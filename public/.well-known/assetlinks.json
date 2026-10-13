@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "bd.flamio.twa",
+      "sha256_cert_fingerprints": [
+        "6E:2E:B5:23:A7:43:30:66:B6:AC:7B:2D:B4:22:46:FD:DF:6D:D6:14:51:AE:06:BD:9A:44:7C:92:0F:5A:D3:71"
+      ]
+    }
+  }
+]
