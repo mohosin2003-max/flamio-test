@@ -82,6 +82,22 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
     CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role)
 );
 
+-- Pre-flight compatibility: if profiles/user_roles already exist from another
+-- schema, guarantee the columns and constraint attendance functions rely on.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_path text;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'user_roles_user_id_role_key'
+       AND conrelid = 'public.user_roles'::regclass
+  ) THEN
+    ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role);
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -96,7 +112,7 @@ CREATE OR REPLACE FUNCTION public.claim_owner(_user_id uuid) RETURNS boolean
     SET search_path TO 'public'
     AS $$
 BEGIN
-  IF _user_id IS DISTINCT FROM auth.uid() THEN
+  IF auth.uid() IS NULL OR _user_id IS DISTINCT FROM auth.uid() THEN
     RETURN false;
   END IF;
   IF EXISTS (SELECT 1 FROM public.user_roles WHERE role = 'owner') THEN
@@ -503,7 +519,8 @@ BEGIN
   INSERT INTO public.attendance_audit_log (table_name, row_id, action, actor_id, subject_user_id, old_data, new_data)
   VALUES (
     TG_TABLE_NAME,
-    NULLIF(v_row->>'id','')::uuid,
+    CASE WHEN TG_TABLE_NAME = 'attendance_settings' THEN NULL
+         ELSE NULLIF(v_row->>'id','')::uuid END,
     TG_OP,
     auth.uid(),
     COALESCE(NULLIF(v_row->>'user_id',''), NULLIF(v_row->>'assigned_to',''))::uuid,
@@ -698,7 +715,7 @@ CREATE OR REPLACE FUNCTION public.attendance_match_shift(_user_id uuid, _at time
     FROM public.attendance_shifts sh, public.attendance_settings cfg
    WHERE cfg.id
      AND sh.user_id = _user_id
-     AND sh.status IN ('scheduled','in_progress')
+     AND sh.status IN ('scheduled','in_progress','missed')
      AND _at >= sh.starts_at - make_interval(mins => cfg.early_clock_in_minutes)
      AND _at <  sh.ends_at
      AND NOT EXISTS (SELECT 1 FROM public.attendance_sessions x WHERE x.shift_id = sh.id)
@@ -809,6 +826,7 @@ DECLARE
   v_now timestamptz := now();
   cfg public.attendance_settings%ROWTYPE;
   r public.attendance_sessions%ROWTYPE;
+  v_out timestamptz;
 BEGIN
   IF NOT public.attendance_is_member(v_uid) THEN RAISE EXCEPTION 'Not a team member'; END IF;
   IF _source NOT IN ('app','kiosk') THEN RAISE EXCEPTION 'Invalid source'; END IF;
@@ -824,11 +842,15 @@ BEGIN
     RAISE EXCEPTION 'This session is too old to close; submit a correction request';
   END IF;
 
+  -- Close any open break first; clock_out_at must enclose every break end.
   UPDATE public.attendance_breaks SET ended_at = GREATEST(v_now, started_at + interval '1 second'), source = 'auto'
    WHERE session_id = r.id AND ended_at IS NULL;
 
+  SELECT max(ended_at) INTO v_out FROM public.attendance_breaks WHERE session_id = r.id;
+  v_out := GREATEST(v_now, COALESCE(v_out, v_now));
+
   UPDATE public.attendance_sessions
-     SET clock_out_at = v_now, clock_out_source = _source, clock_out_note = NULLIF(btrim(_note), ''), status = 'closed'
+     SET clock_out_at = v_out, clock_out_source = _source, clock_out_note = NULLIF(btrim(_note), ''), status = 'closed'
    WHERE id = r.id;
   IF r.shift_id IS NOT NULL THEN
     UPDATE public.attendance_shifts SET status = 'completed' WHERE id = r.shift_id AND status = 'in_progress';
@@ -990,6 +1012,7 @@ DECLARE
   q public.attendance_requests%ROWTYPE;
   s public.attendance_sessions%ROWTYPE;
   v_session uuid;
+  v_shift uuid;
 BEGIN
   IF NOT public.attendance_is_manager(v_uid) THEN RAISE EXCEPTION 'Managers only'; END IF;
   SELECT * INTO q FROM public.attendance_requests WHERE id = _request_id FOR UPDATE;
@@ -1009,11 +1032,15 @@ BEGIN
       IF q.requested_clock_in IS NULL OR q.requested_clock_out IS NULL THEN
         RAISE EXCEPTION 'A missed-punch approval needs both clock-in and clock-out';
       END IF;
+      v_shift := public.attendance_match_shift(q.user_id, q.requested_clock_in);
       INSERT INTO public.attendance_sessions (user_id, shift_id, duty_date, clock_in_at, clock_out_at,
              clock_in_source, clock_out_source, status)
-      VALUES (q.user_id, public.attendance_match_shift(q.user_id, q.requested_clock_in), q.target_date,
+      VALUES (q.user_id, v_shift, q.target_date,
               q.requested_clock_in, q.requested_clock_out, 'correction', 'correction', 'corrected')
       RETURNING id INTO v_session;
+      IF v_shift IS NOT NULL THEN
+        UPDATE public.attendance_shifts SET status = 'completed' WHERE id = v_shift;
+      END IF;
 
     ELSIF q.request_type = 'correction' THEN
       SELECT * INTO s FROM public.attendance_sessions WHERE id = q.session_id FOR UPDATE;
@@ -1090,9 +1117,7 @@ BEGIN
   IF s.user_id = v_uid AND NOT public.has_role(v_uid, 'owner') THEN RAISE EXCEPTION 'You cannot correct your own attendance'; END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('attendance:' || s.user_id::text, 0));
 
-  UPDATE public.attendance_breaks SET ended_at = _clock_out_at, source = 'correction'
-   WHERE session_id = s.id AND (ended_at IS NULL OR ended_at > _clock_out_at) AND _clock_out_at IS NOT NULL;
-
+  -- Update the session first so attendance_break_guard sees the new window.
   UPDATE public.attendance_sessions
      SET verification_status = 'unverified', verified_by = NULL, verified_at = NULL,
          clock_in_at = _clock_in_at, clock_out_at = _clock_out_at,
@@ -1100,6 +1125,16 @@ BEGIN
          status = CASE WHEN _clock_out_at IS NULL THEN 'open' ELSE 'corrected' END,
          verification_note = btrim(_reason)
    WHERE id = s.id;
+
+  IF _clock_out_at IS NOT NULL THEN
+    UPDATE public.attendance_breaks SET ended_at = _clock_out_at, source = 'correction'
+     WHERE session_id = s.id AND (ended_at IS NULL OR ended_at > _clock_out_at);
+  END IF;
+
+  IF _clock_in_at IS NOT NULL THEN
+    UPDATE public.attendance_breaks SET started_at = _clock_in_at, source = 'correction'
+     WHERE session_id = s.id AND started_at < _clock_in_at;
+  END IF;
   PERFORM public.attendance_recalculate_session(s.id);
   SELECT * INTO s FROM public.attendance_sessions WHERE id = s.id;
   RETURN s;
@@ -1176,6 +1211,9 @@ $$;
 -- =====================================================================
 -- Postgres grants EXECUTE to PUBLIC by default — revoke, then re-grant
 -- only what each audience needs.
+
+REVOKE ALL ON FUNCTION public.claim_owner(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.claim_owner(uuid) TO authenticated, service_role;
 
 REVOKE ALL ON FUNCTION public.attendance_recalculate_session(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attendance_match_shift(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
