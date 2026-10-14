@@ -31,16 +31,36 @@
 --   * The duty date of a session is its shift's date, otherwise the Dhaka
 --     calendar date of the clock-in.
 --
--- Safety: single transaction, idempotent guards, no DROP / TRUNCATE / DELETE
--- of existing data, no ALTER of existing tables.
+-- Safety: single transaction (any error rolls everything back), existence
+-- guards on types/tables/indexes/triggers/policies, no DROP / TRUNCATE /
+-- DELETE of existing data. Changes to pre-existing objects are additive
+-- only: profiles.phone / profiles.avatar_path (if missing), UNIQUE
+-- (user_id, role) on user_roles (aborts if duplicates exist), CREATE OR
+-- REPLACE of has_role() (identical body) and claim_owner() (stricter:
+-- self-only, serialised). Re-run safety is by source review only; this file
+-- has NOT been executed on a live PostgreSQL yet.
 -- =====================================================================
 
 BEGIN;
 
 SET check_function_bodies = false;
 
--- Overlap-prevention for shifts uses an exclusion constraint on (uuid, range).
-CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
+-- REQUIRED: exclusion constraints on shifts, sessions and breaks combine
+-- `uuid WITH =` with range `&&`; core GiST has no uuid operator class, so
+-- btree_gist is mandatory. Supabase keeps extensions in schema `extensions`.
+-- If btree_gist is already installed elsewhere it is left there (default
+-- operator classes are found regardless of schema). If it is unavailable,
+-- the run aborts with a clear error — no workaround is attempted.
+CREATE SCHEMA IF NOT EXISTS extensions;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'btree_gist') THEN
+      RAISE EXCEPTION 'btree_gist extension is not available on this server; attendance overlap constraints cannot be created';
+    END IF;
+    CREATE EXTENSION btree_gist WITH SCHEMA extensions;
+  END IF;
+END $$;
 
 -- =====================================================================
 -- 1. IDENTITY FOUNDATION (create only if missing — matches existing Flamio)
@@ -88,12 +108,26 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone text;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_path text;
 
 DO $$
+DECLARE
+  v_dupes integer;
 BEGIN
+  -- Any non-partial unique index exactly on (user_id, role) is enough for
+  -- ON CONFLICT (user_id, role); only add one when none exists.
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-     WHERE conname = 'user_roles_user_id_role_key'
-       AND conrelid = 'public.user_roles'::regclass
+    SELECT 1 FROM pg_index i
+     WHERE i.indrelid = 'public.user_roles'::regclass
+       AND i.indisunique AND i.indpred IS NULL AND i.indnkeyatts = 2
+       AND (SELECT array_agg(a.attname::text ORDER BY a.attname)
+              FROM pg_attribute a
+             WHERE a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey::int2[]))
+           = ARRAY['role','user_id']
   ) THEN
+    SELECT count(*) INTO v_dupes FROM (
+      SELECT 1 FROM public.user_roles GROUP BY user_id, role HAVING count(*) > 1) d;
+    IF v_dupes > 0 THEN
+      RAISE EXCEPTION 'public.user_roles has % duplicated (user_id, role) pair(s); resolve them manually before running this file', v_dupes
+        USING HINT = 'SELECT user_id, role, count(*) FROM public.user_roles GROUP BY 1,2 HAVING count(*) > 1;';
+    END IF;
     ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role);
   END IF;
 END $$;
@@ -115,26 +149,32 @@ BEGIN
   IF auth.uid() IS NULL OR _user_id IS DISTINCT FROM auth.uid() THEN
     RETURN false;
   END IF;
+  -- Serialise concurrent first-owner claims (transaction-scoped lock): a
+  -- second caller waits until the first commits, then sees the owner row.
+  PERFORM pg_advisory_xact_lock(hashtextextended('flamio:claim_owner', 0));
   IF EXISTS (SELECT 1 FROM public.user_roles WHERE role = 'owner') THEN
     RETURN false;
   END IF;
   INSERT INTO public.user_roles (user_id, role) VALUES (_user_id, 'owner')
   ON CONFLICT (user_id, role) DO NOTHING;
-  RETURN true;
+  RETURN FOUND;   -- true only when the owner row was actually inserted
 END;
 $$;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_profiles_updated_at') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_profiles_updated_at'
+                   AND tgrelid = 'public.profiles'::regclass) THEN
     CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
       FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
   END IF;
 END $$;
 
--- Least privilege: roles are READ-ONLY for signed-in users. Role changes go
--- through the service role (server functions) only. (The full restaurant
--- schema grants wider table privileges; RLS still blocks writes there.)
+-- Roles: this file grants signed-in users SELECT only and adds no write
+-- policy. It does NOT revoke privileges an existing installation already
+-- granted; there, RLS (no INSERT/UPDATE/DELETE policy for authenticated)
+-- is what blocks role writes. First owner: claim_owner(); further roles:
+-- service role only.
 GRANT SELECT, INSERT, UPDATE ON public.profiles TO authenticated;
 GRANT ALL ON public.profiles TO service_role;
 GRANT SELECT ON public.user_roles TO authenticated;
@@ -163,25 +203,37 @@ END $$;
 -- 2. ATTENDANCE HELPERS (role checks + Bangladesh time)
 -- =====================================================================
 
+-- Both helpers run inside RLS policies, so `authenticated` must EXECUTE
+-- them (section 7); anon has no EXECUTE. To avoid a role-probing oracle, a
+-- signed-in caller gets a real answer only about themselves unless they are
+-- a manager. System context (auth.uid() IS NULL, e.g. service_role) is
+-- answered normally. has_role() is left unchanged for Flamio compatibility.
+
 -- Owner or admin.
 CREATE OR REPLACE FUNCTION public.attendance_is_manager(_user_id uuid) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-  SELECT _user_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM public.user_roles
-    WHERE user_id = _user_id AND role IN ('owner'::public.app_role, 'admin'::public.app_role)
-  );
+  SELECT _user_id IS NOT NULL
+     AND (auth.uid() IS NULL OR _user_id = auth.uid() OR EXISTS (
+           SELECT 1 FROM public.user_roles c
+            WHERE c.user_id = auth.uid() AND c.role IN ('owner'::public.app_role, 'admin'::public.app_role)))
+     AND EXISTS (
+           SELECT 1 FROM public.user_roles
+            WHERE user_id = _user_id AND role IN ('owner'::public.app_role, 'admin'::public.app_role));
 $$;
 
--- Anyone on the team (owner, admin or staff). Customers are never members.
+-- Anyone holding an owner/admin/staff role. Customers have no user_roles
+-- row, so they are never members.
 CREATE OR REPLACE FUNCTION public.attendance_is_member(_user_id uuid) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-  SELECT _user_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM public.user_roles WHERE user_id = _user_id
-  );
+  SELECT _user_id IS NOT NULL
+     AND (auth.uid() IS NULL OR _user_id = auth.uid() OR EXISTS (
+           SELECT 1 FROM public.user_roles c
+            WHERE c.user_id = auth.uid() AND c.role IN ('owner'::public.app_role, 'admin'::public.app_role)))
+     AND EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id);
 $$;
 
 -- Dhaka calendar date of an instant.
@@ -394,8 +446,9 @@ CREATE TABLE IF NOT EXISTS public.attendance_requests (
             AND leave_end_date - leave_start_date <= 60)
     ),
     CONSTRAINT attendance_requests_missed_shape CHECK (
+        -- missed punch: both times required (same rule as submit + approval)
         request_type <> 'missed_punch' OR (target_date IS NOT NULL
-            AND (requested_clock_in IS NOT NULL OR requested_clock_out IS NOT NULL))
+            AND requested_clock_in IS NOT NULL AND requested_clock_out IS NOT NULL)
     ),
     CONSTRAINT attendance_requests_correction_shape CHECK (
         request_type <> 'correction' OR (session_id IS NOT NULL
@@ -537,23 +590,28 @@ DECLARE
 BEGIN
   FOREACH t IN ARRAY ARRAY['attendance_settings','attendance_stations','attendance_shifts','attendance_sessions',
                            'attendance_breaks','attendance_tasks','attendance_task_items','attendance_requests'] LOOP
-    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = t || '_updated_at') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = t || '_updated_at'
+                     AND tgrelid = format('public.%I', t)::regclass) THEN
       EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column()', t || '_updated_at', t);
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = t || '_audit') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = t || '_audit'
+                     AND tgrelid = format('public.%I', t)::regclass) THEN
       EXECUTE format('CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.attendance_audit()', t || '_audit', t);
     END IF;
   END LOOP;
 
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'attendance_shifts_compute') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'attendance_shifts_compute'
+                   AND tgrelid = 'public.attendance_shifts'::regclass) THEN
     CREATE TRIGGER attendance_shifts_compute BEFORE INSERT OR UPDATE OF shift_date, start_time, end_time
       ON public.attendance_shifts FOR EACH ROW EXECUTE FUNCTION public.attendance_shift_compute();
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'attendance_sessions_guard') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'attendance_sessions_guard'
+                   AND tgrelid = 'public.attendance_sessions'::regclass) THEN
     CREATE TRIGGER attendance_sessions_guard BEFORE INSERT OR UPDATE
       ON public.attendance_sessions FOR EACH ROW EXECUTE FUNCTION public.attendance_session_guard();
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'attendance_breaks_guard') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'attendance_breaks_guard'
+                   AND tgrelid = 'public.attendance_breaks'::regclass) THEN
     CREATE TRIGGER attendance_breaks_guard BEFORE INSERT OR UPDATE
       ON public.attendance_breaks FOR EACH ROW EXECUTE FUNCTION public.attendance_break_guard();
   END IF;
@@ -591,51 +649,83 @@ ALTER TABLE public.attendance_task_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_requests   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_audit_log  ENABLE ROW LEVEL SECURITY;
 
--- Settings: team reads, managers update.
-CREATE POLICY "attendance_settings_member_read" ON public.attendance_settings FOR SELECT TO authenticated
-  USING (public.attendance_is_member(auth.uid()));
-CREATE POLICY "attendance_settings_manager_update" ON public.attendance_settings FOR UPDATE TO authenticated
-  USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+-- Each policy is created only if a policy with that name is missing on that table.
+DO $$
+BEGIN
+  -- Settings: team reads, managers update.
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_settings' AND policyname = 'attendance_settings_member_read') THEN
+    CREATE POLICY "attendance_settings_member_read" ON public.attendance_settings FOR SELECT TO authenticated
+      USING (public.attendance_is_member(auth.uid()));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_settings' AND policyname = 'attendance_settings_manager_update') THEN
+    CREATE POLICY "attendance_settings_manager_update" ON public.attendance_settings FOR UPDATE TO authenticated
+      USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+  END IF;
 
--- Stations: team reads, managers write.
-CREATE POLICY "attendance_stations_member_read" ON public.attendance_stations FOR SELECT TO authenticated
-  USING (public.attendance_is_member(auth.uid()));
-CREATE POLICY "attendance_stations_manager_write" ON public.attendance_stations FOR ALL TO authenticated
-  USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+  -- Stations: team reads, managers write.
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_stations' AND policyname = 'attendance_stations_member_read') THEN
+    CREATE POLICY "attendance_stations_member_read" ON public.attendance_stations FOR SELECT TO authenticated
+      USING (public.attendance_is_member(auth.uid()));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_stations' AND policyname = 'attendance_stations_manager_write') THEN
+    CREATE POLICY "attendance_stations_manager_write" ON public.attendance_stations FOR ALL TO authenticated
+      USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+  END IF;
 
--- Shifts: staff read own, managers everything (assignee must be a team member).
-CREATE POLICY "attendance_shifts_own_read" ON public.attendance_shifts FOR SELECT TO authenticated
-  USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
-CREATE POLICY "attendance_shifts_manager_write" ON public.attendance_shifts FOR ALL TO authenticated
-  USING (public.attendance_is_manager(auth.uid()))
-  WITH CHECK (public.attendance_is_manager(auth.uid()) AND public.attendance_is_member(user_id));
+  -- Shifts: staff read own, managers everything (assignee must be a team member).
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_shifts' AND policyname = 'attendance_shifts_own_read') THEN
+    CREATE POLICY "attendance_shifts_own_read" ON public.attendance_shifts FOR SELECT TO authenticated
+      USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_shifts' AND policyname = 'attendance_shifts_manager_write') THEN
+    CREATE POLICY "attendance_shifts_manager_write" ON public.attendance_shifts FOR ALL TO authenticated
+      USING (public.attendance_is_manager(auth.uid()))
+      WITH CHECK (public.attendance_is_manager(auth.uid()) AND public.attendance_is_member(user_id));
+  END IF;
 
--- Sessions / breaks: read own or manager. No write policies (functions only).
-CREATE POLICY "attendance_sessions_own_read" ON public.attendance_sessions FOR SELECT TO authenticated
-  USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
-CREATE POLICY "attendance_breaks_own_read" ON public.attendance_breaks FOR SELECT TO authenticated
-  USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  -- Sessions / breaks: read own or manager. No write policies (functions only).
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_sessions' AND policyname = 'attendance_sessions_own_read') THEN
+    CREATE POLICY "attendance_sessions_own_read" ON public.attendance_sessions FOR SELECT TO authenticated
+      USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_breaks' AND policyname = 'attendance_breaks_own_read') THEN
+    CREATE POLICY "attendance_breaks_own_read" ON public.attendance_breaks FOR SELECT TO authenticated
+      USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  END IF;
 
--- Tasks: assignee reads own; managers write. Staff progress via functions.
-CREATE POLICY "attendance_tasks_own_read" ON public.attendance_tasks FOR SELECT TO authenticated
-  USING (assigned_to = auth.uid() OR public.attendance_is_manager(auth.uid()));
-CREATE POLICY "attendance_tasks_manager_write" ON public.attendance_tasks FOR ALL TO authenticated
-  USING (public.attendance_is_manager(auth.uid()))
-  WITH CHECK (public.attendance_is_manager(auth.uid()) AND public.attendance_is_member(assigned_to));
+  -- Tasks: assignee reads own; managers write. Staff progress via functions.
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_tasks' AND policyname = 'attendance_tasks_own_read') THEN
+    CREATE POLICY "attendance_tasks_own_read" ON public.attendance_tasks FOR SELECT TO authenticated
+      USING (assigned_to = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_tasks' AND policyname = 'attendance_tasks_manager_write') THEN
+    CREATE POLICY "attendance_tasks_manager_write" ON public.attendance_tasks FOR ALL TO authenticated
+      USING (public.attendance_is_manager(auth.uid()))
+      WITH CHECK (public.attendance_is_manager(auth.uid()) AND public.attendance_is_member(assigned_to));
+  END IF;
 
-CREATE POLICY "attendance_task_items_own_read" ON public.attendance_task_items FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM public.attendance_tasks t WHERE t.id = task_id
-                 AND (t.assigned_to = auth.uid() OR public.attendance_is_manager(auth.uid()))));
-CREATE POLICY "attendance_task_items_manager_write" ON public.attendance_task_items FOR ALL TO authenticated
-  USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_task_items' AND policyname = 'attendance_task_items_own_read') THEN
+    CREATE POLICY "attendance_task_items_own_read" ON public.attendance_task_items FOR SELECT TO authenticated
+      USING (EXISTS (SELECT 1 FROM public.attendance_tasks t WHERE t.id = task_id
+                     AND (t.assigned_to = auth.uid() OR public.attendance_is_manager(auth.uid()))));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_task_items' AND policyname = 'attendance_task_items_manager_write') THEN
+    CREATE POLICY "attendance_task_items_manager_write" ON public.attendance_task_items FOR ALL TO authenticated
+      USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+  END IF;
 
--- Requests: read own or manager. Writes via functions only.
-CREATE POLICY "attendance_requests_own_read" ON public.attendance_requests FOR SELECT TO authenticated
-  USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  -- Requests: read own or manager. Writes via functions only.
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_requests' AND policyname = 'attendance_requests_own_read') THEN
+    CREATE POLICY "attendance_requests_own_read" ON public.attendance_requests FOR SELECT TO authenticated
+      USING (user_id = auth.uid() OR public.attendance_is_manager(auth.uid()));
+  END IF;
 
--- Audit: managers only.
-CREATE POLICY "attendance_audit_manager_read" ON public.attendance_audit_log FOR SELECT TO authenticated
-  USING (public.attendance_is_manager(auth.uid()));
+  -- Audit: managers only.
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_audit_log' AND policyname = 'attendance_audit_manager_read') THEN
+    CREATE POLICY "attendance_audit_manager_read" ON public.attendance_audit_log FOR SELECT TO authenticated
+      USING (public.attendance_is_manager(auth.uid()));
+  END IF;
+END $$;
 
 -- =====================================================================
 -- 6. WORKFLOW FUNCTIONS (the only write path for staff)
@@ -721,6 +811,83 @@ CREATE OR REPLACE FUNCTION public.attendance_match_shift(_user_id uuid, _at time
      AND NOT EXISTS (SELECT 1 FROM public.attendance_sessions x WHERE x.shift_id = sh.id)
    ORDER BY abs(extract(epoch FROM (_at - sh.starts_at)))
    LIMIT 1;
+$$;
+
+-- 6.2b Validate a corrected / missed punch window (internal) -----------
+-- One rule set for staff submission, manager approval and direct manager
+-- correction: clock-in required and not in the future; within 31 days;
+-- clock-out (if any) after clock-in and not in the future; length <= 24 h;
+-- an open window only if clock-in is < 24 h ago; no overlap with the
+-- person's other sessions.
+CREATE OR REPLACE FUNCTION public.attendance_assert_valid_window(
+    _user_id uuid, _exclude_session uuid, _in timestamptz, _out timestamptz) RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+  IF _in IS NULL THEN RAISE EXCEPTION 'Clock-in time is required'; END IF;
+  IF _in > now() OR _out > now() THEN RAISE EXCEPTION 'Times cannot be in the future'; END IF;
+  IF _in < now() - interval '31 days' THEN RAISE EXCEPTION 'Corrections are limited to the last 31 days'; END IF;
+  IF _out IS NOT NULL AND _out <= _in THEN RAISE EXCEPTION 'Clock-out must be after clock-in'; END IF;
+  IF _out IS NOT NULL AND _out - _in > interval '24 hours' THEN RAISE EXCEPTION 'A session cannot exceed 24 hours'; END IF;
+  IF _out IS NULL AND now() - _in > interval '24 hours' THEN RAISE EXCEPTION 'An open session cannot be older than 24 hours'; END IF;
+  IF EXISTS (
+      SELECT 1 FROM public.attendance_sessions x
+       WHERE x.user_id = _user_id
+         AND x.id IS DISTINCT FROM _exclude_session
+         AND tstzrange(x.clock_in_at, COALESCE(x.clock_out_at, 'infinity'::timestamptz), '[)')
+          && tstzrange(_in, COALESCE(_out, 'infinity'::timestamptz), '[)')) THEN
+    RAISE EXCEPTION 'These times overlap another attendance session';
+  END IF;
+END;
+$$;
+
+-- 6.2c Apply corrected session times, keeping breaks valid (internal) ---
+-- Rejects the whole operation (caller's transaction aborts, nothing is
+-- partially written) when any break would fall entirely outside the new
+-- window. Partially overlapping breaks are clipped to
+-- [max(start, in), min(end, out)], which is always non-empty because
+-- start < out and end > in after the rejection checks.
+CREATE OR REPLACE FUNCTION public.attendance_apply_session_times(
+    _session_id uuid, _in timestamptz, _out timestamptz, _source text, _note text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  s public.attendance_sessions%ROWTYPE;
+BEGIN
+  SELECT * INTO s FROM public.attendance_sessions WHERE id = _session_id FOR UPDATE;
+  IF s.id IS NULL THEN RAISE EXCEPTION 'Session not found'; END IF;
+  PERFORM public.attendance_assert_valid_window(s.user_id, s.id, _in, _out);
+
+  IF EXISTS (SELECT 1 FROM public.attendance_breaks b
+              WHERE b.session_id = s.id
+                AND ((_out IS NOT NULL AND b.started_at >= _out)
+                  OR (b.ended_at IS NOT NULL AND b.ended_at <= _in))) THEN
+    RAISE EXCEPTION 'A break lies outside the corrected times; include it or ask for it to be removed';
+  END IF;
+
+  -- Session first, so attendance_break_guard validates against the new window.
+  UPDATE public.attendance_sessions
+     SET verification_status = 'unverified', verified_by = NULL, verified_at = NULL,
+         clock_in_at = _in, clock_out_at = _out,
+         clock_in_source = CASE WHEN _in IS DISTINCT FROM s.clock_in_at THEN _source ELSE clock_in_source END,
+         clock_out_source = CASE WHEN _out IS NULL THEN NULL
+                                 WHEN _out IS DISTINCT FROM s.clock_out_at THEN _source
+                                 ELSE clock_out_source END,
+         status = CASE WHEN _out IS NULL THEN 'open' ELSE 'corrected' END,
+         verification_note = COALESCE(NULLIF(btrim(_note), ''), verification_note)
+   WHERE id = s.id;
+
+  -- Clip each break in a single statement so its CHECK is never violated.
+  UPDATE public.attendance_breaks b
+     SET started_at = GREATEST(b.started_at, _in),
+         ended_at = CASE WHEN _out IS NULL THEN b.ended_at
+                         ELSE LEAST(COALESCE(b.ended_at, _out), _out) END,
+         source = 'correction'
+   WHERE b.session_id = s.id
+     AND (b.started_at < _in OR (_out IS NOT NULL AND (b.ended_at IS NULL OR b.ended_at > _out)));
+END;
 $$;
 
 -- 6.3 Clock in --------------------------------------------------------
@@ -956,6 +1123,9 @@ DECLARE
   r public.attendance_requests%ROWTYPE;
 BEGIN
   IF NOT public.attendance_is_member(v_uid) THEN RAISE EXCEPTION 'Not a team member'; END IF;
+  IF _request_type IS NULL OR _request_type NOT IN ('leave','missed_punch','correction','overtime') THEN
+    RAISE EXCEPTION 'Invalid request type';
+  END IF;
   IF _session_id IS NOT NULL AND NOT EXISTS (
        SELECT 1 FROM public.attendance_sessions WHERE id = _session_id AND user_id = v_uid) THEN
     RAISE EXCEPTION 'Session not found';
@@ -963,10 +1133,22 @@ BEGIN
   IF _requested_clock_in > now() OR _requested_clock_out > now() THEN
     RAISE EXCEPTION 'Requested times cannot be in the future';
   END IF;
-  IF _request_type IN ('missed_punch','correction') AND _target_date IS NOT NULL
-     AND _target_date < public.attendance_local_date(now()) - 31 THEN
-    RAISE EXCEPTION 'Corrections are limited to the last 31 days';
+
+  IF _request_type = 'missed_punch' THEN
+    -- Same rule as approval: both times, valid window, no overlap.
+    IF _requested_clock_in IS NULL OR _requested_clock_out IS NULL THEN
+      RAISE EXCEPTION 'A missed punch needs both clock-in and clock-out';
+    END IF;
+    PERFORM public.attendance_assert_valid_window(v_uid, NULL, _requested_clock_in, _requested_clock_out);
+    _target_date := public.attendance_local_date(_requested_clock_in);
+  ELSIF _request_type = 'correction' AND _session_id IS NOT NULL THEN
+    PERFORM public.attendance_assert_valid_window(v_uid, _session_id,
+      COALESCE(_requested_clock_in, (SELECT clock_in_at FROM public.attendance_sessions WHERE id = _session_id)),
+      COALESCE(_requested_clock_out, (SELECT clock_out_at FROM public.attendance_sessions WHERE id = _session_id)));
+  ELSIF _request_type = 'leave' AND (_leave_start_date IS NULL OR _leave_end_date IS NULL) THEN
+    RAISE EXCEPTION 'Leave start and end dates are required';
   END IF;
+
   IF _request_type = 'leave' AND EXISTS (
        SELECT 1 FROM public.attendance_requests
         WHERE user_id = v_uid AND request_type = 'leave' AND status IN ('pending','approved')
@@ -1032,10 +1214,14 @@ BEGIN
       IF q.requested_clock_in IS NULL OR q.requested_clock_out IS NULL THEN
         RAISE EXCEPTION 'A missed-punch approval needs both clock-in and clock-out';
       END IF;
+      -- Re-validated with the submit rule (state may have changed since).
+      PERFORM public.attendance_assert_valid_window(q.user_id, NULL, q.requested_clock_in, q.requested_clock_out);
       v_shift := public.attendance_match_shift(q.user_id, q.requested_clock_in);
       INSERT INTO public.attendance_sessions (user_id, shift_id, duty_date, clock_in_at, clock_out_at,
              clock_in_source, clock_out_source, status)
-      VALUES (q.user_id, v_shift, q.target_date,
+      VALUES (q.user_id, v_shift,
+              COALESCE((SELECT shift_date FROM public.attendance_shifts WHERE id = v_shift),
+                       public.attendance_local_date(q.requested_clock_in)),
               q.requested_clock_in, q.requested_clock_out, 'correction', 'correction', 'corrected')
       RETURNING id INTO v_session;
       IF v_shift IS NOT NULL THEN
@@ -1045,14 +1231,10 @@ BEGIN
     ELSIF q.request_type = 'correction' THEN
       SELECT * INTO s FROM public.attendance_sessions WHERE id = q.session_id FOR UPDATE;
       IF s.id IS NULL THEN RAISE EXCEPTION 'Session no longer exists'; END IF;
-      UPDATE public.attendance_sessions
-         SET verification_status = 'unverified', verified_by = NULL, verified_at = NULL,
-             clock_in_at = COALESCE(q.requested_clock_in, clock_in_at),
-             clock_out_at = COALESCE(q.requested_clock_out, clock_out_at),
-             clock_in_source = CASE WHEN q.requested_clock_in IS NOT NULL THEN 'correction' ELSE clock_in_source END,
-             clock_out_source = CASE WHEN q.requested_clock_out IS NOT NULL THEN 'correction' ELSE clock_out_source END,
-             status = CASE WHEN COALESCE(q.requested_clock_out, clock_out_at) IS NULL THEN 'open' ELSE 'corrected' END
-       WHERE id = s.id;
+      PERFORM public.attendance_apply_session_times(s.id,
+        COALESCE(q.requested_clock_in, s.clock_in_at),
+        COALESCE(q.requested_clock_out, s.clock_out_at),
+        'correction', NULL);
       v_session := s.id;
 
     ELSIF q.request_type = 'overtime' THEN
@@ -1111,30 +1293,13 @@ DECLARE
 BEGIN
   IF NOT public.attendance_is_manager(v_uid) THEN RAISE EXCEPTION 'Managers only'; END IF;
   IF _reason IS NULL OR char_length(btrim(_reason)) < 3 THEN RAISE EXCEPTION 'A reason is required'; END IF;
-  IF _clock_in_at > now() OR _clock_out_at > now() THEN RAISE EXCEPTION 'Times cannot be in the future'; END IF;
+  IF _clock_in_at IS NULL THEN RAISE EXCEPTION 'Clock-in time is required'; END IF;
   SELECT * INTO s FROM public.attendance_sessions WHERE id = _session_id FOR UPDATE;
   IF s.id IS NULL THEN RAISE EXCEPTION 'Session not found'; END IF;
   IF s.user_id = v_uid AND NOT public.has_role(v_uid, 'owner') THEN RAISE EXCEPTION 'You cannot correct your own attendance'; END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('attendance:' || s.user_id::text, 0));
 
-  -- Update the session first so attendance_break_guard sees the new window.
-  UPDATE public.attendance_sessions
-     SET verification_status = 'unverified', verified_by = NULL, verified_at = NULL,
-         clock_in_at = _clock_in_at, clock_out_at = _clock_out_at,
-         clock_in_source = 'manager', clock_out_source = CASE WHEN _clock_out_at IS NOT NULL THEN 'manager' END,
-         status = CASE WHEN _clock_out_at IS NULL THEN 'open' ELSE 'corrected' END,
-         verification_note = btrim(_reason)
-   WHERE id = s.id;
-
-  IF _clock_out_at IS NOT NULL THEN
-    UPDATE public.attendance_breaks SET ended_at = _clock_out_at, source = 'correction'
-     WHERE session_id = s.id AND (ended_at IS NULL OR ended_at > _clock_out_at);
-  END IF;
-
-  IF _clock_in_at IS NOT NULL THEN
-    UPDATE public.attendance_breaks SET started_at = _clock_in_at, source = 'correction'
-     WHERE session_id = s.id AND started_at < _clock_in_at;
-  END IF;
+  PERFORM public.attendance_apply_session_times(s.id, _clock_in_at, _clock_out_at, 'manager', _reason);
   PERFORM public.attendance_recalculate_session(s.id);
   SELECT * INTO s FROM public.attendance_sessions WHERE id = s.id;
   RETURN s;
@@ -1154,13 +1319,15 @@ DECLARE
   v_missed integer := 0;
   v_out timestamptz;
 BEGIN
+  -- Defence in depth: EXECUTE is granted to service_role only (section 7).
   IF auth.uid() IS NOT NULL AND NOT public.has_role(auth.uid(), 'owner') THEN
     RAISE EXCEPTION 'Not allowed';
   END IF;
   SELECT * INTO cfg FROM public.attendance_settings WHERE id;
 
   FOR s IN
-    SELECT se.id, se.clock_in_at, sh.ends_at
+    SELECT se.id, se.clock_in_at, sh.ends_at,
+           (SELECT max(b.started_at) FROM public.attendance_breaks b WHERE b.session_id = se.id) AS last_break_start
       FROM public.attendance_sessions se
       LEFT JOIN public.attendance_shifts sh ON sh.id = se.shift_id
      WHERE se.clock_out_at IS NULL
@@ -1171,6 +1338,14 @@ BEGIN
     v_out := LEAST(COALESCE(s.ends_at, s.clock_in_at + make_interval(hours => cfg.max_session_hours)),
                    s.clock_in_at + make_interval(hours => cfg.max_session_hours));
     v_out := GREATEST(v_out, s.clock_in_at + interval '1 minute');
+    -- Never close before a break began (that would create an invalid break).
+    IF s.last_break_start IS NOT NULL AND s.last_break_start + interval '1 minute' > v_out THEN
+      v_out := s.last_break_start + interval '1 minute';
+    END IF;
+    IF v_out - s.clock_in_at > interval '24 hours' OR v_out > now() THEN
+      RAISE NOTICE 'attendance_run_maintenance: session % left open for manual correction', s.id;
+      CONTINUE;
+    END IF;
     UPDATE public.attendance_breaks SET ended_at = v_out, source = 'auto'
      WHERE session_id = s.id AND (ended_at IS NULL OR ended_at > v_out);
     UPDATE public.attendance_sessions
@@ -1215,6 +1390,14 @@ $$;
 REVOKE ALL ON FUNCTION public.claim_owner(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.claim_owner(uuid) TO authenticated, service_role;
 
+-- RLS helpers: required by authenticated for policy evaluation; never anon.
+REVOKE ALL ON FUNCTION public.attendance_is_manager(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.attendance_is_member(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.attendance_is_manager(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.attendance_is_member(uuid) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.attendance_assert_valid_window(uuid, uuid, timestamptz, timestamptz) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.attendance_apply_session_times(uuid, timestamptz, timestamptz, text, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attendance_recalculate_session(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attendance_match_shift(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attendance_audit() FROM PUBLIC, anon, authenticated;
@@ -1260,6 +1443,7 @@ COMMIT;
 --    claim_owner(auth.uid()). Add staff via the service role (server).
 -- 4. Schedule attendance_run_maintenance() every 15 min with the service
 --    role (pg_cron or the app's existing minute dispatcher).
--- 5. Rollback for TEST only: drop the attendance_* objects (script to be
---    supplied separately on request). Identity tables are left untouched.
+-- 5. Rollback for TEST only: run the read-only dependency inventory, then
+--    drop attendance_* objects with RESTRICT. Identity tables, has_role,
+--    claim_owner and btree_gist are left untouched.
 -- =====================================================================
