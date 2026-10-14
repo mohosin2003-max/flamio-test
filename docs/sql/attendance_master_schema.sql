@@ -826,6 +826,7 @@ DECLARE
   v_now timestamptz := now();
   cfg public.attendance_settings%ROWTYPE;
   r public.attendance_sessions%ROWTYPE;
+  v_out timestamptz;
 BEGIN
   IF NOT public.attendance_is_member(v_uid) THEN RAISE EXCEPTION 'Not a team member'; END IF;
   IF _source NOT IN ('app','kiosk') THEN RAISE EXCEPTION 'Invalid source'; END IF;
@@ -841,11 +842,15 @@ BEGIN
     RAISE EXCEPTION 'This session is too old to close; submit a correction request';
   END IF;
 
+  -- Close any open break first; clock_out_at must enclose every break end.
   UPDATE public.attendance_breaks SET ended_at = GREATEST(v_now, started_at + interval '1 second'), source = 'auto'
    WHERE session_id = r.id AND ended_at IS NULL;
 
+  SELECT max(ended_at) INTO v_out FROM public.attendance_breaks WHERE session_id = r.id;
+  v_out := GREATEST(v_now, COALESCE(v_out, v_now));
+
   UPDATE public.attendance_sessions
-     SET clock_out_at = v_now, clock_out_source = _source, clock_out_note = NULLIF(btrim(_note), ''), status = 'closed'
+     SET clock_out_at = v_out, clock_out_source = _source, clock_out_note = NULLIF(btrim(_note), ''), status = 'closed'
    WHERE id = r.id;
   IF r.shift_id IS NOT NULL THEN
     UPDATE public.attendance_shifts SET status = 'completed' WHERE id = r.shift_id AND status = 'in_progress';
@@ -1007,6 +1012,7 @@ DECLARE
   q public.attendance_requests%ROWTYPE;
   s public.attendance_sessions%ROWTYPE;
   v_session uuid;
+  v_shift uuid;
 BEGIN
   IF NOT public.attendance_is_manager(v_uid) THEN RAISE EXCEPTION 'Managers only'; END IF;
   SELECT * INTO q FROM public.attendance_requests WHERE id = _request_id FOR UPDATE;
@@ -1026,11 +1032,15 @@ BEGIN
       IF q.requested_clock_in IS NULL OR q.requested_clock_out IS NULL THEN
         RAISE EXCEPTION 'A missed-punch approval needs both clock-in and clock-out';
       END IF;
+      v_shift := public.attendance_match_shift(q.user_id, q.requested_clock_in);
       INSERT INTO public.attendance_sessions (user_id, shift_id, duty_date, clock_in_at, clock_out_at,
              clock_in_source, clock_out_source, status)
-      VALUES (q.user_id, public.attendance_match_shift(q.user_id, q.requested_clock_in), q.target_date,
+      VALUES (q.user_id, v_shift, q.target_date,
               q.requested_clock_in, q.requested_clock_out, 'correction', 'correction', 'corrected')
       RETURNING id INTO v_session;
+      IF v_shift IS NOT NULL THEN
+        UPDATE public.attendance_shifts SET status = 'completed' WHERE id = v_shift;
+      END IF;
 
     ELSIF q.request_type = 'correction' THEN
       SELECT * INTO s FROM public.attendance_sessions WHERE id = q.session_id FOR UPDATE;
