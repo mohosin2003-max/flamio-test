@@ -39,9 +39,13 @@ function createSupabaseClient() {
       ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
       ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
     ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
-    throw new Error(message);
+    // Don't crash the whole app when the backend isn't configured yet (e.g. a
+    // fresh remix before secrets are entered). Render with a no-op client so
+    // the UI loads; any data call simply fails until the values are set.
+    console.error(`[Supabase] Missing environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`);
+    return createClient<Database>('https://unconfigured.supabase.co', 'unconfigured-anon-key', {
+      auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
+    });
   }
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
