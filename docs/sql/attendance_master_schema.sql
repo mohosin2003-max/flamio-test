@@ -82,6 +82,22 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
     CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role)
 );
 
+-- Pre-flight compatibility: if profiles/user_roles already exist from another
+-- schema, guarantee the columns and constraint attendance functions rely on.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_path text;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'user_roles_user_id_role_key'
+       AND conrelid = 'public.user_roles'::regclass
+  ) THEN
+    ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_user_id_role_key UNIQUE (user_id, role);
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -96,7 +112,7 @@ CREATE OR REPLACE FUNCTION public.claim_owner(_user_id uuid) RETURNS boolean
     SET search_path TO 'public'
     AS $$
 BEGIN
-  IF _user_id IS DISTINCT FROM auth.uid() THEN
+  IF auth.uid() IS NULL OR _user_id IS DISTINCT FROM auth.uid() THEN
     RETURN false;
   END IF;
   IF EXISTS (SELECT 1 FROM public.user_roles WHERE role = 'owner') THEN
@@ -503,7 +519,8 @@ BEGIN
   INSERT INTO public.attendance_audit_log (table_name, row_id, action, actor_id, subject_user_id, old_data, new_data)
   VALUES (
     TG_TABLE_NAME,
-    NULLIF(v_row->>'id','')::uuid,
+    CASE WHEN TG_TABLE_NAME = 'attendance_settings' THEN NULL
+         ELSE NULLIF(v_row->>'id','')::uuid END,
     TG_OP,
     auth.uid(),
     COALESCE(NULLIF(v_row->>'user_id',''), NULLIF(v_row->>'assigned_to',''))::uuid,
@@ -698,7 +715,7 @@ CREATE OR REPLACE FUNCTION public.attendance_match_shift(_user_id uuid, _at time
     FROM public.attendance_shifts sh, public.attendance_settings cfg
    WHERE cfg.id
      AND sh.user_id = _user_id
-     AND sh.status IN ('scheduled','in_progress')
+     AND sh.status IN ('scheduled','in_progress','missed')
      AND _at >= sh.starts_at - make_interval(mins => cfg.early_clock_in_minutes)
      AND _at <  sh.ends_at
      AND NOT EXISTS (SELECT 1 FROM public.attendance_sessions x WHERE x.shift_id = sh.id)
