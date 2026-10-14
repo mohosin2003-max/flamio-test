@@ -1117,9 +1117,7 @@ BEGIN
   IF s.user_id = v_uid AND NOT public.has_role(v_uid, 'owner') THEN RAISE EXCEPTION 'You cannot correct your own attendance'; END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('attendance:' || s.user_id::text, 0));
 
-  UPDATE public.attendance_breaks SET ended_at = _clock_out_at, source = 'correction'
-   WHERE session_id = s.id AND (ended_at IS NULL OR ended_at > _clock_out_at) AND _clock_out_at IS NOT NULL;
-
+  -- Update the session first so attendance_break_guard sees the new window.
   UPDATE public.attendance_sessions
      SET verification_status = 'unverified', verified_by = NULL, verified_at = NULL,
          clock_in_at = _clock_in_at, clock_out_at = _clock_out_at,
@@ -1127,6 +1125,16 @@ BEGIN
          status = CASE WHEN _clock_out_at IS NULL THEN 'open' ELSE 'corrected' END,
          verification_note = btrim(_reason)
    WHERE id = s.id;
+
+  IF _clock_out_at IS NOT NULL THEN
+    UPDATE public.attendance_breaks SET ended_at = _clock_out_at, source = 'correction'
+     WHERE session_id = s.id AND (ended_at IS NULL OR ended_at > _clock_out_at);
+  END IF;
+
+  IF _clock_in_at IS NOT NULL THEN
+    UPDATE public.attendance_breaks SET started_at = _clock_in_at, source = 'correction'
+     WHERE session_id = s.id AND started_at < _clock_in_at;
+  END IF;
   PERFORM public.attendance_recalculate_session(s.id);
   SELECT * INTO s FROM public.attendance_sessions WHERE id = s.id;
   RETURN s;
@@ -1203,6 +1211,9 @@ $$;
 -- =====================================================================
 -- Postgres grants EXECUTE to PUBLIC by default — revoke, then re-grant
 -- only what each audience needs.
+
+REVOKE ALL ON FUNCTION public.claim_owner(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.claim_owner(uuid) TO authenticated, service_role;
 
 REVOKE ALL ON FUNCTION public.attendance_recalculate_session(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attendance_match_shift(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
