@@ -68,7 +68,7 @@ function OwnerAttendance() {
   }
 
   const { settings, sessions, tasks } = overview.data;
-  if (settings && !settingsLoaded) { setSettingsForm({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in }); setSettingsLoaded(true); }
+  useEffect(() => { if (settings && !settingsLoaded) { setSettingsForm({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in }); setSettingsLoaded(true); } }, [settings, settingsLoaded]);
   const openSessions = sessions.filter((session) => !session.clockOutAt);
   const lateSessions = sessions.filter((session) => session.lateMinutes > 0);
   const pendingTasks = tasks.filter((task) => !["completed", "verified", "cancelled"].includes(task.status));
