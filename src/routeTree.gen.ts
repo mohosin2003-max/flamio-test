@@ -476,8 +476,6 @@ export interface FileRoutesByFullPath {
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
-  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
-  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -608,8 +606,6 @@ export interface FileRoutesById {
   '/_authenticated/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
-  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
-  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/_authenticated/owner/finance': typeof AuthenticatedOwnerFinanceRoute
@@ -1403,6 +1399,7 @@ const AuthenticatedOwnerRouteWithChildren =
   AuthenticatedOwnerRoute._addFileChildren(AuthenticatedOwnerRouteChildren)
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAttendanceRoute: typeof AuthenticatedAttendanceRoute
   AuthenticatedChangePasswordRoute: typeof AuthenticatedChangePasswordRoute
   AuthenticatedKitchenRoute: typeof AuthenticatedKitchenRoute
   AuthenticatedOwnerRoute: typeof AuthenticatedOwnerRouteWithChildren
@@ -1420,6 +1417,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAttendanceRoute: AuthenticatedAttendanceRoute,
   AuthenticatedChangePasswordRoute: AuthenticatedChangePasswordRoute,
   AuthenticatedKitchenRoute: AuthenticatedKitchenRoute,
   AuthenticatedOwnerRoute: AuthenticatedOwnerRouteWithChildren,
