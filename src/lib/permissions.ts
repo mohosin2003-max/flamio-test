@@ -42,6 +42,8 @@ export const STAFF_PERMISSIONS = [
   "settings",
   "integrations",
   "account_recovery",
+  "attendance",
+  "attendance_management",
 ] as const;
 
 export type StaffPermission = (typeof STAFF_PERMISSIONS)[number];
@@ -89,6 +91,8 @@ export const PERMISSION_LABELS: Record<StaffPermission, string> = {
   settings: "Settings",
   integrations: "Integrations & Providers",
   account_recovery: "Account Recovery",
+  attendance: "My Attendance",
+  attendance_management: "Attendance Management",
 };
 
 export const PERMISSION_HINTS: Partial<Record<StaffPermission, string>> = {
@@ -103,6 +107,8 @@ export const PERMISSION_HINTS: Partial<Record<StaffPermission, string>> = {
   customer_messaging: "Send a message to a customer (inbox, push, SMS, WhatsApp, email)",
   integrations: "Set up SMS, WhatsApp, email and payment providers",
   account_recovery: "Review password-recovery requests and issue one-time codes",
+  attendance: "Clock in/out, breaks, own tasks and own attendance requests",
+  attendance_management: "Duty board, shifts, task review, approvals and attendance corrections",
 };
 
 
@@ -152,7 +158,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: StaffPermission[] 
   },
   {
     title: "People & money",
-    permissions: ["staff", "staff_finance", "own_salary", "own_money_taken", "own_profit_share"],
+    permissions: ["staff", "staff_finance", "own_salary", "own_money_taken", "own_profit_share", "attendance", "attendance_management"],
   },
   {
     title: "Reports & setup",
