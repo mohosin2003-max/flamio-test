@@ -131,6 +131,11 @@ const AuthenticatedKitchenRoute = AuthenticatedKitchenRouteImport.update({
   path: '/kitchen',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedAttendanceRoute = AuthenticatedAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedOwnerRoute = AuthenticatedOwnerRouteImport.update({
   id: '/owner',
   path: '/owner',
