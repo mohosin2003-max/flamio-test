@@ -61,7 +61,7 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
     await requireAttendanceOwner(context.userId);
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
     const db = await untypedAdmin();
-    const [stationsResult, shiftsResult, profilesResult] = await Promise.all([
+    const [stationsResult, shiftsResult, profilesResult, tasksResult] = await Promise.all([
       db.from("attendance_stations")
         .select("id, name, description, is_active, sort_order")
         .order("sort_order")
@@ -72,12 +72,14 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
         .order("shift_date", { ascending: false })
         .limit(200),
       db.from("user_roles").select("user_id").eq("role", "staff"),
+      db.from("attendance_tasks").select("id, assigned_to, title, description, due_date, due_at, priority, status, requires_verification, completed_at, completion_note, review_note").order("due_date", { ascending: false }).limit(200),
     ]);
-    if (stationsResult.error || shiftsResult.error || profilesResult.error) {
+    if (stationsResult.error || shiftsResult.error || profilesResult.error || tasksResult.error) {
       console.error("Attendance management read failed", {
         stations: stationsResult.error?.message,
         shifts: shiftsResult.error?.message,
         staffRoles: profilesResult.error?.message,
+        tasks: tasksResult.error?.message,
       });
       throw new Error("Attendance management could not be loaded.");
     }
@@ -93,6 +95,15 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
       stations: (stationsResult.data ?? []).map((s: Record<string, unknown>) => ({
         id: String(s.id), name: String(s.name), description: s.description ? String(s.description) : null,
         isActive: Boolean(s.is_active), sortOrder: Number(s.sort_order ?? 0),
+      })),
+      tasks: (tasksResult.data ?? []).map((t: Record<string, unknown>) => ({
+        id: String(t.id), assignedTo: String(t.assigned_to), staffName: names.get(String(t.assigned_to)) ?? "Staff member",
+        title: String(t.title), description: t.description ? String(t.description) : null,
+        dueDate: String(t.due_date), dueAt: t.due_at ? String(t.due_at) : null,
+        priority: String(t.priority), status: String(t.status), requiresVerification: Boolean(t.requires_verification),
+        completedAt: t.completed_at ? String(t.completed_at) : null,
+        completionNote: t.completion_note ? String(t.completion_note) : null,
+        reviewNote: t.review_note ? String(t.review_note) : null,
       })),
       shifts: (shiftsResult.data ?? []).map((s: Record<string, unknown>) => ({
         id: String(s.id), userId: String(s.user_id), staffName: names.get(String(s.user_id)) ?? "Staff member",
