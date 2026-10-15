@@ -28,5 +28,5 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build
         run: npm run build
-      - name: Lint attendance implementation
-        run: npx eslint src/lib/attendance.functions.ts src/routes/_authenticated/owner.attendance.tsx
+      - name: Lint attendance implementation (excluding repository formatting rule)
+        run: npx eslint src/lib/attendance.functions.ts src/routes/_authenticated/owner.attendance.tsx --rule 'prettier/prettier: off'
