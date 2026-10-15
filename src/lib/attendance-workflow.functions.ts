@@ -226,7 +226,7 @@ export const staffCompleteAttendanceTask = createServerFn({ method: "POST" })
     if (error || !task) throw new Error("Task not found.");
     if (["completed", "verified", "cancelled"].includes(task.status)) throw new Error("This task is already closed.");
     const now = new Date().toISOString();
-    const nextStatus = task.requires_verification ? "awaiting_verification" : "completed";
+    const nextStatus = "completed";
     const { error: updateError } = await db.from("attendance_tasks").update({
       status: nextStatus, completed_at: now, completion_note: data.completionNote ?? null,
     }).eq("id", task.id).eq("assigned_to", context.userId);
@@ -238,20 +238,21 @@ export const staffCompleteAttendanceTask = createServerFn({ method: "POST" })
 export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({
-    requestType: z.enum(["leave", "attendance_correction", "overtime"]),
+    requestType: z.enum(["leave", "correction", "missed_punch", "overtime"]),
+    sessionId: z.string().uuid().nullable().optional(),
     leaveType: z.string().trim().max(60).nullable().optional(),
     leaveStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     leaveEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     requestedClockIn: z.string().datetime().nullable().optional(),
     requestedClockOut: z.string().datetime().nullable().optional(),
-    requestedOvertimeMinutes: z.number().int().min(1).max(720).nullable().optional(),
+    requestedOvertimeMinutes: z.number().int().min(1).max(960).nullable().optional(),
     reason: z.string().trim().min(5).max(1000),
-  }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.").refine((v) => v.requestType !== "attendance_correction" || Boolean(v.targetDate && (v.requestedClockIn || v.requestedClockOut)), "Attendance correction requires a date and a requested time.").refine((v) => v.requestType !== "overtime" || Boolean(v.targetDate && v.requestedOvertimeMinutes), "Overtime requires a date and minutes.").parse(input))
+  }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.").refine((v) => v.requestType !== "correction" || Boolean(v.sessionId && (v.requestedClockIn || v.requestedClockOut)), "Correction requires a session and a requested time.").refine((v) => v.requestType !== "missed_punch" || Boolean(v.targetDate && v.requestedClockIn && v.requestedClockOut), "Missed punch requires a date and both times.").refine((v) => v.requestType !== "overtime" || Boolean(v.sessionId && v.requestedOvertimeMinutes), "Overtime requires a session and minutes.").parse(input))
   .handler(async ({ data, context }) => {
     const { db } = await dbForUser(context.userId);
     const { data: request, error } = await db.from("attendance_requests").insert({
-      user_id: context.userId, request_type: data.requestType, leave_type: data.leaveType ?? null,
+      user_id: context.userId, request_type: data.requestType, session_id: data.sessionId ?? null, leave_type: data.leaveType ?? null,
       leave_start_date: data.leaveStartDate ?? null, leave_end_date: data.leaveEndDate ?? null,
       target_date: data.targetDate ?? null, requested_clock_in: data.requestedClockIn ?? null,
       requested_clock_out: data.requestedClockOut ?? null, requested_overtime_minutes: data.requestedOvertimeMinutes ?? null,
