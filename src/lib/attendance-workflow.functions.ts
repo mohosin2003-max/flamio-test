@@ -166,7 +166,7 @@ export const staffClockOut = createServerFn({ method: "POST" })
     const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - now.getTime()) / 60000)) : 0;
     const { error: updateError } = await db.from("attendance_sessions").update({
       clock_out_at: now.toISOString(), clock_out_source: "app", clock_out_note: data.note ?? null,
-      worked_minutes: workedMinutes, early_leave_minutes: earlyLeave, status: "completed",
+      worked_minutes: workedMinutes, early_leave_minutes: earlyLeave, status: "closed",
     }).eq("id", session.id).eq("user_id", context.userId).is("clock_out_at", null);
     if (updateError) {
       console.error("Attendance clock-out failed", updateError.message);
