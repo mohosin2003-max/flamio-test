@@ -1372,7 +1372,8 @@ END;
 $$;
 
 -- 6.13 Manager: team directory exposes names and roles only; never profile phone numbers.
-CREATE OR REPLACE FUNCTION public.attendance_team_directory()
+DROP FUNCTION IF EXISTS public.attendance_team_directory();
+CREATE FUNCTION public.attendance_team_directory()
     RETURNS TABLE (user_id uuid, full_name text, roles public.app_role[])
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
