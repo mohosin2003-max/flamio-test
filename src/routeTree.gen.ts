@@ -478,6 +478,9 @@ export interface FileRoutesByFullPath {
   '/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
   '/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
@@ -609,6 +612,8 @@ export interface FileRoutesById {
   '/_authenticated/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
   '/_authenticated/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/_authenticated/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
+  '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
+  '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
   '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
@@ -677,6 +682,7 @@ export interface FileRouteTypes {
     | '/owner/coupons'
     | '/owner/customers'
     | '/owner/data-storage'
+    | '/attendance'
     | '/owner/attendance'
     | '/owner/attendance-management'
     | '/owner/attendance-workflow'
@@ -806,6 +812,7 @@ export interface FileRouteTypes {
     | '/_authenticated/owner/coupons'
     | '/_authenticated/owner/customers'
     | '/_authenticated/owner/data-storage'
+    | '/_authenticated/attendance'
     | '/_authenticated/owner/attendance'
     | '/_authenticated/owner/attendance-management'
     | '/_authenticated/owner/attendance-workflow'
