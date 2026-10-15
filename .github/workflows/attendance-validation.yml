@@ -29,4 +29,4 @@ jobs:
       - name: Build
         run: npm run build
       - name: Lint attendance implementation (excluding repository formatting rule)
-        run: npx eslint src/lib/attendance.functions.ts src/lib/attendance-management.functions.ts src/lib/attendance-workflow.functions.ts src/routes/_authenticated/owner.attendance.tsx src/routes/_authenticated/owner.attendance-management.tsx src/routes/_authenticated/owner.attendance-workflow.tsx src/routes/_authenticated/attendance.tsx src/routeTree.gen.ts --rule 'prettier/prettier: off'
+        run: npx eslint src/lib/attendance.functions.ts src/lib/attendance-settings.functions.ts src/lib/attendance-management.functions.ts src/lib/attendance-workflow.functions.ts src/routes/_authenticated/owner.attendance.tsx src/routes/_authenticated/owner.attendance-management.tsx src/routes/_authenticated/owner.attendance-workflow.tsx src/routes/_authenticated/attendance.tsx src/routeTree.gen.ts --rule 'prettier/prettier: off'
