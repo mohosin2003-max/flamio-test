@@ -468,7 +468,6 @@ export interface FileRoutesByFullPath {
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
-  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -532,6 +531,7 @@ export interface FileRoutesByTo {
   '/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -597,6 +597,7 @@ export interface FileRoutesById {
   '/_authenticated/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/_authenticated/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/_authenticated/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/_authenticated/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/_authenticated/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -663,6 +664,7 @@ export interface FileRouteTypes {
     | '/owner/customers'
     | '/owner/data-storage'
     | '/owner/attendance'
+    | '/owner/attendance-management'
     | '/owner/delivery'
     | '/owner/finance'
     | '/owner/inbox'
@@ -790,6 +792,7 @@ export interface FileRouteTypes {
     | '/_authenticated/owner/customers'
     | '/_authenticated/owner/data-storage'
     | '/_authenticated/owner/attendance'
+    | '/_authenticated/owner/attendance-management'
     | '/_authenticated/owner/delivery'
     | '/_authenticated/owner/finance'
     | '/_authenticated/owner/inbox'
