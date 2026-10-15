@@ -652,14 +652,17 @@ ALTER TABLE public.attendance_audit_log  ENABLE ROW LEVEL SECURITY;
 -- Each policy is created only if a policy with that name is missing on that table.
 DO $$
 BEGIN
-  -- Settings: team reads, managers update.
+  -- Settings: team reads; ONLY the Owner may update system-wide settings.
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_settings' AND policyname = 'attendance_settings_member_read') THEN
     CREATE POLICY "attendance_settings_member_read" ON public.attendance_settings FOR SELECT TO authenticated
       USING (public.attendance_is_member(auth.uid()));
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_settings' AND policyname = 'attendance_settings_manager_update') THEN
-    CREATE POLICY "attendance_settings_manager_update" ON public.attendance_settings FOR UPDATE TO authenticated
-      USING (public.attendance_is_manager(auth.uid())) WITH CHECK (public.attendance_is_manager(auth.uid()));
+  -- Remove the legacy manager policy if present; admins/managers must not control Owner-only settings.
+  DROP POLICY IF EXISTS attendance_settings_manager_update ON public.attendance_settings;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_settings' AND policyname = 'attendance_settings_owner_update') THEN
+    CREATE POLICY "attendance_settings_owner_update" ON public.attendance_settings FOR UPDATE TO authenticated
+      USING (public.has_role((select auth.uid()), 'owner'::public.app_role))
+      WITH CHECK (public.has_role((select auth.uid()), 'owner'::public.app_role));
   END IF;
 
   -- Stations: team reads, managers write.
@@ -1368,18 +1371,18 @@ BEGIN
 END;
 $$;
 
--- 6.13 Manager: team directory (names only) without widening profiles RLS.
+-- 6.13 Manager: team directory exposes names and roles only; never profile phone numbers.
 CREATE OR REPLACE FUNCTION public.attendance_team_directory()
-    RETURNS TABLE (user_id uuid, full_name text, phone text, roles public.app_role[])
+    RETURNS TABLE (user_id uuid, full_name text, roles public.app_role[])
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
-    AS $$
-  SELECT ur.user_id, p.full_name, p.phone, array_agg(ur.role ORDER BY ur.role)
+    AS $
+  SELECT ur.user_id, p.full_name, array_agg(ur.role ORDER BY ur.role)
     FROM public.user_roles ur
     LEFT JOIN public.profiles p ON p.id = ur.user_id
    WHERE public.attendance_is_manager(auth.uid())
-   GROUP BY ur.user_id, p.full_name, p.phone;
-$$;
+   GROUP BY ur.user_id, p.full_name;
+$;
 
 -- =====================================================================
 -- 7. FUNCTION EXECUTE PRIVILEGES
@@ -1389,6 +1392,10 @@ $$;
 
 REVOKE ALL ON FUNCTION public.claim_owner(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.claim_owner(uuid) TO authenticated, service_role;
+
+-- Role helper: needed by authenticated RLS policies/server RPCs, but never exposed to anon.
+REVOKE ALL ON FUNCTION public.has_role(uuid, public.app_role) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated, service_role;
 
 -- RLS helpers: required by authenticated for policy evaluation; never anon.
 REVOKE ALL ON FUNCTION public.attendance_is_manager(uuid) FROM PUBLIC, anon;
