@@ -8,6 +8,9 @@ const noteSchema = z.string().trim().max(500).nullable().optional();
 
 async function dbForUser(userId: string) {
   const access = await getAccessProfile(userId);
+  if (!access.roles?.includes("staff") && !access.isOwner) {
+    throw new Error("Only authorized staff or the Owner can access attendance operations.");
+  }
   const { untypedAdmin } = await import("@/lib/untyped-db.server");
   return { access, db: await untypedAdmin() };
 }
