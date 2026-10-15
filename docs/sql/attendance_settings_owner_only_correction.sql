@@ -1,7 +1,7 @@
 -- FLAMIO ATTENDANCE MASTER — Owner-only settings security correction
 -- REVIEW ONLY. NOT EXECUTED.
 -- Scope: Supabase TEST project avwrptztixaketchgmsh only.
--- This file changes no data and must not be run until the user separately approves
+-- This file changes policy/function definitions but no application rows. Do not run until the user separately approves
 -- SQL execution. Never apply to Production (wubsldblxvkusauafwfd).
 
 BEGIN;
@@ -25,6 +25,23 @@ BEGIN
   END IF;
 END
 $preflight$;
+
+-- Remove the legacy role-enumeration RPC exposure and explicitly scope execution.
+REVOKE ALL ON FUNCTION public.has_role(uuid, public.app_role) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated, service_role;
+
+-- The team directory must not disclose personal phone numbers.
+CREATE OR REPLACE FUNCTION public.attendance_team_directory()
+  RETURNS TABLE (user_id uuid, full_name text, roles public.app_role[])
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path TO 'public'
+  AS $
+    SELECT ur.user_id, p.full_name, array_agg(ur.role ORDER BY ur.role)
+      FROM public.user_roles ur
+      LEFT JOIN public.profiles p ON p.id = ur.user_id
+     WHERE public.attendance_is_manager(auth.uid())
+     GROUP BY ur.user_id, p.full_name;
+  $;
 
 -- The existing attendance_is_manager() intentionally includes admins.
 -- Attendance settings are an Owner-controlled feature switch, so do not use
