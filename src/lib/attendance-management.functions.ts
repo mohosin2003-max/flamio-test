@@ -71,17 +71,22 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
         .gte("shift_date", new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10))
         .order("shift_date", { ascending: false })
         .limit(200),
-      db.from("profiles").select("id, full_name").limit(1000),
+      db.from("user_roles").select("user_id").eq("role", "staff"),
     ]);
     if (stationsResult.error || shiftsResult.error || profilesResult.error) {
       console.error("Attendance management read failed", {
         stations: stationsResult.error?.message,
         shifts: shiftsResult.error?.message,
-        profiles: profilesResult.error?.message,
+        staffRoles: profilesResult.error?.message,
       });
       throw new Error("Attendance management could not be loaded.");
     }
-    const names = new Map((profilesResult.data ?? []).map((p: { id: string; full_name: string | null }) => [
+    const staffIds = Array.from(new Set((profilesResult.data ?? []).map((row: { user_id: string }) => row.user_id)));
+    const { data: staffProfiles, error: staffProfilesError } = staffIds.length
+      ? await db.from("profiles").select("id, full_name").in("id", staffIds)
+      : { data: [], error: null };
+    if (staffProfilesError) throw new Error("Staff directory could not be loaded.");
+    const names = new Map((staffProfiles ?? []).map((p: { id: string; full_name: string | null }) => [
       p.id, p.full_name?.trim() || "Unnamed staff",
     ]));
     return {
@@ -97,7 +102,7 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
         plannedBreakMinutes: Number(s.planned_break_minutes ?? 0), status: String(s.status),
         notes: s.notes ? String(s.notes) : null,
       })),
-      staff: (profilesResult.data ?? []).map((p: { id: string; full_name: string | null }) => ({
+      staff: (staffProfiles ?? []).map((p: { id: string; full_name: string | null }) => ({
         id: p.id, name: p.full_name?.trim() || "Unnamed staff",
       })),
     };
