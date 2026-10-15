@@ -31,7 +31,8 @@ REVOKE ALL ON FUNCTION public.has_role(uuid, public.app_role) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated, service_role;
 
 -- The team directory must not disclose personal phone numbers.
-CREATE OR REPLACE FUNCTION public.attendance_team_directory()
+DROP FUNCTION IF EXISTS public.attendance_team_directory();
+CREATE FUNCTION public.attendance_team_directory()
   RETURNS TABLE (user_id uuid, full_name text, roles public.app_role[])
   LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path TO 'public'
