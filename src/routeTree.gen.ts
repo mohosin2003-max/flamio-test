@@ -44,6 +44,7 @@ import { Route as AuthenticatedOwnerCouponsRouteImport } from './routes/_authent
 import { Route as AuthenticatedOwnerCustomersRouteImport } from './routes/_authenticated/owner.customers'
 import { Route as AuthenticatedOwnerDataStorageRouteImport } from './routes/_authenticated/owner.data-storage'
 import { Route as AuthenticatedOwnerAttendanceRouteImport } from './routes/_authenticated/owner.attendance'
+import { Route as AuthenticatedOwnerAttendanceManagementRouteImport } from './routes/_authenticated/owner.attendance-management'
 import { Route as AuthenticatedOwnerDeliveryRouteImport } from './routes/_authenticated/owner.delivery'
 import { Route as AuthenticatedOwnerFinanceRouteImport } from './routes/_authenticated/owner.finance'
 import { Route as AuthenticatedOwnerInboxRouteImport } from './routes/_authenticated/owner.inbox'
@@ -265,6 +266,11 @@ const AuthenticatedOwnerAttendanceRoute = AuthenticatedOwnerAttendanceRouteImpor
   path: '/attendance',
   getParentRoute: () => AuthenticatedOwnerRoute,
 } as any)
+const AuthenticatedOwnerAttendanceManagementRoute = AuthenticatedOwnerAttendanceManagementRouteImport.update({
+  id: '/attendance-management',
+  path: '/attendance-management',
+  getParentRoute: () => AuthenticatedOwnerRoute,
+} as any)
 const AuthenticatedOwnerDeliveryRoute =
   AuthenticatedOwnerDeliveryRouteImport.update({
     id: '/delivery',
@@ -461,6 +467,8 @@ export interface FileRoutesByFullPath {
   '/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -1313,6 +1321,7 @@ interface AuthenticatedOwnerRouteChildren {
   AuthenticatedOwnerCustomersRoute: typeof AuthenticatedOwnerCustomersRouteWithChildren
   AuthenticatedOwnerDataStorageRoute: typeof AuthenticatedOwnerDataStorageRoute
   AuthenticatedOwnerAttendanceRoute: typeof AuthenticatedOwnerAttendanceRoute
+  AuthenticatedOwnerAttendanceManagementRoute: typeof AuthenticatedOwnerAttendanceManagementRoute
   AuthenticatedOwnerDeliveryRoute: typeof AuthenticatedOwnerDeliveryRoute
   AuthenticatedOwnerFinanceRoute: typeof AuthenticatedOwnerFinanceRoute
   AuthenticatedOwnerInboxRoute: typeof AuthenticatedOwnerInboxRoute
@@ -1346,6 +1355,7 @@ const AuthenticatedOwnerRouteChildren: AuthenticatedOwnerRouteChildren = {
     AuthenticatedOwnerCustomersRouteWithChildren,
   AuthenticatedOwnerDataStorageRoute: AuthenticatedOwnerDataStorageRoute,
   AuthenticatedOwnerAttendanceRoute: AuthenticatedOwnerAttendanceRoute,
+  AuthenticatedOwnerAttendanceManagementRoute: AuthenticatedOwnerAttendanceManagementRoute,
   AuthenticatedOwnerDeliveryRoute: AuthenticatedOwnerDeliveryRoute,
   AuthenticatedOwnerFinanceRoute: AuthenticatedOwnerFinanceRoute,
   AuthenticatedOwnerInboxRoute: AuthenticatedOwnerInboxRoute,
