@@ -95,6 +95,7 @@ const TABS: {
     ownerRoleOnly: true,
   },
   { to: "/owner/attendance", label: "Staff Duty Monitoring", exact: false, permission: "staff", ownerRoleOnly: true },
+  { to: "/owner/attendance-management", label: "Attendance Schedules", exact: false, permission: "staff", ownerRoleOnly: true },
 
 ];
 
