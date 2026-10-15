@@ -20,6 +20,7 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as OffersRouteImport } from './routes/offers'
 import { Route as AuthenticatedChangePasswordRouteImport } from './routes/_authenticated/change-password'
 import { Route as AuthenticatedKitchenRouteImport } from './routes/_authenticated/kitchen'
+import { Route as AuthenticatedAttendanceRouteImport } from './routes/_authenticated/attendance'
 import { Route as AuthenticatedOwnerRouteImport } from './routes/_authenticated/owner'
 import { Route as MenuIndexRouteImport } from './routes/menu.index'
 import { Route as MenuProductSlugRouteImport } from './routes/menu.$productSlug'
@@ -45,6 +46,7 @@ import { Route as AuthenticatedOwnerCustomersRouteImport } from './routes/_authe
 import { Route as AuthenticatedOwnerDataStorageRouteImport } from './routes/_authenticated/owner.data-storage'
 import { Route as AuthenticatedOwnerAttendanceRouteImport } from './routes/_authenticated/owner.attendance'
 import { Route as AuthenticatedOwnerAttendanceManagementRouteImport } from './routes/_authenticated/owner.attendance-management'
+import { Route as AuthenticatedOwnerAttendanceWorkflowRouteImport } from './routes/_authenticated/owner.attendance-workflow'
 import { Route as AuthenticatedOwnerDeliveryRouteImport } from './routes/_authenticated/owner.delivery'
 import { Route as AuthenticatedOwnerFinanceRouteImport } from './routes/_authenticated/owner.finance'
 import { Route as AuthenticatedOwnerInboxRouteImport } from './routes/_authenticated/owner.inbox'
@@ -271,6 +273,11 @@ const AuthenticatedOwnerAttendanceManagementRoute = AuthenticatedOwnerAttendance
   path: '/attendance-management',
   getParentRoute: () => AuthenticatedOwnerRoute,
 } as any)
+const AuthenticatedOwnerAttendanceWorkflowRoute = AuthenticatedOwnerAttendanceWorkflowRouteImport.update({
+  id: '/attendance-workflow',
+  path: '/attendance-workflow',
+  getParentRoute: () => AuthenticatedOwnerRoute,
+} as any)
 const AuthenticatedOwnerDeliveryRoute =
   AuthenticatedOwnerDeliveryRouteImport.update({
     id: '/delivery',
@@ -468,6 +475,9 @@ export interface FileRoutesByFullPath {
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -598,6 +608,9 @@ export interface FileRoutesById {
   '/_authenticated/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
   '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
+  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
+  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/_authenticated/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/_authenticated/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -665,6 +678,7 @@ export interface FileRouteTypes {
     | '/owner/data-storage'
     | '/owner/attendance'
     | '/owner/attendance-management'
+    | '/owner/attendance-workflow'
     | '/owner/delivery'
     | '/owner/finance'
     | '/owner/inbox'
@@ -793,6 +807,7 @@ export interface FileRouteTypes {
     | '/_authenticated/owner/data-storage'
     | '/_authenticated/owner/attendance'
     | '/_authenticated/owner/attendance-management'
+    | '/_authenticated/owner/attendance-workflow'
     | '/_authenticated/owner/delivery'
     | '/_authenticated/owner/finance'
     | '/_authenticated/owner/inbox'
@@ -1325,6 +1340,7 @@ interface AuthenticatedOwnerRouteChildren {
   AuthenticatedOwnerDataStorageRoute: typeof AuthenticatedOwnerDataStorageRoute
   AuthenticatedOwnerAttendanceRoute: typeof AuthenticatedOwnerAttendanceRoute
   AuthenticatedOwnerAttendanceManagementRoute: typeof AuthenticatedOwnerAttendanceManagementRoute
+  AuthenticatedOwnerAttendanceWorkflowRoute: typeof AuthenticatedOwnerAttendanceWorkflowRoute
   AuthenticatedOwnerDeliveryRoute: typeof AuthenticatedOwnerDeliveryRoute
   AuthenticatedOwnerFinanceRoute: typeof AuthenticatedOwnerFinanceRoute
   AuthenticatedOwnerInboxRoute: typeof AuthenticatedOwnerInboxRoute
@@ -1359,6 +1375,7 @@ const AuthenticatedOwnerRouteChildren: AuthenticatedOwnerRouteChildren = {
   AuthenticatedOwnerDataStorageRoute: AuthenticatedOwnerDataStorageRoute,
   AuthenticatedOwnerAttendanceRoute: AuthenticatedOwnerAttendanceRoute,
   AuthenticatedOwnerAttendanceManagementRoute: AuthenticatedOwnerAttendanceManagementRoute,
+  AuthenticatedOwnerAttendanceWorkflowRoute: AuthenticatedOwnerAttendanceWorkflowRoute,
   AuthenticatedOwnerDeliveryRoute: AuthenticatedOwnerDeliveryRoute,
   AuthenticatedOwnerFinanceRoute: AuthenticatedOwnerFinanceRoute,
   AuthenticatedOwnerInboxRoute: AuthenticatedOwnerInboxRoute,
