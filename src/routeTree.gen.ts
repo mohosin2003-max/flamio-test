@@ -544,8 +544,10 @@ export interface FileRoutesByTo {
   '/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
   '/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
