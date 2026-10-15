@@ -63,6 +63,17 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       console.error("Attendance workspace read failed", [settingsResult.error, sessionsResult.error, breaksResult.error, tasksResult.error, requestsResult.error].filter(Boolean).map((e) => e?.message));
       throw new Error("Attendance workspace could not be loaded.");
     }
+    const taskIds = (tasksResult.data ?? []).map((task: { id: string }) => task.id);
+    const taskItemsResult = taskIds.length
+      ? await db.from("attendance_task_items").select("id, task_id, label, sort_order, is_done, done_at").in("task_id", taskIds).order("sort_order")
+      : { data: [], error: null };
+    if (taskItemsResult.error) throw new Error("Task checklist could not be loaded.");
+    const itemsByTask = new Map<string, unknown[]>();
+    for (const item of taskItemsResult.data ?? []) {
+      const current = itemsByTask.get(item.task_id) ?? [];
+      current.push(item);
+      itemsByTask.set(item.task_id, current);
+    }
     const today = localDateDhaka();
     const todayShiftResult = await db.from("attendance_shifts")
       .select("id, shift_date, start_time, end_time, starts_at, ends_at, is_overnight, planned_break_minutes, station_id, duty_role, status")
@@ -74,7 +85,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       shifts: todayShiftResult.data ?? [],
       activeBreak: breaksResult.data?.[0] ?? null,
       sessions: sessionsResult.data ?? [],
-      tasks: tasksResult.data ?? [],
+      tasks: (tasksResult.data ?? []).map((task: Record<string, unknown>) => ({ ...task, checklist: itemsByTask.get(String(task.id)) ?? [] })),
       requests: requestsResult.data ?? [],
     };
   });
@@ -357,4 +368,25 @@ export const ownerReviewAttendanceTask = createServerFn({ method: "POST" })
     if (error) throw new Error("Could not review task.");
     await audit(db, { tableName: "attendance_tasks", rowId: task.id, action: data.decision, actorId: context.userId, subjectUserId: task.assigned_to, oldData: task, newData: { status: nextStatus, reviewNote: data.reviewNote ?? null } });
     return { ok: true, status: nextStatus };
+  });
+
+export const staffToggleAttendanceTaskItem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ itemId: z.string().uuid(), isDone: z.boolean() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { db } = await dbForUser(context.userId);
+    const { data: item, error: readError } = await db.from("attendance_task_items")
+      .select("id, task_id, label, is_done").eq("id", data.itemId).maybeSingle();
+    if (readError || !item) throw new Error("Checklist item not found.");
+    const { data: task, error: taskError } = await db.from("attendance_tasks")
+      .select("id, assigned_to, status").eq("id", item.task_id).eq("assigned_to", context.userId).maybeSingle();
+    if (taskError || !task) throw new Error("This checklist does not belong to you.");
+    if (["completed", "verified", "cancelled"].includes(task.status)) throw new Error("This task is already closed.");
+    const now = new Date().toISOString();
+    const { error } = await db.from("attendance_task_items").update({
+      is_done: data.isDone, done_at: data.isDone ? now : null, done_by: data.isDone ? context.userId : null,
+    }).eq("id", item.id);
+    if (error) throw new Error("Could not update checklist item.");
+    await audit(db, { tableName: "attendance_task_items", rowId: item.id, action: data.isDone ? "checklist_item_done" : "checklist_item_reopened", actorId: context.userId, subjectUserId: context.userId, oldData: item, newData: { is_done: data.isDone, done_at: data.isDone ? now : null } });
+    return { ok: true };
   });
