@@ -124,7 +124,12 @@ export const staffClockIn = createServerFn({ method: "POST" })
         .select("id, shift_date, starts_at, ends_at, status").eq("user_id", context.userId)
         .eq("shift_date", today).eq("status", "scheduled").order("starts_at").limit(1);
       if (error) throw new Error("Could not check your schedule.");
-      if (todaysShift?.[0] && Date.parse(nowIso) <= Date.parse(todaysShift[0].ends_at)) shift = todaysShift[0];
+      if (todaysShift?.[0] && Date.parse(nowIso) <= Date.parse(todaysShift[0].ends_at)) {
+        if (Date.parse(nowIso) < Date.parse(todaysShift[0].starts_at) - Number(settings.early_clock_in_minutes) * 60000) {
+          throw new Error("It is too early to clock in for today's shift.");
+        }
+        shift = todaysShift[0];
+      }
     }
     const dutyDate = shift?.shift_date ?? localDateDhaka(now);
     const lateMinutes = shift ? Math.max(0, Math.floor((now.getTime() - Date.parse(shift.starts_at) - Number(settings.late_grace_minutes) * 60000) / 60000)) : 0;
