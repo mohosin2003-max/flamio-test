@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { CalendarClock, CheckCircle2, Clock3, RefreshCw, ShieldAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -9,6 +11,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ownerGetAttendanceOverview } from "@/lib/attendance.functions";
+import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functions";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/_authenticated/owner/attendance")({
   head: () => ({
@@ -36,7 +41,12 @@ function duration(minutes: number) {
 }
 
 function OwnerAttendance() {
+  const queryClient = useQueryClient();
   const getOverview = useServerFn(ownerGetAttendanceOverview);
+  const updateSettings = useServerFn(ownerUpdateAttendanceSettings);
+  const [settingsForm, setSettingsForm] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true });
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const overview = useQuery({
     queryKey: ["owner-attendance-overview"],
     queryFn: () => getOverview(),
@@ -58,6 +68,7 @@ function OwnerAttendance() {
   }
 
   const { settings, sessions, tasks } = overview.data;
+  if (settings && !settingsLoaded) { setSettingsForm({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in }); setSettingsLoaded(true); }
   const openSessions = sessions.filter((session) => !session.clockOutAt);
   const lateSessions = sessions.filter((session) => session.lateMinutes > 0);
   const pendingTasks = tasks.filter((task) => !["completed", "verified", "cancelled"].includes(task.status));
@@ -92,7 +103,15 @@ function OwnerAttendance() {
               <Setting label="Unscheduled clock-in" value={settings.allow_unscheduled_clock_in ? "Allowed" : "Not allowed"} />
             </div>
           ) : <p className="text-sm text-muted-foreground">No settings row found.</p>}
-          <p className="text-xs text-muted-foreground">This initial page does not change settings or write attendance records.</p>
+          <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); setSettingsBusy(true); void updateSettings({ data: { timezone: "Asia/Dhaka", ...settingsForm } }).then(async () => { await queryClient.invalidateQueries({ queryKey: ["owner-attendance-overview"] }); toast.success("Attendance settings saved"); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not save settings")).finally(() => setSettingsBusy(false)); }}>
+            <div className="space-y-1"><Label htmlFor="late-grace">Late grace (minutes)</Label><Input id="late-grace" type="number" min={0} max={120} value={settingsForm.lateGraceMinutes} onChange={(e) => setSettingsForm((old) => ({ ...old, lateGraceMinutes: Number(e.target.value) }))} /></div>
+            <div className="space-y-1"><Label htmlFor="early-window">Early clock-in window (minutes)</Label><Input id="early-window" type="number" min={0} max={240} value={settingsForm.earlyClockInMinutes} onChange={(e) => setSettingsForm((old) => ({ ...old, earlyClockInMinutes: Number(e.target.value) }))} /></div>
+            <div className="space-y-1"><Label htmlFor="punch-gap">Minimum punch gap (seconds)</Label><Input id="punch-gap" type="number" min={10} max={3600} value={settingsForm.minPunchGapSeconds} onChange={(e) => setSettingsForm((old) => ({ ...old, minPunchGapSeconds: Number(e.target.value) }))} /></div>
+            <div className="space-y-1"><Label htmlFor="max-session">Maximum session (hours)</Label><Input id="max-session" type="number" min={1} max={24} value={settingsForm.maxSessionHours} onChange={(e) => setSettingsForm((old) => ({ ...old, maxSessionHours: Number(e.target.value) }))} /></div>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.allowUnscheduledClockIn} onChange={(e) => setSettingsForm((old) => ({ ...old, allowUnscheduledClockIn: e.target.checked }))} /> Allow clock-in without a scheduled shift</label>
+            <Button type="submit" disabled={settingsBusy} className="sm:col-span-2">{settingsBusy ? "Saving…" : "Save attendance settings"}</Button>
+          </form>
+          <p className="text-xs text-muted-foreground">Owner-only server check is enforced. The separate TEST database RLS policy correction is still a pending, unexecuted SQL draft.</p>
         </CardContent>
       </Card>
 
