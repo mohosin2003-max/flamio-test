@@ -8,6 +8,7 @@ const noteSchema = z.string().trim().max(500).nullable().optional();
 
 async function dbForUser(userId: string) {
   const access = await getAccessProfile(userId);
+  if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
   const { untypedAdmin } = await import("@/lib/untyped-db.server");
   return { access, db: await untypedAdmin() };
 }
