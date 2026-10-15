@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { CalendarClock, CheckCircle2, Clock3, Coffee, LogIn, LogOut, RefreshCw, Send } from "lucide-react";
+import { CheckCircle2, Coffee, LogIn, LogOut, RefreshCw, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ function MyAttendance() {
   };
   if (query.isLoading) return <div className="space-y-3"><Skeleton className="h-32 w-full"/><Skeleton className="h-48 w-full"/></div>;
   if (query.error || !query.data) return <EmptyState title="Attendance unavailable" description="Your attendance workspace could not be loaded." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
-  const { settings, shifts, sessions, tasks, requests, activeBreak } = query.data;
+  const { shifts, sessions, tasks, requests, activeBreak } = query.data;
   const activeSession = sessions.find((s: any) => !s.clock_out_at);
   const pendingTasks = tasks.filter((t: any) => !["completed","verified","cancelled"].includes(t.status));
   const dateTime = (v: string) => new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
