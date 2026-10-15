@@ -1,6 +1,6 @@
 # FLAMIO ATTENDANCE MASTER — Implementation Status & Release Gate
 
-**Updated:** 2026-10-16  
+**Updated:** 2026-10-16 (follow-up verification)  
 **Decision:** INCOMPLETE — do not merge or deploy  
 **Repository:** `mohosin2003-max/flamio-test`  
 **Branch:** `feature/attendance-master-safe`  
@@ -44,7 +44,9 @@
 6. **Retention:** automatic one-month deletion is not installed or verified. No cleanup/deletion job was run.
 7. **Scheduling:** editing, recurring weekday schedules, date-specific overrides, leave/calendar integration, and full schedule history are incomplete.
 8. **Request workflow:** approve/reject decisions are recorded, but all request types do not yet apply the approved changes to attendance/leave/overtime records.
-9. **Testing:** run and capture the current CI build and scoped lint; add repeatable unit/integration/end-to-end tests for authorization, shifts, clock-in/out, breaks, tasks, requests, notification delivery, QR replay, privacy, retention, and regressions.
+9. **Task status:** confirm the database task status transitions against the UI and test Owner verification/rejection. The current implementation needs an integration test to verify every transition against live CHECK constraints.
+10. **Request approvals:** Owner approve/reject currently records a decision only; approved leave/correction/missed-punch/overtime is not applied to the underlying shift/session data.
+11. **Testing:** run and capture the current CI build and scoped lint; add repeatable unit/integration/end-to-end tests for authorization, shifts, clock-in/out, breaks, tasks, requests, notification delivery, QR replay, privacy, retention, and regressions.
 
 ## Release gate
 
