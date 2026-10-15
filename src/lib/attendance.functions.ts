@@ -1,11 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { assertOwner } from "@/lib/owner.server";
+import { getAccessProfile } from "@/lib/owner.server";
 
 export const ownerGetAttendanceOverview = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await assertOwner(context.userId);
+    const access = await getAccessProfile(context.userId);
+    if (!access.isOwner) throw new Error("Forbidden");
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
     const db = await untypedAdmin();
 
