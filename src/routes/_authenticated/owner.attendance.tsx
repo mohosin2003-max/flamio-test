@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { CalendarClock, CheckCircle2, Clock3, RefreshCw, ShieldAlert, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -138,7 +139,7 @@ function OwnerAttendance() {
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: string }) {
+function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return <Card><CardContent className="space-y-2 p-3"><Icon className="h-5 w-5 text-primary" /><p className="text-xs text-muted-foreground">{label}</p><p className="font-display text-2xl font-bold">{value}</p></CardContent></Card>;
 }
 
