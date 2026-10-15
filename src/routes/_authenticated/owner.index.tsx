@@ -55,6 +55,7 @@ const MODULES: Module[] = [
   { to: "/owner/settings", label: "Settings", description: "Business configuration", icon: Settings2, permission: "settings" },
   { to: "/owner/data-storage", label: "Data & Storage", description: "Retention, cleanup and files", icon: Settings2, permission: "settings", ownerRoleOnly: true },
   { to: "/owner/attendance", label: "Staff Duty Monitoring", description: "Attendance, duty sessions and tasks", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
+  { to: "/owner/attendance-management", label: "Attendance Schedules", description: "Manage work stations and staff shifts", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
 ];
 
 function OwnerHome() {
