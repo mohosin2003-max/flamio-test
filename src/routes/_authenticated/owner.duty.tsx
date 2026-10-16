@@ -217,12 +217,14 @@ function MyTasks({ tasks }: { tasks: Overview["tasks"] }) {
   );
 }
 
+type FKey = "reason" | "leaveType" | "start" | "end" | "sessionId" | "target" | "in" | "out" | "ot";
+
 function MyRequests({ requests, sessions }: { requests: Overview["requests"]; sessions: Overview["sessions"] }) {
   const qc = useQueryClient();
   const submit = useServerFn(attendanceSubmitRequest);
   const cancel = useServerFn(attendanceCancelRequest);
   const [type, setType] = useState<"leave" | "missed_punch" | "correction" | "overtime">("leave");
-  const [f, setF] = useState<Record<string, string>>({});
+  const [f, setF] = useState<Partial<Record<FKey, string>>>({});
   const [sending, setSending] = useState(false);
   const iso = (v?: string) => (v ? new Date(`${v}:00+06:00`).toISOString() : null);
 
@@ -249,7 +251,7 @@ function MyRequests({ requests, sessions }: { requests: Overview["requests"]; se
     } catch (e) { toast.error(errMsg(e)); } finally { setSending(false); }
   };
 
-  const field = (k: string, label: string, t = "text") => (
+  const field = (k: FKey, label: string, t = "text") => (
     <div className="space-y-1"><Label htmlFor={`r-${k}`}>{label}</Label><Input id={`r-${k}`} type={t} value={f[k] ?? ""} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></div>
   );
 
