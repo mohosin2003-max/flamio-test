@@ -44,7 +44,7 @@ function OwnerAttendance() {
   const queryClient = useQueryClient();
   const getOverview = useServerFn(ownerGetAttendanceOverview);
   const updateSettings = useServerFn(ownerUpdateAttendanceSettings);
-  const [settingsForm, setSettingsForm] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true });
+  const [settingsForm, setSettingsForm] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true, geofenceEnabled: false, qrVerificationEnabled: false, selfieVerificationEnabled: false, attendanceAlertsEnabled: false });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const overview = useQuery({
@@ -55,7 +55,7 @@ function OwnerAttendance() {
   const settings = overview.data?.settings;
   useEffect(() => {
     if (settings && !settingsLoaded) {
-      setSettingsForm({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in });
+      setSettingsForm({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in, geofenceEnabled: settings.geofence_enabled, qrVerificationEnabled: settings.qr_verification_enabled, selfieVerificationEnabled: settings.selfie_verification_enabled, attendanceAlertsEnabled: settings.attendance_alerts_enabled });
       setSettingsLoaded(true);
     }
   }, [settings, settingsLoaded]);
@@ -119,6 +119,10 @@ function OwnerAttendance() {
               <Setting label="Minimum punch gap" value={`${settings.min_punch_gap_seconds} seconds`} />
               <Setting label="Maximum session" value={`${settings.max_session_hours} hours`} />
               <Setting label="Unscheduled clock-in" value={settings.allow_unscheduled_clock_in ? "Allowed" : "Not allowed"} />
+              <Setting label="GPS geofence" value={settings.geofence_enabled ? "Enabled" : "Disabled"} />
+              <Setting label="QR verification" value={settings.qr_verification_enabled ? "Enabled" : "Disabled"} />
+              <Setting label="Selfie verification" value={settings.selfie_verification_enabled ? "Enabled" : "Disabled"} />
+              <Setting label="Attendance alerts" value={settings.attendance_alerts_enabled ? "Enabled" : "Disabled"} />
             </div>
           ) : <p className="text-sm text-muted-foreground">No settings row found.</p>}
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); setSettingsBusy(true); void updateSettings({ data: { timezone: "Asia/Dhaka", ...settingsForm } }).then(async () => { await queryClient.invalidateQueries({ queryKey: ["owner-attendance-overview"] }); toast.success("Attendance settings saved"); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not save settings")).finally(() => setSettingsBusy(false)); }}>
@@ -127,9 +131,13 @@ function OwnerAttendance() {
             <div className="space-y-1"><Label htmlFor="punch-gap">Minimum punch gap (seconds)</Label><Input id="punch-gap" type="number" min={10} max={3600} value={settingsForm.minPunchGapSeconds} onChange={(e) => setSettingsForm((old) => ({ ...old, minPunchGapSeconds: Number(e.target.value) }))} /></div>
             <div className="space-y-1"><Label htmlFor="max-session">Maximum session (hours)</Label><Input id="max-session" type="number" min={1} max={24} value={settingsForm.maxSessionHours} onChange={(e) => setSettingsForm((old) => ({ ...old, maxSessionHours: Number(e.target.value) }))} /></div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.allowUnscheduledClockIn} onChange={(e) => setSettingsForm((old) => ({ ...old, allowUnscheduledClockIn: e.target.checked }))} /> Allow clock-in without a scheduled shift</label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.geofenceEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, geofenceEnabled: e.target.checked }))} /> Require GPS geofence at clock-in (stations need coordinates)</label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.qrVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, qrVerificationEnabled: e.target.checked }))} /> Require a single-use station QR token at clock-in (issuance UI still under development)</label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.selfieVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, selfieVerificationEnabled: e.target.checked }))} /> Selfie verification switch (not functional until identity verification is implemented)</label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.attendanceAlertsEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, attendanceAlertsEnabled: e.target.checked }))} /> Attendance notification switch (delivery wiring still incomplete)</label>
             <Button type="submit" disabled={settingsBusy} className="sm:col-span-2">{settingsBusy ? "Saving…" : "Save attendance settings"}</Button>
           </form>
-          <p className="text-xs text-muted-foreground">Owner-only server check is enforced. The separate TEST database RLS policy correction is still a pending, unexecuted SQL draft.</p>
+          <p className="text-xs text-muted-foreground">Owner-only server authorization and TEST database RLS are enforced. GPS/QR checks run only when enabled; configure station coordinates first. Selfie and notification delivery are not yet end-to-end.</p>
         </CardContent>
       </Card>
 
