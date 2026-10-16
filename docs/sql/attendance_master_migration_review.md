@@ -1,6 +1,6 @@
 # FLAMIO ATTENDANCE MASTER — TEST Migration Review
 
-**Status: Three TEST-only security/verification migrations applied; complete feature release remains blocked.**  
+**Status: Four TEST-only security/verification/workflow migrations applied; complete feature release remains blocked.**  
 **Target:** TEST project `avwrptztixaketchgmsh` only.  
 **Production project `wubsldblxvkusauafwfd`: explicitly out of scope.**
 
@@ -16,8 +16,10 @@
    - Revokes PUBLIC/anon EXECUTE on `attendance_is_manager(uuid)` and `attendance_is_member(uuid)`, retaining authenticated/service_role access.
 3. `20261016140000_attendance_qr_station_binding.sql`
    - Changes the QR consume RPC to bind consumption to an expected station ID and reject wrong-station tokens before marking them consumed.
+4. `20261016150000_attendance_request_review_service_bridge.sql`
+   - Adds a service-role-only bridge that verifies the supplied actor is an Owner, sets the Owner claim transaction-locally, and invokes the existing transactional request-review function so approved leave, missed-punch, correction and overtime requests use the database's validation/application logic.
 
-Supabase migration history confirms all three migration records exist in TEST. Read-only checks after the first two migrations confirmed the Owner-only policy, new columns, QR challenge table and explicit helper ACL/search_path. The final station-binding migration applied successfully. No attendance-session data was deleted; no retention scheduler, app deployment, PR merge or Production mutation occurred.
+Supabase migration history confirms all four migration records exist in TEST. Read-only checks after the first two migrations confirmed the Owner-only policy, new columns, QR challenge table and explicit helper ACL/search_path. The final station-binding migration applied successfully. No attendance-session data was deleted; no retention scheduler, app deployment, PR merge or Production mutation occurred.
 
 ## Application integration added after the schema migration
 
