@@ -111,7 +111,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
-      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled")
+      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
     const now = new Date();
@@ -203,7 +203,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
       throw new Error("Clock-in failed. Please refresh and try again.");
     }
     await audit(db, { tableName: "attendance_sessions", rowId: session.id, action: "clock_in", actorId: context.userId, subjectUserId: context.userId, newData: session });
-    if (lateMinutes > 0) {
+    if (lateMinutes > 0 && settings.attendance_alerts_enabled) {
       const { sendLateArrivalAlert } = await import("@/lib/attendance-push.server");
       await sendLateArrivalAlert({ sessionId: session.id, userId: context.userId, minutesLate: lateMinutes });
     }
@@ -335,8 +335,13 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
     }).select("id, request_type, status, created_at").single();
     if (error || !request) throw new Error("Could not submit attendance request.");
     await audit(db, { tableName: "attendance_requests", rowId: request.id, action: "request_created", actorId: context.userId, subjectUserId: context.userId, newData: request });
-    const { sendPendingRequestAlert } = await import("@/lib/attendance-push.server");
-    await sendPendingRequestAlert({ requestId: request.id, userId: context.userId, requestType: request.request_type });
+    const { data: notificationSettings, error: notificationSettingsError } = await db.from("attendance_settings")
+      .select("attendance_alerts_enabled").eq("id", true).maybeSingle();
+    if (notificationSettingsError) console.error("Attendance alert setting lookup failed", notificationSettingsError.message);
+    if (notificationSettings?.attendance_alerts_enabled) {
+      const { sendPendingRequestAlert } = await import("@/lib/attendance-push.server");
+      await sendPendingRequestAlert({ requestId: request.id, userId: context.userId, requestType: request.request_type });
+    }
     return { ok: true, request };
   });
 
@@ -372,14 +377,19 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
     if (error) throw new Error("Could not review attendance request.");
     if (!updated) throw new Error("This request has already been reviewed.");
     await audit(db, { tableName: "attendance_requests", rowId: current.id, action: data.decision, actorId: context.userId, subjectUserId: current.user_id, oldData: current, newData: { status: data.decision, reviewedAt: now, reviewNote: data.reviewNote ?? null } });
-    const { sendRequestDecisionAlert } = await import("@/lib/attendance-push.server");
-    await sendRequestDecisionAlert({
-      requestId: current.id,
-      userId: current.user_id,
-      requestType: current.request_type,
-      approved: data.decision === "approved",
-      note: data.reviewNote ?? null,
-    });
+    const { data: notificationSettings, error: notificationSettingsError } = await db.from("attendance_settings")
+      .select("attendance_alerts_enabled").eq("id", true).maybeSingle();
+    if (notificationSettingsError) console.error("Attendance alert setting lookup failed", notificationSettingsError.message);
+    if (notificationSettings?.attendance_alerts_enabled) {
+      const { sendRequestDecisionAlert } = await import("@/lib/attendance-push.server");
+      await sendRequestDecisionAlert({
+        requestId: current.id,
+        userId: current.user_id,
+        requestType: current.request_type,
+        approved: data.decision === "approved",
+        note: data.reviewNote ?? null,
+      });
+    }
     return { ok: true };
   });
 
