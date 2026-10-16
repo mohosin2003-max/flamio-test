@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -13,6 +14,16 @@ async function dbForUser(userId: string) {
   }
   const { untypedAdmin } = await import("@/lib/untyped-db.server");
   return { access, db: await untypedAdmin() };
+}
+
+function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadiusMeters = 6_371_000;
+  const dLat = radians(lat2 - lat1);
+  const dLon = radians(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLon / 2) ** 2;
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function localDateDhaka(value = new Date()) {
@@ -47,7 +58,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const [settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult] = await Promise.all([
       db.from("attendance_settings")
-        .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in")
+        .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled")
         .eq("id", true).maybeSingle(),
       db.from("attendance_sessions")
         .select("id, shift_id, duty_date, clock_in_at, clock_out_at, break_minutes, worked_minutes, late_minutes, status, verification_status")
@@ -95,12 +106,12 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
 
 export const staffClockIn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema }).parse(input))
+  .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema, latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), accuracyMeters: z.number().min(0).max(1000).optional(), qrToken: z.string().trim().min(32).max(512).optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
-      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in")
+      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
     const now = new Date();
@@ -119,10 +130,10 @@ export const staffClockIn = createServerFn({ method: "POST" })
         throw new Error("Please wait before punching again.");
       }
     }
-    let shift: { id: string; shift_date: string; starts_at: string; ends_at: string; status: string } | null = null;
+    let shift: { id: string; shift_date: string; starts_at: string; ends_at: string; status: string; station_id?: string | null } | null = null;
     if (data.shiftId) {
       const { data: shiftRow, error } = await db.from("attendance_shifts")
-        .select("id, shift_date, starts_at, ends_at, status").eq("id", data.shiftId)
+        .select("id, shift_date, starts_at, ends_at, status, station_id").eq("id", data.shiftId)
         .eq("user_id", context.userId).maybeSingle();
       if (error || !shiftRow) throw new Error("The selected shift was not found.");
       if (shiftRow.status !== "scheduled") throw new Error("This shift is not available for clock-in.");
@@ -136,7 +147,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
     } else {
       const today = localDateDhaka(now);
       const { data: todaysShift, error } = await db.from("attendance_shifts")
-        .select("id, shift_date, starts_at, ends_at, status").eq("user_id", context.userId)
+        .select("id, shift_date, starts_at, ends_at, status, station_id").eq("user_id", context.userId)
         .eq("shift_date", today).eq("status", "scheduled").order("starts_at").limit(1);
       if (error) throw new Error("Could not check your schedule.");
       if (todaysShift?.[0] && Date.parse(nowIso) <= Date.parse(todaysShift[0].ends_at)) {
@@ -146,6 +157,40 @@ export const staffClockIn = createServerFn({ method: "POST" })
         shift = todaysShift[0];
       }
     }
+    if (settings.geofence_enabled) {
+      if (data.latitude === undefined || data.longitude === undefined || data.accuracyMeters === undefined) {
+        throw new Error("Location permission is required because the Owner enabled the attendance geofence.");
+      }
+      if (data.accuracyMeters > 50) {
+        throw new Error("GPS accuracy is too low. Move to an open area and try again.");
+      }
+      if (!shift?.station_id) {
+        throw new Error("A station-linked shift is required while geofence verification is enabled.");
+      }
+      const { data: station, error: stationError } = await db.from("attendance_stations")
+        .select("latitude, longitude, geofence_radius_meters, is_active")
+        .eq("id", shift.station_id).maybeSingle();
+      if (stationError || !station || !station.is_active
+        || station.latitude === null || station.latitude === undefined
+        || station.longitude === null || station.longitude === undefined) {
+        throw new Error("The selected shift's station has no active geofence configured.");
+      }
+      const distance = distanceMeters(data.latitude, data.longitude, Number(station.latitude), Number(station.longitude));
+      if (!Number.isFinite(distance) || distance > Number(station.geofence_radius_meters)) {
+        throw new Error("You are outside the permitted attendance geofence.");
+      }
+    }
+
+    if (settings.qr_verification_enabled) {
+      if (!data.qrToken) throw new Error("The Owner enabled QR verification. Scan a valid station QR before clocking in.");
+      const tokenHash = createHash("sha256").update(data.qrToken, "utf8").digest("hex");
+      const { data: consumed, error: qrError } = await db.rpc("attendance_consume_qr_challenge", { _token_hash: tokenHash });
+      if (qrError || !Array.isArray(consumed) || consumed.length !== 1 || consumed[0]?.station_id !== shift?.station_id) {
+        console.error("Attendance QR verification failed", qrError?.message ?? "Invalid station or consumed challenge");
+        throw new Error("QR verification failed. Scan a fresh QR code for your assigned station.");
+      }
+    }
+
     const dutyDate = shift?.shift_date ?? localDateDhaka(now);
     const lateMinutes = shift ? Math.max(0, Math.floor((now.getTime() - Date.parse(shift.starts_at) - Number(settings.late_grace_minutes) * 60000) / 60000)) : 0;
     const { data: session, error: insertError } = await db.from("attendance_sessions").insert({
