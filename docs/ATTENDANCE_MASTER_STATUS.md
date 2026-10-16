@@ -92,22 +92,26 @@ The draft covers:
 
 ## 5. Changes made in this review
 
-- Added `docs/sql/attendance_review_draft_v2.sql` as a commented, review-only proposal. It contains no active SQL statements and has not been executed.
+- Added `docs/sql/attendance_review_draft_v2.sql` as a commented, review-only proposal. It has not been executed.
 - Added this status report at `docs/ATTENDANCE_MASTER_STATUS.md`.
-- No application source files were modified in this review because the expected staff duty route and several claimed server-function signatures could not be verified in the target branch. Creating navigation links without a confirmed route or wiring push calls to unverified functions would risk breaking the app.
+- Added permission-gated “My duty” navigation to `src/components/layout/StaffBottomNav.tsx`, linking to the verified route `/attendance` (not the non-existent `/owner/duty`).
+- Updated Attendance-related Owner shell tab permissions in `src/routes/_authenticated/owner.tsx` to use `attendance_management`. The routes retain the existing owner-only guard because the underlying server functions are owner-only; manager access is not claimed.
+- Fixed the conditional React hook ordering in `src/routes/_authenticated/owner.attendance.tsx` by moving the settings effect before early returns.
+- Changed the owner overview refresh to 30 seconds and added navigation links to the existing Stations & Shifts and Tasks & Requests workspaces.
+- Added `src/lib/attendance-push.server.ts` with best-effort late-arrival, pending-request, and request-decision notifications using the existing push infrastructure and stable dedupe keys.
+- Wired best-effort alerts after successful clock-in/request creation/request review in `src/lib/attendance-workflow.functions.ts`. Request review now checks that its conditional update returned a row, to avoid reporting a duplicate review as successful.
+- No database schema or application data was changed. No application build/test command could be run from the GitHub file-editing environment.
 
 ## 6. Outstanding work
 
-1. Add My Duty navigation with the actual route and correct permission gating; verify the route exists in the current branch before linking it.
-2. Replace/extend the existing Owner Attendance page with the required six-tab dashboard only after locating and verifying all real server-function signatures and database column names.
-3. Review owner-shell access gating: managers should not gain owner-only controls, and adding a manager tab must not be blocked by an owner-only shell gate.
-4. Locate or reconcile the existing staff duty route; do not assume `owner.duty.tsx` exists because it was described in a prior report.
-5. Implement attendance push dispatch only after confirming event mutation call sites, notification schema constraints, dedupe-key behavior, and role recipients.
-6. Validate request approval against an authenticated TEST staff account and manager/owner account; prove that database-side session/break updates happen atomically before claiming approval reconciliation works.
-7. Run typecheck, lint, tests, and production build in the project workspace and attach exact outputs.
-8. Perform role-based end-to-end checks: staff self-only data access, manager permitted actions, owner-only settings, duplicate approval prevention, GPS stale/accuracy handling, and push behavior.
-9. Keep the pull request Draft and unmerged until the owner explicitly authorizes further release steps.
+1. The staff page is currently `/attendance`; it is linked from the bottom navigation. The earlier requested `/owner/duty` route does not exist in the inspected branch.
+2. The Owner Attendance page is still a summary/settings page with links to existing Stations & Shifts and Tasks & Requests routes; it is not yet a single six-tab dashboard. The existing management/workflow routes are owner-only in their server functions.
+3. Verify notification table constraints and delivery behavior in CI/runtime. Push dispatch is best-effort; it is not proof of delivery, and background audio cannot be guaranteed.
+4. Validate request approval against authenticated TEST staff/owner accounts. The current request-review function updates request status; this review did not establish that correction/missed-punch approval atomically updates session/break records.
+5. Run typecheck, lint, tests, and production build in the project workspace and attach exact outputs.
+6. Perform role-based end-to-end checks: staff self-only data access, owner-only settings, duplicate approval prevention, GPS stale/accuracy handling, and push behavior.
+7. Keep the pull request Draft and unmerged until the owner explicitly authorizes further release steps.
 
 ## 7. Release assessment
 
-**Not production-ready.** This inspection found a partially implemented Attendance overview and missing navigation integration. Runtime behavior, approval-trigger reconciliation, push delivery, role-based end-to-end access, and all requested build checks remain unverified. No destructive retention workflow should be enabled.
+**Not production-ready.** Navigation and best-effort push hooks have been added, and the existing schedule/task/request routes are linked from the overview. Runtime behavior, approval-trigger reconciliation, notification delivery, role-based end-to-end access, and all build checks remain unverified. No destructive retention workflow should be enabled.
