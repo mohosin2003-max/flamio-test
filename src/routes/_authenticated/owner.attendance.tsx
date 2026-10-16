@@ -74,7 +74,8 @@ function OwnerAttendance() {
     );
   }
 
-  const { sessions, tasks } = overview.data;
+  const sessions: { id: string; staffName: string; clockOutAt: string | null; lateMinutes: number; status: string; clockInAt: string; dutyDate: string; workedMinutes: number; verificationStatus: string }[] = overview.data.sessions;
+  const tasks: { id: string; title: string; staffName: string; dueDate: string; dueAt: string | null; priority: string; status: string; completedAt: string | null }[] = overview.data.tasks;
   const openSessions = sessions.filter((session) => !session.clockOutAt);
   const lateSessions = sessions.filter((session) => session.lateMinutes > 0);
   const pendingTasks = tasks.filter((task) => !["completed", "verified", "cancelled"].includes(task.status));
