@@ -26,10 +26,12 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      # TanStack Router generates the file-route type map during the Vite build.
+      # Build first so TypeScript checks against the current route tree.
+      - name: Build and generate route types
+        run: npm run build
       - name: TypeScript check
         run: npx tsc --noEmit
-      - name: Build
-        run: npm run build
       - name: Lint attendance implementation
         run: >-
           npx eslint
