@@ -1,6 +1,6 @@
 # FLAMIO ATTENDANCE MASTER — Implementation Status & Release Gate
 
-**Updated:** 2026-10-16 (TEST geofence/QR integration and security follow-up)  
+**Updated:** 2026-10-16 (TEST geofence/QR and transactional request-review integration)  
 **Decision:** INCOMPLETE — do not merge or deploy  
 **Repository:** `mohosin2003-max/flamio-test`  
 **Branch:** `feature/attendance-master-safe`  
@@ -20,13 +20,15 @@
 - TEST-only migration `20261016120000_attendance_security_verification_extension.sql` applied: Owner-only settings policy, phone-free team directory RPC, verification settings, station geofence columns, QR challenge storage and initial atomic consume RPC.
 - TEST-only migration `20261016130000_attendance_helper_acl_hardening.sql` applied: fixed search_path for timestamp helpers and removed PUBLIC/anon execution from manager/member helpers.
 - TEST-only migration `20261016140000_attendance_qr_station_binding.sql` applied: binds QR challenge consumption to the expected station.
-- Supabase migration history confirms all three migrations are recorded in TEST. No attendance-session data deletion, retention scheduler, deployment, PR merge or Production mutation occurred.
+- TEST-only migration `20261016150000_attendance_request_review_service_bridge.sql` applied: adds a service-role-only, Owner-verified bridge to the existing transactional request-review function, so approved leave/missed-punch/correction/overtime requests are applied through the database's validation logic.
+- The bridge's negative authorization check was exercised with a random non-Owner ID and correctly rejected it before any request mutation.
+- Supabase migration history confirms all four migrations are recorded in TEST. No attendance-session data deletion, retention scheduler, deployment, PR merge or Production mutation occurred.
 - PR #1 remains Draft and unmerged.
 
 ## CI verification
 
 - Earlier commit `df868a927050360346932765645c50028ca89be8` passed dependency install, build/route generation, TypeScript check and scoped ESLint.
-- Latest implementation commits add Owner switches, station coordinates, QR rendering/issuance, geofence/QR clock-in enforcement, and notification toggle handling. Current-head CI runs are pending/in progress; do not claim those later changes are build-verified until the latest run finishes successfully.
+- Latest implementation commits add Owner switches, station coordinates, QR rendering/issuance, geofence/QR clock-in enforcement, and notification toggle handling. GitHub Actions run [Attendance branch validation](https://github.com/mohosin2003-max/flamio-test/actions/runs/38872233850) completed successfully for commit `169705fd0cc9620ac5faf4e5d0e40dde22e3ddb5`: dependency install, build/route generation, TypeScript check and scoped ESLint all passed.
 - Security advisor after the first migrations still reports the intentionally policy-less QR table (direct client access is revoked), 18 authenticated-callable SECURITY DEFINER functions needing a full authorization review, and Supabase Auth leaked-password protection not enabled. Two mutable-search-path warnings were addressed; the full advisor must be rechecked after current migrations.
 
 ## Remaining release blockers
