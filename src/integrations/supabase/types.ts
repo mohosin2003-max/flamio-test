@@ -2023,6 +2023,7 @@ export type Database = {
       }
       staff_permissions: {
         Row: {
+          access_level: string
           created_at: string
           id: string
           permission: string
@@ -2030,6 +2031,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          access_level?: string
           created_at?: string
           id?: string
           permission: string
@@ -2037,13 +2039,22 @@ export type Database = {
           user_id: string
         }
         Update: {
+          access_level?: string
           created_at?: string
           id?: string
           permission?: string
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "staff_permissions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       staff_salary_profiles: {
         Row: {
