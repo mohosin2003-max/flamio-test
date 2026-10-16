@@ -1,0 +1,193 @@
+-- FLAMIO ATTENDANCE MASTER — REVIEW-ONLY DRAFT v2
+-- STATUS: NOT EXECUTED. Do not paste this file into the Supabase SQL Editor as a whole.
+-- Target intended for later review only: TEST project avwrptztixaketchgmsh.
+-- Production project wubsldblxvkusauafwfd is strictly out of scope.
+--
+-- IMPORTANT:
+-- 1) Verify exact existing policy names, has_role signature/ownership, table columns,
+--    grants, RLS policies, and dependencies against the TEST schema before applying.
+-- 2) This draft is intentionally non-runnable by default: every proposed SQL statement
+--    below is commented out. Remove comments only after independent review and approval.
+-- 3) The rollback section is a TEMPLATE, not a guarantee of full rollback. Adding columns
+--    or tables can become destructive if they acquire data after application.
+-- 4) Do not enable/schedule any retention deletion job. This draft only proposes counts.
+--
+-- ---------------------------------------------------------------------------
+-- A. OWNER-ONLY ATTENDANCE SETTINGS POLICY (PROPOSAL)
+-- ---------------------------------------------------------------------------
+-- First inspect policies:
+-- SELECT schemaname, tablename, policyname, roles, cmd, qual, with_check
+-- FROM pg_policies
+-- WHERE schemaname = 'public' AND tablename = 'attendance_settings';
+--
+-- Verify whether public.has_role(uuid, public.app_role) is the actual signature:
+-- SELECT p.oid::regprocedure, p.prosecdef, p.proowner::regrole
+-- FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+-- WHERE n.nspname = 'public' AND p.proname = 'has_role';
+--
+-- Proposed change only after policy/dependency review:
+-- BEGIN;
+-- DROP POLICY IF EXISTS attendance_settings_manager_update ON public.attendance_settings;
+-- CREATE POLICY attendance_settings_owner_update
+--   ON public.attendance_settings
+--   FOR UPDATE TO authenticated
+--   USING (public.has_role(auth.uid(), 'owner'::public.app_role))
+--   WITH CHECK (public.has_role(auth.uid(), 'owner'::public.app_role));
+-- COMMIT;
+--
+-- Do not apply this if the enum type, function signature, existing policy strategy, or
+-- ownership model differs. Confirm that the server-side owner check remains in place.
+--
+-- ---------------------------------------------------------------------------
+-- B. HAS_ROLE EXECUTE PRIVILEGES (HIGH-RISK PROPOSAL)
+-- ---------------------------------------------------------------------------
+-- Do not revoke privileges until every policy/function dependency has been inventoried.
+-- A blanket revoke can break authenticated RLS policies and application functions.
+-- Inspect effective grants first:
+-- SELECT routine_schema, routine_name, grantee, privilege_type
+-- FROM information_schema.routine_privileges
+-- WHERE routine_schema = 'public' AND routine_name = 'has_role';
+--
+-- Only if the exact function signature and dependency audit confirm safety:
+-- REVOKE EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) FROM PUBLIC, anon;
+-- GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated, service_role;
+--
+-- Validate anonymous invocation is denied and required authenticated policies still work.
+-- Do not assume revoking PUBLIC is harmless: verify function grants and RLS behavior.
+--
+-- ---------------------------------------------------------------------------
+-- C. OPTIONAL STATION GEOFENCE COLUMNS (PROPOSAL)
+-- ---------------------------------------------------------------------------
+-- Inspect current columns/constraints first. Choose types and constraints to match the app.
+-- BEGIN;
+-- ALTER TABLE public.attendance_stations
+--   ADD COLUMN IF NOT EXISTS latitude numeric(10,7),
+--   ADD COLUMN IF NOT EXISTS longitude numeric(10,7),
+--   ADD COLUMN IF NOT EXISTS geofence_radius_meters integer NOT NULL DEFAULT 100;
+-- ALTER TABLE public.attendance_stations
+--   ADD CONSTRAINT attendance_stations_latitude_range
+--     CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90) NOT VALID;
+-- ALTER TABLE public.attendance_stations
+--   ADD CONSTRAINT attendance_stations_longitude_range
+--     CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180) NOT VALID;
+-- ALTER TABLE public.attendance_stations
+--   ADD CONSTRAINT attendance_stations_geofence_radius_range
+--     CHECK (geofence_radius_meters BETWEEN 10 AND 5000) NOT VALID;
+-- COMMIT;
+--
+-- Validate existing rows before VALIDATE CONSTRAINT. Default radius is a proposal only;
+-- Owner-configurable radius and server-side freshness/accuracy checks are still required.
+--
+-- ---------------------------------------------------------------------------
+-- D. SINGLE-USE QR CHALLENGES (PROPOSAL — RLS DESIGN REQUIRED BEFORE APPLYING)
+-- ---------------------------------------------------------------------------
+-- Do not expose challenge tokens through broad SELECT grants. Prefer server-only
+-- issuance/consumption functions with strict owner/staff authorization and atomic UPDATE.
+-- BEGIN;
+-- CREATE TABLE IF NOT EXISTS public.attendance_qr_challenges (
+--   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+--   station_id uuid NOT NULL REFERENCES public.attendance_stations(id) ON DELETE CASCADE,
+--   token_hash text NOT NULL UNIQUE,
+--   expires_at timestamptz NOT NULL,
+--   consumed_at timestamptz,
+--   consumed_by uuid REFERENCES auth.users(id),
+--   created_at timestamptz NOT NULL DEFAULT now(),
+--   CONSTRAINT attendance_qr_challenges_expiry_after_creation
+--     CHECK (expires_at > created_at),
+--   CONSTRAINT attendance_qr_challenges_consumption_pair
+--     CHECK ((consumed_at IS NULL AND consumed_by IS NULL)
+--         OR (consumed_at IS NOT NULL AND consumed_by IS NOT NULL))
+-- );
+-- ALTER TABLE public.attendance_qr_challenges ENABLE ROW LEVEL SECURITY;
+-- REVOKE ALL ON TABLE public.attendance_qr_challenges FROM PUBLIC, anon, authenticated;
+-- -- Add no direct authenticated table grants unless a reviewed policy requires them.
+-- -- The raw token must be cryptographically random and shown only at issuance.
+-- -- Store a hash, use a short expiry (e.g. 60 seconds), and atomically consume:
+-- -- UPDATE ... SET consumed_at = now(), consumed_by = auth.uid()
+-- -- WHERE token_hash = ... AND expires_at > now() AND consumed_at IS NULL
+-- -- RETURNING station_id; exactly one row must be returned to succeed.
+-- COMMIT;
+--
+-- A schema-only table does not implement QR verification. A reviewed server-side
+-- atomic consume function and replay/expiry tests are prerequisites.
+--
+-- ---------------------------------------------------------------------------
+-- E. NON-DESTRUCTIVE RETENTION PREVIEW (PROPOSAL)
+-- ---------------------------------------------------------------------------
+-- Security review is required before adding any SECURITY DEFINER function.
+-- The function must use a fixed search_path, explicit authorization, bounded _days,
+-- and must never DELETE, UPDATE, archive, or schedule a job.
+--
+-- CREATE OR REPLACE FUNCTION public.attendance_preview_retention_cleanup(_days integer DEFAULT 30)
+-- RETURNS TABLE (closed_sessions_past_cutoff bigint, audit_entries_past_cutoff bigint)
+-- LANGUAGE plpgsql
+-- SECURITY DEFINER
+-- SET search_path = pg_catalog, public
+-- AS $function$
+-- DECLARE
+--   cutoff_at timestamptz;
+-- BEGIN
+--   IF auth.uid() IS NULL OR NOT public.has_role(auth.uid(), 'owner'::public.app_role) THEN
+--     RAISE EXCEPTION 'Forbidden' USING ERRCODE = '42501';
+--   END IF;
+--   IF _days < 1 OR _days > 365 THEN
+--     RAISE EXCEPTION '_days must be between 1 and 365';
+--   END IF;
+--   cutoff_at := now() - make_interval(days => _days);
+--   RETURN QUERY
+--     SELECT
+--       (SELECT count(*) FROM public.attendance_sessions s
+--        WHERE s.status = 'closed' AND s.clock_out_at < cutoff_at),
+--       (SELECT count(*) FROM public.attendance_audit_log a
+--        WHERE a.created_at < cutoff_at);
+-- END;
+-- $function$;
+-- REVOKE ALL ON FUNCTION public.attendance_preview_retention_cleanup(integer) FROM PUBLIC, anon;
+-- GRANT EXECUTE ON FUNCTION public.attendance_preview_retention_cleanup(integer) TO authenticated;
+--
+-- Verify actual status values and timestamps before using this proposal. Counting old audit
+-- rows does not authorize deletion; retention policy/legal requirements need separate review.
+--
+-- ---------------------------------------------------------------------------
+-- F. VALIDATION QUERIES (READ-ONLY PROPOSALS)
+-- ---------------------------------------------------------------------------
+-- SELECT column_name, data_type, is_nullable
+-- FROM information_schema.columns
+-- WHERE table_schema = 'public'
+--   AND table_name IN ('attendance_settings','attendance_stations','attendance_sessions',
+--                      'attendance_breaks','attendance_requests','attendance_audit_log')
+-- ORDER BY table_name, ordinal_position;
+--
+-- SELECT schemaname, tablename, policyname, roles, cmd, qual, with_check
+-- FROM pg_policies
+-- WHERE schemaname = 'public' AND tablename LIKE 'attendance_%'
+-- ORDER BY tablename, policyname;
+--
+-- SELECT to_regclass('public.attendance_qr_challenges') AS qr_table_exists,
+--        to_regprocedure('public.attendance_preview_retention_cleanup(integer)') AS preview_function_exists;
+--
+-- ---------------------------------------------------------------------------
+-- G. ROLLBACK TEMPLATE — DO NOT RUN WITHOUT REVIEW
+-- ---------------------------------------------------------------------------
+-- Rollback depends on what was actually applied and whether new data exists.
+-- If a proposed policy was applied, restore the exact prior policy definition from a
+-- captured pre-change schema snapshot; do not guess it.
+--
+-- BEGIN;
+-- DROP POLICY IF EXISTS attendance_settings_owner_update ON public.attendance_settings;
+-- -- Re-create the prior policy only from the verified pre-change definition.
+-- DROP FUNCTION IF EXISTS public.attendance_preview_retention_cleanup(integer);
+-- DROP TABLE IF EXISTS public.attendance_qr_challenges;
+-- ALTER TABLE public.attendance_stations
+--   DROP CONSTRAINT IF EXISTS attendance_stations_latitude_range,
+--   DROP CONSTRAINT IF EXISTS attendance_stations_longitude_range,
+--   DROP CONSTRAINT IF EXISTS attendance_stations_geofence_radius_range;
+-- -- Drop added columns only if they were added by this migration, have no needed data,
+-- -- and the owner explicitly approves data loss:
+-- -- ALTER TABLE public.attendance_stations
+-- --   DROP COLUMN IF EXISTS latitude,
+-- --   DROP COLUMN IF EXISTS longitude,
+-- --   DROP COLUMN IF EXISTS geofence_radius_meters;
+-- COMMIT;
+--
+-- END STATUS: REVIEW-ONLY. No SQL has been executed and no database state was changed.
