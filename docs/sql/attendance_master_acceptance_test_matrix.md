@@ -1,7 +1,15 @@
 # FLAMIO ATTENDANCE MASTER — Acceptance & Regression Test Matrix
 
-Status: planning artifact only. These tests have **not** been executed against Supabase.
+Status: acceptance plan only; role-matrix and end-to-end tests have **not** been executed against Supabase.
 Target environment: TEST project `avwrptztixaketchgmsh` only. Never run against Production.
+
+## Current implementation state (2026-10-16)
+- Three TEST-only migrations are applied: security/verification extension, helper ACL/search_path hardening, station-bound QR consumption.
+- Owner-only settings RLS, geofence settings/station coordinates, single-use QR challenge storage, and request-review service bridge are present in TEST.
+- Owner UI supports geofence/QR/selfie/alert switches, station coordinates/radius, and one-time QR generation.
+- Staff clock-in validates geofence and consumes a station-bound QR token when the relevant switches are enabled.
+- Owner request review now delegates to the database's transactional request-review logic so approved leave, missed-punch, correction and overtime flows are applied by that function.
+- Earlier CI passed; current-head CI after the latest code changes is still pending/in progress. Do not treat the build gate as passed until the latest commit's run succeeds.
 
 ## Gate 0 — Environment and schema (must pass before feature work)
 - [ ] Confirm active Supabase project ref is exactly `avwrptztixaketchgmsh`.
@@ -9,7 +17,7 @@ Target environment: TEST project `avwrptztixaketchgmsh` only. Never run against 
 - [ ] Compare live TEST schema to `attendance_master_schema.sql` and `attendance_master_additive_extension.sql`.
 - [ ] Confirm existing Owner role model and auth middleware are unchanged.
 - [ ] Stop if any dependency differs; do not auto-alter identity tables/functions.
-- [ ] Apply migration only after a separate approval, then verify all objects and re-run migration validation in an isolated clone first.
+- [x] TEST migrations applied and core schema/policy/function objects verified read-only. Isolated-clone clean-install/re-run testing remains outstanding.
 
 ## Gate 1 — Build and static checks
 - [ ] `npm run build` passes on the current branch.
@@ -77,10 +85,12 @@ Target environment: TEST project `avwrptztixaketchgmsh` only. Never run against 
 - [ ] PR remains Draft until user approves readiness; do not merge or deploy without explicit approval.
 
 ## Known current blockers
-1. No confirmed direct TEST Supabase connection/read-only schema output is available in this workflow.
-2. The existing core SQL is a review draft and has not been proven compatible with the actual TEST schema.
-3. The feature-extension SQL is also review-only; its policies, grants, extension availability and table compatibility need a real schema diff.
-4. Push subscription delivery, geofence checks, ephemeral selfie verification, QR consumption, and scheduled retention are not yet integrated end-to-end.
-5. CI logs for the latest branch head have not been confirmed by the available GitHub status response. A prior Build passed, but that does not certify the current full feature set.
+1. No real Owner/Admin/Staff account acceptance matrix has been executed; direct RLS, row isolation and SECURITY DEFINER grants still require role-by-role verification.
+2. Current-head CI for the latest application changes is pending/in progress. Earlier build/TypeScript/scoped ESLint success does not certify the latest commit.
+3. Geofence and QR backend/UI integration exists but needs Android/browser real-device tests, QR expiry/replay/wrong-station/concurrency tests, and failure-path review.
+4. Selfie verification remains a switch only; there is no identity verification flow. Attendance push remains best-effort without delivery receipts/retries/loud alarm proof.
+5. Approved request application now calls a service-role-only wrapper around the existing transactional database function; test its actor claim handling and every request type with real TEST records.
+6. Recurring schedules/date overrides and the 30-day retention purge/scheduler remain incomplete. No attendance-session purge was created or run.
+7. Security Advisor still flags 18 authenticated-callable SECURITY DEFINER functions for review and Supabase Auth leaked-password protection as disabled; the policy-less QR table is intentionally closed to direct client access.
 
 No SQL, data mutation, deployment, or merge is authorized by this test plan.
