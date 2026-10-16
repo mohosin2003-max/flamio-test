@@ -17,7 +17,7 @@ import {
   ownerCreateAttendanceTask, ownerListAttendanceRequests, ownerReviewAttendanceRequest, ownerReviewAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
 
-export const Route = createFileRoute("/owner/attendance-workflow")({
+export const Route = createFileRoute("/_authenticated/owner/attendance-workflow")({
   head: () => ({ meta: [{ title: "Attendance Tasks & Requests — Flamio" }, { name: "robots", content: "noindex" }] }),
   component: AttendanceWorkflow,
 });
