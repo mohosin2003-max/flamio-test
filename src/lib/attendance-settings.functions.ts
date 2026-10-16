@@ -43,10 +43,10 @@ export const ownerUpdateAttendanceSettings = createServerFn({ method: "POST" })
     const { error: auditError } = await db.from("attendance_audit_log").insert({
       table_name: "attendance_settings",
       row_id: null,
-      action: "settings_updated",
+      action: "UPDATE",
       actor_id: context.userId,
       old_data: previous,
-      new_data: updated,
+      new_data: { ...updated, _attendance_event: "settings_updated" },
     });
     if (auditError) console.error("Attendance settings audit log failed", auditError.message);
     return { ok: true };
