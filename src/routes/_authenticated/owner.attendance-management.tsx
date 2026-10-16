@@ -34,6 +34,9 @@ function AttendanceManagement() {
   const cancelShift = useServerFn(ownerCancelAttendanceShift);
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
+  const [stationLatitude, setStationLatitude] = useState("");
+  const [stationLongitude, setStationLongitude] = useState("");
+  const [geofenceRadius, setGeofenceRadius] = useState("100");
   const [userId, setUserId] = useState("");
   const [stationId, setStationId] = useState("");
   const [shiftDate, setShiftDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }));
@@ -56,7 +59,7 @@ function AttendanceManagement() {
   if (query.isLoading) return <div className="space-y-3"><Skeleton className="h-32 w-full" /><Skeleton className="h-48 w-full" /></div>;
   if (query.error || !query.data) return <EmptyState title="Attendance management unavailable" description="Could not load staff schedules from the TEST database." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
 
-  const stations: { id: string; name: string; description: string | null; isActive: boolean; sortOrder: number }[] = query.data.stations;
+  const stations: { id: string; name: string; description: string | null; isActive: boolean; sortOrder: number; latitude: number | null; longitude: number | null; geofenceRadiusMeters: number }[] = query.data.stations;
   const shifts: { id: string; staffName: string; dutyRole: string | null; shiftDate: string; startTime: string; endTime: string; isOvernight: boolean; stationId: string | null; plannedBreakMinutes: number; status: string; notes: string | null }[] = query.data.shifts;
   const staff: { id: string; name: string }[] = query.data.staff;
   return <div className="space-y-5">
@@ -66,12 +69,15 @@ function AttendanceManagement() {
     </div>
     <Card><CardContent className="space-y-3 p-4">
       <h3 className="font-display font-bold">Stations / work areas</h3>
-      <form className="grid gap-3 sm:grid-cols-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await createStation({ data: { name: stationName, description: stationDescription.trim() || null } }); setStationName(""); setStationDescription(""); }, "Station created"); }}>
+      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (Boolean(stationLatitude.trim()) !== Boolean(stationLongitude.trim())) { toast.error("Enter both latitude and longitude, or leave both blank."); return; } void run(async () => { await createStation({ data: { name: stationName, description: stationDescription.trim() || null, latitude: stationLatitude.trim() ? Number(stationLatitude) : null, longitude: stationLongitude.trim() ? Number(stationLongitude) : null, geofenceRadiusMeters: Number(geofenceRadius) } }); setStationName(""); setStationDescription(""); setStationLatitude(""); setStationLongitude(""); }, "Station created"); }}>
         <div className="space-y-1"><Label htmlFor="station-name">Station name</Label><Input id="station-name" required minLength={2} maxLength={80} value={stationName} onChange={(e) => setStationName(e.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="station-description">Description (optional)</Label><Input id="station-description" maxLength={300} value={stationDescription} onChange={(e) => setStationDescription(e.target.value)} /></div>
+        <div className="space-y-1"><Label htmlFor="station-latitude">Latitude (optional, for GPS)</Label><Input id="station-latitude" type="number" step="any" min={-90} max={90} value={stationLatitude} onChange={(e) => setStationLatitude(e.target.value)} placeholder="e.g. 23.8103" /></div>
+        <div className="space-y-1"><Label htmlFor="station-longitude">Longitude (optional, for GPS)</Label><Input id="station-longitude" type="number" step="any" min={-180} max={180} value={stationLongitude} onChange={(e) => setStationLongitude(e.target.value)} placeholder="e.g. 90.4125" /></div>
+        <div className="space-y-1"><Label htmlFor="station-radius">Geofence radius (metres)</Label><Input id="station-radius" type="number" min={25} max={1000} value={geofenceRadius} onChange={(e) => setGeofenceRadius(e.target.value)} /></div>
         <Button type="submit" disabled={busy} className="self-end"><Plus className="mr-2 h-4 w-4" />Add station</Button>
       </form>
-      {stations.length ? <div className="space-y-2">{stations.map((station) => <div key={station.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><div><p className="font-medium">{station.name}</p>{station.description ? <p className="text-sm text-muted-foreground">{station.description}</p> : null}</div><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => setStationActive({ data: { id: station.id, isActive: !station.isActive } }), station.isActive ? "Station disabled" : "Station enabled")}>{station.isActive ? "Disable" : "Enable"}</Button></div>)}</div> : <p className="text-sm text-muted-foreground">No stations yet.</p>}
+      {stations.length ? <div className="space-y-2">{stations.map((station) => <div key={station.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><div><p className="font-medium">{station.name}</p>{station.description ? <p className="text-sm text-muted-foreground">{station.description}</p> : null}<p className="text-xs text-muted-foreground">{station.latitude != null && station.longitude != null ? `GPS: ${station.latitude}, ${station.longitude} · radius ${station.geofenceRadiusMeters} m` : "No GPS coordinates configured"}</p></div><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => setStationActive({ data: { id: station.id, isActive: !station.isActive } }), station.isActive ? "Station disabled" : "Station enabled")}>{station.isActive ? "Disable" : "Enable"}</Button></div>)}</div> : <p className="text-sm text-muted-foreground">No stations yet.</p>}
     </CardContent></Card>
     <Card><CardContent className="space-y-3 p-4">
       <h3 className="font-display font-bold">Schedule a shift</h3>
