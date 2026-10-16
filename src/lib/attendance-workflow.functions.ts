@@ -21,11 +21,12 @@ function localDateDhaka(value = new Date()) {
   }).format(value);
 }
 
-async function audit(db: any, input: {
+async function audit(db: unknown, input: {
   tableName: string; rowId?: string | null; action: string; actorId: string;
   subjectUserId?: string | null; oldData?: unknown; newData?: unknown;
 }) {
-  const { error } = await db.from("attendance_audit_log").insert({
+  const adminDb = db as { from: (table: string) => { insert: (value: Record<string, unknown>) => Promise<{ error: { message: string } | null }> } };
+  const { error } = await adminDb.from("attendance_audit_log").insert({
     table_name: input.tableName,
     row_id: input.rowId ?? null,
     action: ["clock_in", "break_start", "request_created", "task_created"].includes(input.action) ? "INSERT" : "UPDATE",
@@ -118,7 +119,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
         throw new Error("Please wait before punching again.");
       }
     }
-    let shift: any = null;
+    let shift: { id: string; shift_date: string; starts_at: string; ends_at: string; status: string } | null = null;
     if (data.shiftId) {
       const { data: shiftRow, error } = await db.from("attendance_shifts")
         .select("id, shift_date, starts_at, ends_at, status").eq("id", data.shiftId)
