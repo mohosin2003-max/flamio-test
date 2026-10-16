@@ -17,12 +17,6 @@ export type AttendanceVerificationStatus = "unverified" | "verified" | "disputed
 export type AttendanceClockInSource = "app" | "kiosk" | "manager" | "correction";
 export type AttendanceClockOutSource = AttendanceClockInSource | "auto";
 export type AttendanceBreakSource = AttendanceClockOutSource;
-/**
- * Values staff may pass as `_source` to attendance_clock_in/attendance_clock_out
- * (SQL: `IF _source NOT IN ('app','kiosk') THEN RAISE`). 'manager'/'correction'/'auto'
- * are written only by internal manager-correction and maintenance paths.
- */
-export type AttendanceStaffPunchSource = "app" | "kiosk";
 export type AttendanceTaskPriority = "low" | "medium" | "high" | "urgent";
 export type AttendanceTaskStatus =
   | "pending" | "in_progress" | "completed" | "verified" | "rejected" | "cancelled";
@@ -182,46 +176,6 @@ export interface AttendanceAuditLogRow {
   created_at: string;
 }
 
-/* ---------------------------------------------------------------------------
- * Direct-write types. Only tables where `authenticated` has a table grant AND a
- * manager write policy get them. Sessions, breaks, requests and the audit log
- * are written only through SECURITY DEFINER RPCs, so no write types exist.
- * attendance_settings: single row seeded by the schema; authenticated has
- * SELECT/UPDATE only (no INSERT grant/policy), so only an Update type exists.
- * attendance_shifts: starts_at/ends_at/is_overnight are always recomputed by
- * the attendance_shift_compute trigger, so they are not accepted as input.
- * ------------------------------------------------------------------------- */
-
-type Server = "id" | "created_at" | "updated_at";
-
-export type AttendanceSettingsUpdate = Partial<
-  Pick<AttendanceSettingsRow,
-    | "late_grace_minutes" | "early_clock_in_minutes" | "min_punch_gap_seconds"
-    | "max_session_hours" | "allow_unscheduled_clock_in" | "updated_by">
-> & { timezone?: "Asia/Dhaka" };
-
-export type AttendanceStationInsert =
-  Pick<AttendanceStationRow, "name"> &
-  Partial<Omit<AttendanceStationRow, Server | "name">> & { id?: string };
-export type AttendanceStationUpdate = Partial<Omit<AttendanceStationRow, Server>>;
-
-type ShiftComputed = "starts_at" | "ends_at" | "is_overnight";
-export type AttendanceShiftInsert =
-  Pick<AttendanceShiftRow, "user_id" | "shift_date" | "start_time" | "end_time"> &
-  Partial<Omit<AttendanceShiftRow, Server | ShiftComputed | "user_id" | "shift_date" | "start_time" | "end_time">> &
-  { id?: string };
-export type AttendanceShiftUpdate = Partial<Omit<AttendanceShiftRow, Server | ShiftComputed>>;
-
-export type AttendanceTaskInsert =
-  Pick<AttendanceTaskRow, "assigned_to" | "title"> &
-  Partial<Omit<AttendanceTaskRow, Server | "assigned_to" | "title">> & { id?: string };
-export type AttendanceTaskUpdate = Partial<Omit<AttendanceTaskRow, Server>>;
-
-export type AttendanceTaskItemInsert =
-  Pick<AttendanceTaskItemRow, "task_id" | "label"> &
-  Partial<Omit<AttendanceTaskItemRow, Server | "task_id" | "label">> & { id?: string };
-export type AttendanceTaskItemUpdate = Partial<Omit<AttendanceTaskItemRow, Server>>;
-
 /** The 9 attendance tables, keyed by table name (row shape only). */
 export interface AttendanceTables {
   attendance_settings: AttendanceSettingsRow;
@@ -247,11 +201,11 @@ export interface AttendanceRpc {
   attendance_is_manager: { Args: { _user_id: string }; Returns: boolean };
   attendance_is_member: { Args: { _user_id: string }; Returns: boolean };
   attendance_clock_in: {
-    Args: { _note?: string | null; _source?: AttendanceStaffPunchSource };
+    Args: { _note?: string | null; _source?: AttendanceClockInSource };
     Returns: AttendanceSessionRow;
   };
   attendance_clock_out: {
-    Args: { _note?: string | null; _source?: AttendanceStaffPunchSource };
+    Args: { _note?: string | null; _source?: AttendanceClockInSource };
     Returns: AttendanceSessionRow;
   };
   attendance_start_break: { Args: Record<string, never>; Returns: AttendanceBreakRow };
