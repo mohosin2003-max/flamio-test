@@ -366,7 +366,7 @@ export const ownerReviewAttendanceTask = createServerFn({ method: "POST" })
     if (readError || !task) throw new Error("Task not found.");
     if (!["awaiting_verification", "completed"].includes(task.status)) throw new Error("Task is not awaiting verification.");
     const now = new Date().toISOString();
-    const nextStatus = data.decision === "verified" ? "verified" : "pending";
+    const nextStatus = data.decision;
     const { error } = await db.from("attendance_tasks").update({
       status: nextStatus, verified_by: data.decision === "verified" ? context.userId : null,
       verified_at: data.decision === "verified" ? now : null, review_note: data.reviewNote ?? null,
