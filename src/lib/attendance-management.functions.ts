@@ -160,7 +160,10 @@ export const ownerCreateAttendanceShift = createServerFn({ method: "POST" })
     await requireAttendanceOwner(context.userId);
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
     const db = await untypedAdmin();
-    const [year, month, day] = data.shiftDate.split("-").map(Number);
+    const dateParts = data.shiftDate.split("-").map(Number);
+    const year = dateParts[0] ?? Number.NaN;
+    const month = dateParts[1] ?? Number.NaN;
+    const day = dateParts[2] ?? Number.NaN;
     const parsedDate = new Date(Date.UTC(year, month - 1, day));
     if (!Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== data.shiftDate) {
       throw new Error("Invalid shift date.");
