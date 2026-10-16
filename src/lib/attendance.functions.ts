@@ -330,7 +330,7 @@ async function write(q: PromiseLike<{ data: unknown; error: { message: string } 
     console.error("[attendance] write failed:", error.message);
     throw new Error(error.message);
   }
-  return data as Record<string, unknown> | null;
+  return { ok: true as const, id: ((data as { id?: string } | null)?.id ?? null) as string | null };
 }
 
 export const attendanceSaveStation = createServerFn({ method: "POST" })
@@ -423,13 +423,14 @@ export const attendanceCreateTask = createServerFn({ method: "POST" })
         description: data.description ?? null, due_date: data.dueDate, priority: data.priority,
         requires_verification: data.requiresVerification,
       }).select("id").single(),
-    )) as { id: string };
+    )) as { id: string | null };
+    if (!task.id) throw new Error("Task was not created");
     if (data.items.length) {
       await write(db(context, "attendance_task_items").insert(
         data.items.map((label, i) => ({ task_id: task.id, label, sort_order: i })),
       ));
     }
-    return task;
+    return { id: task.id };
   });
 
 export const attendanceCancelTask = createServerFn({ method: "POST" })
