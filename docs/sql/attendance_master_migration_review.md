@@ -1,45 +1,46 @@
 # FLAMIO ATTENDANCE MASTER — TEST Migration Review
 
-**Status: Initial security/verification migration applied to TEST; full feature migration remains incomplete.**  
+**Status: Three TEST-only security/verification migrations applied; complete feature release remains blocked.**  
 **Target:** TEST project `avwrptztixaketchgmsh` only.  
 **Production project `wubsldblxvkusauafwfd`: explicitly out of scope.**
 
-## Applied migration and verification
+## Applied migrations and verified effects
 
-The versioned migration `supabase/migrations/20261016120000_attendance_security_verification_extension.sql` was applied to TEST on 2026-10-16. Supabase migration history reports version `20261016074823`, name `attendance_security_verification_extension_20261016`.
+1. `20261016120000_attendance_security_verification_extension.sql`
+   - Owner-only attendance settings UPDATE policy.
+   - Removes phone from `attendance_team_directory()`.
+   - Adds geofence/verification switches and station coordinates/radius.
+   - Adds hash-only QR challenge storage and atomic consumption RPC.
+2. `20261016130000_attendance_helper_acl_hardening.sql`
+   - Sets explicit `search_path=public` for `attendance_local_date` and `attendance_minutes`.
+   - Revokes PUBLIC/anon EXECUTE on `attendance_is_manager(uuid)` and `attendance_is_member(uuid)`, retaining authenticated/service_role access.
+3. `20261016140000_attendance_qr_station_binding.sql`
+   - Changes the QR consume RPC to bind consumption to an expected station ID and reject wrong-station tokens before marking them consumed.
 
-Read-only post-migration checks confirmed:
-- `attendance_settings_owner_update` exists and both USING/WITH CHECK require Owner role.
-- `has_role(uuid, app_role)` execution is revoked from PUBLIC/anon and granted to authenticated/service_role.
-- `attendance_team_directory()` no longer returns staff phone numbers; it returns user ID, full name and roles.
-- Geofence/verification settings columns and station latitude/longitude/radius columns exist.
-- `attendance_qr_challenges` exists with hash-only token storage, expiry/consumption constraints, RLS enabled and no direct PUBLIC/anon/authenticated table privileges.
-- QR consume RPC uses fixed `search_path`, validates caller role and token-hash format, and atomically consumes a valid unexpired challenge.
+Supabase migration history confirms all three migration records exist in TEST. Read-only checks after the first two migrations confirmed the Owner-only policy, new columns, QR challenge table and explicit helper ACL/search_path. The final station-binding migration applied successfully. No attendance-session data was deleted; no retention scheduler, app deployment, PR merge or Production mutation occurred.
 
-The migration did not delete attendance data, create a retention scheduler, deploy the app, merge the PR, or target Production.
+## Application integration added after the schema migration
 
-## Important limitations
+- Owner UI exposes the geofence, QR, selfie and attendance-alert switches.
+- Station creation accepts optional latitude/longitude and radius.
+- Owner can generate a cryptographically random one-time QR code with a 60-second expiry. Only its SHA-256 hash is stored.
+- Staff clock-in requests browser geolocation when geofence is enabled and validates the assigned station/radius on the server.
+- Staff clock-in consumes the QR hash through a conditional, station-bound UPDATE when QR verification is enabled.
+- Notification sending respects the Owner alert switch.
+- The latest CI runs for these later application changes are pending/in progress; earlier CI passed before the newest changes. Do not claim current-head build success yet.
 
-1. This is not a complete Attendance Master schema migration. Do not run `attendance_master_schema.sql` as-is.
-2. The existing schema draft mixes identity and authorization changes into attendance setup (including role types/tables, profiles, grants and owner-onboarding helpers). Those must not be casually replaced or widened as part of a later attendance migration.
-3. The new QR challenge table is storage and atomic consumption only. QR issuance, cryptographically random raw token creation, short expiry, UI and clock-in integration are not implemented end-to-end.
-4. Geofence fields exist, but GPS capture, server-side distance validation, entry/exit/re-entry event records and notifications are not wired up.
-5. Selfie verification is not implemented. Do not persist selfie bytes, permanent photo URLs or biometric templates.
-6. Retention scheduling and deletion are deliberately not included. No destructive cleanup function has been scheduled or run.
-7. SECURITY DEFINER functions and direct RLS policies still require a full role matrix test with separate Anonymous/Staff/Admin/Owner accounts.
-8. The team-directory RPC contract changed. Search all callers and run runtime integration checks before release.
-9. Existing settings-read policy remains available to authenticated members by design; settings updates are now Owner-only.
-10. Do not infer runtime safety solely from a successful SQL apply or build.
+## Important limitations and release blockers
 
-## Remaining safe plan
+1. QR display/issuance exists, but camera-based scanning and manual token entry require real-device verification. QR is single-use and may be consumed even if a subsequent session insert fails; the user must then generate a new challenge.
+2. GPS coordinates from a browser can be spoofed. The current geofence check is a location policy, not tamper-proof proof of presence.
+3. Selfie identity verification is not implemented; do not persist images, permanent photo URLs or biometric templates.
+4. Push delivery remains best-effort. Delivery receipts, retries, Owner loud-sound behavior and full end-to-end checks are incomplete.
+5. Leave/correction/missed-punch/overtime approval does not yet fully apply all approved changes to attendance records.
+6. Recurring schedules/date overrides and full task state integration need more implementation and acceptance tests.
+7. No session retention purge/scheduler exists. Do not add destructive cleanup until scope, exceptions, dry-run and audit behavior are separately reviewed.
+8. Supabase Security Advisor still reports a policy-less QR table (intentional denial of direct client access), 18 authenticated-callable SECURITY DEFINER functions requiring role-by-role review, and the Auth leaked-password protection setting. Do not dismiss the function warnings without reviewing each function and its grants.
+9. Run the latest CI to completion and perform real TEST acceptance tests with separate Anonymous/Staff/Admin/Owner identities before any release decision.
 
-- Test migration re-run behavior in an isolated clone before treating it as generally repeatable. Function drop/recreate is intentional for the team-directory return contract and is not a zero-impact operation.
-- Verify all app callers of `attendance_team_directory()` and validate server authorization/RLS with distinct test accounts.
-- Implement Owner UI for the new switches and geofence settings.
-- Add GPS event pipeline, notification delivery records/retries, QR issuance/clock-in integration, and a reviewed ephemeral selfie verification flow if required.
-- Define retention scope, legal/business exceptions, dry-run, auditability and scheduling before creating any destructive job.
-- Implement complete request application, recurring schedules/date overrides and task status integration.
-- Run the repository's CI and end-to-end acceptance matrix repeatedly; attach evidence to the PR.
-- Keep PR Draft/unmerged and do not deploy until all release gates pass.
+## Safety
 
-Production remains out of scope.
+Do not run `attendance_master_schema.sql` as-is. Do not merge or deploy this PR until every release gate passes. Production remains out of scope.
