@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
@@ -50,7 +50,7 @@ function OwnerAttendance() {
   const overview = useQuery({
     queryKey: ["owner-attendance-overview"],
     queryFn: () => getOverview(),
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
   });
   const settings = overview.data?.settings;
   useEffect(() => {
@@ -84,7 +84,7 @@ function OwnerAttendance() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-display text-xl font-bold">Staff Duty Monitoring</h2>
-          <p className="text-sm text-muted-foreground">Read-only overview · TEST environment · refreshes every minute</p>
+          <p className="text-sm text-muted-foreground">Duty overview · TEST environment · refreshes every 30 seconds</p>
         </div>
         <Button variant="outline" onClick={() => void overview.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
       </div>
@@ -94,6 +94,17 @@ function OwnerAttendance() {
         <Stat icon={Clock3} label="Currently on duty" value={String(openSessions.length)} />
         <Stat icon={ShieldAlert} label="Late records" value={String(lateSessions.length)} />
         <Stat icon={CheckCircle2} label="Open tasks" value={String(pendingTasks.length)} />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Link to="/owner/attendance-management" className="rounded-xl border p-4 transition-colors hover:bg-muted/50">
+          <p className="font-semibold">Stations & shifts</p>
+          <p className="mt-1 text-sm text-muted-foreground">Manage work areas, assign staff shifts, and cancel scheduled shifts.</p>
+        </Link>
+        <Link to="/owner/attendance-workflow" className="rounded-xl border p-4 transition-colors hover:bg-muted/50">
+          <p className="font-semibold">Tasks & requests</p>
+          <p className="mt-1 text-sm text-muted-foreground">Assign checklist tasks, review completions, and process staff requests.</p>
+        </Link>
       </div>
 
       <Card>
