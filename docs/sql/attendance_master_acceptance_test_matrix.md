@@ -94,3 +94,24 @@ Target environment: TEST project `avwrptztixaketchgmsh` only. Never run against 
 7. Security Advisor still flags 18 authenticated-callable SECURITY DEFINER functions for review and Supabase Auth leaked-password protection as disabled; the policy-less QR table is intentionally closed to direct client access.
 
 No SQL, data mutation, deployment, or merge is authorized by this test plan.
+
+
+## Latest additional TEST checks — 2026-10-16
+
+- [x] All 10 public Attendance tables have RLS enabled (read-only catalog check).
+- [x] Attendance settings UPDATE policy is Owner-only in both USING and WITH CHECK.
+- [x] QR challenge table has RLS enabled and no direct client policies.
+- [x] Service-only request-review bridge is not executable by anon or authenticated.
+- [x] Direct execution denied to anon and authenticated for 14 Attendance SECURITY DEFINER RPCs; service_role execution retained for server-side operations.
+- [x] Fixed search_path confirmed for QR consume and transactional request review functions.
+- [x] Pure SQL calculation checks passed: 75-minute interval, 8-hour overnight interval (480 minutes), zero-length interval, and Asia/Dhaka date boundary conversion.
+- [x] Latest CI run passed on commit 15ec33a126c58e81f795aac4b5dfa733264f23c8: https://github.com/mohosin2003-max/flamio-test/actions/runs/38925641322.
+- [ ] Signed-in HTTP tests for Owner/Admin/Staff, cross-user IDOR, direct-server-function abuse, and task/request mutations.
+- [ ] Real Android GPS/QR camera or manual token, QR expiry/replay/wrong-station/concurrency and post-consume failure-path tests.
+- [ ] Push delivery/notification permission/background sound verification on device.
+- [ ] Recurring schedule and date override implementation/tests.
+- [ ] Selfie verification implementation (switch alone is not a completed verification feature).
+- [ ] Retention dry-run and separately approved policy; no deletion or schedule is authorized yet.
+- [ ] Configure Supabase Auth leaked-password protection in TEST Dashboard and re-run advisor.
+
+These checks are partial. The acceptance matrix is NOT fully passed and PR #1 must remain Draft/unmerged.
