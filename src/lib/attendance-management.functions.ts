@@ -38,8 +38,15 @@ function shiftTimestamps(date: string, start: string, end: string) {
   const overnight = endTime <= startTime;
   // Convert the restaurant-local Asia/Dhaka wall clock to UTC explicitly (UTC+6).
   const toUtcIso = (d: string, t: string) => {
-    const [year, month, day] = d.split("-").map(Number);
-    const [hour, minute, second] = t.split(":").map(Number);
+    const year = Number(d.slice(0, 4));
+    const month = Number(d.slice(5, 7));
+    const day = Number(d.slice(8, 10));
+    const hour = Number(t.slice(0, 2));
+    const minute = Number(t.slice(3, 5));
+    const second = Number(t.slice(6, 8));
+    if (![year, month, day, hour, minute, second].every(Number.isFinite)) {
+      throw new Error("Invalid shift date or time.");
+    }
     return new Date(Date.UTC(year, month - 1, day, hour - 6, minute, second)).toISOString();
   };
   const startAt = toUtcIso(date, startTime);
