@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { CalendarClock, Plus, RefreshCw, XCircle } from "lucide-react";
+import { CalendarClock, Plus, QrCode, RefreshCw, XCircle } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
   ownerCancelAttendanceShift,
   ownerCreateAttendanceShift,
   ownerCreateAttendanceStation,
+  ownerIssueAttendanceQrChallenge,
   ownerListAttendanceManagement,
   ownerSetAttendanceStationActive,
 } from "@/lib/attendance-management.functions";
@@ -29,6 +31,8 @@ function AttendanceManagement() {
   const queryClient = useQueryClient();
   const listFn = useServerFn(ownerListAttendanceManagement);
   const createStation = useServerFn(ownerCreateAttendanceStation);
+  const issueQr = useServerFn(ownerIssueAttendanceQrChallenge);
+  const [qrChallenge, setQrChallenge] = useState<{ stationId: string; stationName: string; token: string; expiresAt: string } | null>(null);
   const setStationActive = useServerFn(ownerSetAttendanceStationActive);
   const createShift = useServerFn(ownerCreateAttendanceShift);
   const cancelShift = useServerFn(ownerCancelAttendanceShift);
@@ -77,7 +81,8 @@ function AttendanceManagement() {
         <div className="space-y-1"><Label htmlFor="station-radius">Geofence radius (metres)</Label><Input id="station-radius" type="number" min={25} max={1000} value={geofenceRadius} onChange={(e) => setGeofenceRadius(e.target.value)} /></div>
         <Button type="submit" disabled={busy} className="self-end"><Plus className="mr-2 h-4 w-4" />Add station</Button>
       </form>
-      {stations.length ? <div className="space-y-2">{stations.map((station) => <div key={station.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><div><p className="font-medium">{station.name}</p>{station.description ? <p className="text-sm text-muted-foreground">{station.description}</p> : null}<p className="text-xs text-muted-foreground">{station.latitude != null && station.longitude != null ? `GPS: ${station.latitude}, ${station.longitude} · radius ${station.geofenceRadiusMeters} m` : "No GPS coordinates configured"}</p></div><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => setStationActive({ data: { id: station.id, isActive: !station.isActive } }), station.isActive ? "Station disabled" : "Station enabled")}>{station.isActive ? "Disable" : "Enable"}</Button></div>)}</div> : <p className="text-sm text-muted-foreground">No stations yet.</p>}
+      {stations.length ? <div className="space-y-2">{stations.map((station) => <div key={station.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><div><p className="font-medium">{station.name}</p>{station.description ? <p className="text-sm text-muted-foreground">{station.description}</p> : null}<p className="text-xs text-muted-foreground">{station.latitude != null && station.longitude != null ? `GPS: ${station.latitude}, ${station.longitude} · radius ${station.geofenceRadiusMeters} m` : "No GPS coordinates configured"}</p></div><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => setStationActive({ data: { id: station.id, isActive: !station.isActive } }), station.isActive ? "Station disabled" : "Station enabled")}>{station.isActive ? "Disable" : "Enable"}</Button><Button size="sm" variant="outline" disabled={busy || !station.isActive} onClick={() => void run(async () => { const challenge = await issueQr({ data: { stationId: station.id } }); setQrChallenge(challenge); }, "Single-use QR generated (expires in 60 seconds)") }><QrCode className="mr-1 h-4 w-4"/>Generate QR</Button></div></div>)}</div> : <p className="text-sm text-muted-foreground">No stations yet.</p>}
+      {qrChallenge ? <div className="rounded-lg border p-4 text-center space-y-3"><p className="font-semibold">One-time QR · {qrChallenge.stationName}</p><QRCodeSVG value={qrChallenge.token} size={220} level="M" className="mx-auto max-w-full" /><p className="text-xs text-muted-foreground">Expires at {new Date(qrChallenge.expiresAt).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka" })} Bangladesh time. The token works once only; generate a fresh QR after expiry or use.</p><code className="block break-all rounded bg-muted p-2 text-xs">{qrChallenge.token}</code><Button type="button" variant="outline" onClick={() => { void navigator.clipboard?.writeText(qrChallenge.token); toast.success("Token copied"); }}>Copy token</Button><Button type="button" variant="ghost" onClick={() => setQrChallenge(null)}>Hide QR</Button></div> : null}
     </CardContent></Card>
     <Card><CardContent className="space-y-3 p-4">
       <h3 className="font-display font-bold">Schedule a shift</h3>
