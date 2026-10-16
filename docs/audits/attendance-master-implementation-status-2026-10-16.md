@@ -1,6 +1,6 @@
 # FLAMIO ATTENDANCE MASTER — Implementation Status & Release Gate
 
-**Updated:** 2026-10-16 (TEST security migration and CI verification)  
+**Updated:** 2026-10-16 (TEST geofence/QR integration and security follow-up)  
 **Decision:** INCOMPLETE — do not merge or deploy  
 **Repository:** `mohosin2003-max/flamio-test`  
 **Branch:** `feature/attendance-master-safe`  
@@ -9,49 +9,39 @@
 
 ## Work completed in the TEST branch
 
-- Owner-only Attendance overview page with an editor for existing settings fields: late grace, early punch window, minimum punch gap, maximum session hours, and unscheduled clock-in.
-- Server-side Owner authorization for settings updates, station/shift management, task assignment/review, and request review.
-- Station creation and enable/disable.
-- Staff shift scheduling and cancellation; input validation, Asia/Dhaka time conversion, overnight support, active-station/staff-role checks, overlap check, and maximum shift duration.
-- Staff workspace for own attendance history, clock-in/out, breaks, today's shift list, assigned tasks, interactive checklist items, and leave/correction/missed-punch/overtime requests.
-- Owner workflow UI for task assignment with checklist items, task verification/return, and request approve/reject.
-- Audit-log inserts are attempted for the main attendance mutations. Logging failures are recorded to server logs; they do not roll back the primary mutation.
-- GitHub Actions validation workflow builds the app, runs TypeScript checking, and lints the Attendance implementation files.
-- Added `supabase/migrations/20261016120000_attendance_security_verification_extension.sql` and applied it to TEST only. It restricts attendance settings updates to Owner, revokes `has_role()` execution from PUBLIC/anon, removes staff phone from the team-directory RPC result, adds geofence/verification settings and station coordinates/radius, and creates a hash-only single-use QR challenge table plus atomic consume RPC.
-- Migration application was confirmed by Supabase migration history (`20261016074823`, `attendance_security_verification_extension_20261016`). Read-only post-migration checks confirmed the new columns, Owner-only update policy, QR table, and fixed-search-path SECURITY DEFINER RPCs exist.
-- The new GitHub Actions run for commit `df868a927050360346932765645c50028ca89be8` completed successfully: dependency install, production build/route generation, TypeScript check, and scoped ESLint all passed.
-
-## TEST database safety and live state
-
-- Only Supabase TEST ref `avwrptztixaketchgmsh` was used for the migration. Production ref `wubsldblxvkusauafwfd` was not targeted.
-- The applied migration did not delete attendance data and did not configure a retention scheduler.
-- The settings update policy is now `attendance_settings_owner_update`, using Owner-only checks in both USING and WITH CHECK.
-- `attendance_team_directory()` now returns user ID, full name and roles, not phone numbers. Confirm all callers are compatible before release.
-- QR challenge rows store token hashes, not raw QR payloads. Issuance UI and end-to-end clock-in integration remain incomplete.
-- No deployment, PR merge, attendance data write test, or Owner/Admin/Staff end-to-end acceptance cycle has been performed.
+- Owner-only Attendance overview/settings, station and shift management, task assignment/review, and request review.
+- Staff workspace for attendance history, clock-in/out, breaks, shifts, tasks/checklists, and leave/correction/missed-punch/overtime requests.
+- Owner-controlled switches for geofence, QR verification, selfie verification and attendance alerts.
+- Station creation now accepts latitude/longitude and a configurable 25–1000 metre geofence radius; Owner station list shows whether coordinates are configured.
+- When geofence is enabled, clock-in requires precise browser location, a station-linked shift, an active station with coordinates, reported accuracy no worse than 50 m, and location within the configured radius. Exact coordinates are not stored in the attendance session or audit log.
+- Owner can generate a cryptographically random, single-use station QR challenge that expires after 60 seconds. QR table stores only SHA-256 hashes; the Owner UI renders a QR code and provides a manual token fallback.
+- When QR verification is enabled, clock-in hashes the submitted token and consumes it with a single conditional database UPDATE bound to the assigned station; concurrent/replayed or expired tokens should not pass the update. Real-device replay acceptance tests are still required.
+- Attendance notification sends now respect the Owner-controlled attendance-alert switch. Existing push delivery remains best-effort and is not yet verified end-to-end.
+- TEST-only migration `20261016120000_attendance_security_verification_extension.sql` applied: Owner-only settings policy, phone-free team directory RPC, verification settings, station geofence columns, QR challenge storage and initial atomic consume RPC.
+- TEST-only migration `20261016130000_attendance_helper_acl_hardening.sql` applied: fixed search_path for timestamp helpers and removed PUBLIC/anon execution from manager/member helpers.
+- TEST-only migration `20261016140000_attendance_qr_station_binding.sql` applied: binds QR challenge consumption to the expected station.
+- Supabase migration history confirms all three migrations are recorded in TEST. No attendance-session data deletion, retention scheduler, deployment, PR merge or Production mutation occurred.
 - PR #1 remains Draft and unmerged.
 
-## Verification evidence and limits
+## CI verification
 
-- CI run: [Attendance branch validation #122](https://github.com/mohosin2003-max/flamio-test/actions/runs/38869038124) — success for the current commit.
-- Supabase migration history and read-only post-migration schema/policy/function queries confirmed the TEST migration is present.
-- CI success does not prove runtime permissions, clock-in/out correctness, notification delivery, GPS accuracy, QR replay resistance in the complete UI, or acceptance with separate real user roles.
-- No claim is made that the full product is complete.
+- Earlier commit `df868a927050360346932765645c50028ca89be8` passed dependency install, build/route generation, TypeScript check and scoped ESLint.
+- Latest implementation commits add Owner switches, station coordinates, QR rendering/issuance, geofence/QR clock-in enforcement, and notification toggle handling. Current-head CI runs are pending/in progress; do not claim those later changes are build-verified until the latest run finishes successfully.
+- Security advisor after the first migrations still reports the intentionally policy-less QR table (direct client access is revoked), 18 authenticated-callable SECURITY DEFINER functions needing a full authorization review, and Supabase Auth leaked-password protection not enabled. Two mutable-search-path warnings were addressed; the full advisor must be rechecked after current migrations.
 
 ## Remaining release blockers
 
-1. **End-to-end security tests:** verify anonymous, Staff-own-row, Staff-other-row, Admin, Owner and service-role access with separate TEST identities. Confirm direct RLS access and every SECURITY DEFINER function's grants.
-2. **Feature switches/UI:** geofence, selfie, QR and attendance-alert settings columns now exist in TEST, but Owner configuration UI and end-to-end behavior are not complete.
-3. **Geofence/GPS:** no complete server-validated location event pipeline, configurable-radius enforcement, entry/exit/re-entry event tracking, or spoofing controls.
-4. **Notifications:** no verified attendance delivery worker/retry strategy, delivery record, Owner loud-sound behavior, or end-to-end push test.
-5. **QR:** challenge storage and atomic consumption exist in TEST, but challenge issuance, cryptographically random raw token generation, short expiry, UI, clock-in integration, and replay acceptance tests are missing.
-6. **Selfie:** identity verification remains missing. No image bytes or permanent photo URL should be retained; use a separately reviewed ephemeral/provider-backed flow if this remains a requirement.
-7. **Retention:** no session purge function or scheduler was added by the applied migration. No cleanup/deletion job was run. Retention requirements for sessions, location events and notification records need approval and dry-run tests before any destructive job is created.
-8. **Scheduling:** recurring weekday schedules, date-specific overrides, leave/calendar integration, and complete schedule history remain incomplete.
-9. **Request workflow:** approve/reject decisions are recorded, but approved leave/correction/missed-punch/overtime is not fully applied to underlying attendance records.
-10. **Task status:** verify all task transitions against database CHECK constraints and acceptance cases.
-11. **Acceptance:** run repeated tests for clock-in/out concurrency, breaks, overnight/overlap shifts, tasks, request application, QR replay, geofence boundaries, notification retry, and regressions.
+1. **Role/RLS tests:** use separate Anonymous/Staff/Admin/Owner accounts to test own-row/other-row access, direct RPC access and all SECURITY DEFINER authorization branches.
+2. **QR real-device acceptance:** verify camera scan/manual token flow, 60-second expiry, replay rejection, wrong-station rejection, concurrent requests, and behavior if QR is consumed but the later attendance insert fails.
+3. **GPS acceptance:** test Android/browser permission denial, high accuracy, geofence boundary, unavailable GPS, station coordinate errors, and spoofing limitations. Browser coordinates alone are not strong proof of physical presence.
+4. **Selfie verification:** switch exists but no identity verification flow is implemented. Do not retain selfie bytes, permanent photo URLs or biometric templates.
+5. **Notifications:** delivery records, retries, Owner loud-sound behavior and push delivery verification remain incomplete.
+6. **Requests:** approvals are not fully applied to underlying shift/session data for every request type.
+7. **Scheduling:** recurring weekday schedules, date-specific overrides, leave/calendar integration and full schedule history remain incomplete.
+8. **Retention:** no session purge function or scheduler was added or run. Define retention scope, exceptions, dry-run and audit requirements before destructive cleanup.
+9. **Task integration:** test all task transitions against database CHECK constraints and Owner verification/rejection.
+10. **Current-head CI and acceptance:** wait for current CI to pass and run repeated acceptance/regression tests for shifts, punches, breaks, tasks, requests, QR, geofence and notifications.
 
 ## Release gate
 
-**Not production-ready.** Keep PR #1 Draft and unmerged. Continue only on this repository branch and TEST project. Any further destructive retention work, deployment, or PR merge requires its own explicit approval. Never target Production ref `wubsldblxvkusauafwfd`.
+**Not production-ready.** Keep PR #1 Draft and unmerged. Continue only on this repository branch and TEST project. Any destructive retention work, deployment, or PR merge requires separate explicit approval. Never target Production ref `wubsldblxvkusauafwfd`.
