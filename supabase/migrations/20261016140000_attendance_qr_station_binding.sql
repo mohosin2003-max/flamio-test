@@ -1,5 +1,5 @@
 -- FLAMIO ATTENDANCE MASTER — bind QR consumption to assigned station
--- TEST Supabase ref avwrptztixaketchgmsh only; Production is out of scope.
+-- TEST Supabase ref avwrptztixaketchgmsh only; Production ref wubsldblxvkusauafwfd is out of scope.
 -- No attendance records are changed or deleted.
 
 BEGIN;
