@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Home, Lock, MessageCircle, ReceiptText, UserRound } from "lucide-react";
+import { Clock, Home, Lock, MessageCircle, ReceiptText, UserRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: "/owner", label: "Home", icon: Home, kind: "home" },
   { to: "/owner/inbox", label: "Messages", icon: MessageCircle, kind: "messages" },
   { to: "/owner/orders", label: "Orders", icon: ReceiptText, kind: "orders" },
+  { to: "/attendance", label: "My duty", icon: Clock, kind: "duty" },
   { to: "/owner/account", label: "Account", icon: UserRound, kind: "account" },
 ] as const;
 
@@ -27,6 +28,7 @@ export function StaffBottomNav() {
   const getSummary = useServerFn(ownerGetDashboardSummary);
   const canMessage = signedIn && hasPermission(access.data, "customers");
   const canOrder = signedIn && (hasPermission(access.data, "online_orders") || hasPermission(access.data, "order_management"));
+  const canDuty = signedIn && hasPermission(access.data, "attendance");
 
   const threads = useQuery({
     queryKey: ["contact-inbox", "owner"],
@@ -49,6 +51,7 @@ export function StaffBottomNav() {
   function isActive(kind: (typeof NAV_ITEMS)[number]["kind"]) {
     if (kind === "messages") return pathname.startsWith("/owner/inbox");
     if (kind === "orders") return pathname.startsWith("/owner/orders");
+    if (kind === "duty") return pathname === "/attendance";
     if (kind === "account") {
       return ["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
     }
@@ -57,9 +60,9 @@ export function StaffBottomNav() {
 
   return (
     <nav aria-label="Staff workspace" className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
-      <ul className="mx-auto grid max-w-lg grid-cols-4">
+      <ul className="mx-auto grid max-w-lg grid-cols-5">
         {NAV_ITEMS.map((item) => {
-          const allowed = item.kind === "messages" ? canMessage : item.kind === "orders" ? canOrder : true;
+          const allowed = item.kind === "messages" ? canMessage : item.kind === "orders" ? canOrder : item.kind === "duty" ? canDuty : true;
           const count = item.kind === "messages" ? unread : item.kind === "orders" ? activeOrders : 0;
           const content = (
             <>
