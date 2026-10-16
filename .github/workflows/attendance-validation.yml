@@ -16,7 +16,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,7 +26,22 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: TypeScript check
+        run: npx tsc --noEmit
       - name: Build
         run: npm run build
-      - name: Lint attendance implementation (excluding repository formatting rule)
-        run: npx eslint src/lib/attendance.functions.ts src/lib/attendance-settings.functions.ts src/lib/attendance-management.functions.ts src/lib/attendance-workflow.functions.ts src/routes/_authenticated/owner.attendance.tsx src/routes/_authenticated/owner.attendance-management.tsx src/routes/_authenticated/owner.attendance-workflow.tsx src/routes/_authenticated/attendance.tsx src/routeTree.gen.ts --rule 'prettier/prettier: off'
+      - name: Lint attendance implementation
+        run: >-
+          npx eslint
+          src/lib/attendance.functions.ts
+          src/lib/attendance-settings.functions.ts
+          src/lib/attendance-management.functions.ts
+          src/lib/attendance-workflow.functions.ts
+          src/lib/attendance-push.server.ts
+          src/routes/_authenticated/owner.attendance.tsx
+          src/routes/_authenticated/owner.attendance-management.tsx
+          src/routes/_authenticated/owner.attendance-workflow.tsx
+          src/routes/_authenticated/attendance.tsx
+          src/components/layout/StaffBottomNav.tsx
+          src/routeTree.gen.ts
+          --rule 'prettier/prettier: off'
