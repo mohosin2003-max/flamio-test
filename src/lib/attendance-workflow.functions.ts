@@ -378,16 +378,35 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isOwner) throw new Error("Only the Owner can review attendance requests.");
     const { data: current, error: readError } = await db.from("attendance_requests")
-      .select("id, user_id, request_type, status").eq("id", data.requestId).maybeSingle();
+      .select("id, user_id, request_type, status, session_id, leave_start_date, leave_end_date, requested_clock_in, requested_clock_out")
+      .eq("id", data.requestId).maybeSingle();
     if (readError || !current) throw new Error("Attendance request not found.");
     if (current.status !== "pending") throw new Error("This request has already been reviewed.");
-    const now = new Date().toISOString();
-    const { data: updated, error } = await db.from("attendance_requests").update({
-      status: data.decision, reviewed_by: context.userId, reviewed_at: now, review_note: data.reviewNote ?? null,
-    }).eq("id", current.id).eq("status", "pending").select("id").maybeSingle();
-    if (error) throw new Error("Could not review attendance request.");
-    if (!updated) throw new Error("This request has already been reviewed.");
-    await audit(db, { tableName: "attendance_requests", rowId: current.id, action: data.decision, actorId: context.userId, subjectUserId: current.user_id, oldData: current, newData: { status: data.decision, reviewedAt: now, reviewNote: data.reviewNote ?? null } });
+
+    // Use the TEST-only service-role bridge to execute the existing database
+    // transaction, including leave/shift changes, missed-punch creation,
+    // session correction and recalculation. The bridge independently verifies
+    // the supplied actor is an Owner and is executable only by service_role.
+    const { data: updated, error } = await db.rpc("attendance_review_request_as_service", {
+      _request_id: data.requestId,
+      _approve: data.decision === "approved",
+      _note: data.reviewNote ?? null,
+      _actor_id: context.userId,
+    });
+    if (error || !updated) {
+      console.error("Attendance request review failed", error?.message);
+      throw new Error("Could not apply this attendance request. Check its dates/times and try again.");
+    }
+    await audit(db, {
+      tableName: "attendance_requests",
+      rowId: current.id,
+      action: data.decision,
+      actorId: context.userId,
+      subjectUserId: current.user_id,
+      oldData: current,
+      newData: { status: data.decision, reviewNote: data.reviewNote ?? null },
+    });
+
     const { data: notificationSettings, error: notificationSettingsError } = await db.from("attendance_settings")
       .select("attendance_alerts_enabled").eq("id", true).maybeSingle();
     if (notificationSettingsError) console.error("Attendance alert setting lookup failed", notificationSettingsError.message);
@@ -401,7 +420,7 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
         note: data.reviewNote ?? null,
       });
     }
-    return { ok: true };
+    return { ok: true, status: data.decision };
   });
 
 export const ownerCreateAttendanceTask = createServerFn({ method: "POST" })
