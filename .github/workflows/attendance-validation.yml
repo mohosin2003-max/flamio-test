@@ -1,0 +1,49 @@
+name: Attendance branch validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/attendance-master-safe]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attendance-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      # TanStack Router generates the file-route type map during the Vite build.
+      # Build first so TypeScript checks against the current route tree.
+      - name: Build and generate route types
+        run: npm run build
+      - name: TypeScript check
+        run: npx tsc --noEmit
+      - name: Lint attendance implementation
+        run: >-
+          npx eslint
+          src/lib/attendance.functions.ts
+          src/lib/attendance-settings.functions.ts
+          src/lib/attendance-management.functions.ts
+          src/lib/attendance-workflow.functions.ts
+          src/lib/attendance-push.server.ts
+          src/routes/_authenticated/owner.attendance.tsx
+          src/routes/_authenticated/owner.attendance-management.tsx
+          src/routes/_authenticated/owner.attendance-workflow.tsx
+          src/routes/_authenticated/attendance.tsx
+          src/components/layout/StaffBottomNav.tsx
+          src/routeTree.gen.ts
+          --rule 'prettier/prettier: off'

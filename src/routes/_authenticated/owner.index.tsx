@@ -4,7 +4,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import type { LucideIcon } from "lucide-react";
-import { Boxes, ChefHat, ClipboardList, Contact, CookingPot, Gift, HandCoins, Images, LayoutGrid, MessageCircle, PackageCheck, ReceiptText, Settings2, ShieldCheck, ShoppingBag, Tags, Truck, Users, UtensilsCrossed, WalletCards } from "lucide-react";
+import { Boxes, CalendarClock, ChefHat, ClipboardList, Contact, CookingPot, Gift, HandCoins, Images, LayoutGrid, MessageCircle, PackageCheck, ReceiptText, Settings2, ShieldCheck, ShoppingBag, Tags, Truck, Users, UtensilsCrossed, WalletCards } from "lucide-react";
 
 import { PushToggle } from "@/components/notifications/PushToggle";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,6 +54,9 @@ const MODULES: Module[] = [
 
   { to: "/owner/settings", label: "Settings", description: "Business configuration", icon: Settings2, permission: "settings" },
   { to: "/owner/data-storage", label: "Data & Storage", description: "Retention, cleanup and files", icon: Settings2, permission: "settings", ownerRoleOnly: true },
+  { to: "/owner/attendance", label: "Staff Duty Monitoring", description: "Attendance, duty sessions and tasks", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
+  { to: "/owner/attendance-management", label: "Attendance Schedules", description: "Manage work stations and staff shifts", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
+  { to: "/owner/attendance-workflow", label: "Attendance Tasks & Requests", description: "Assign tasks and review staff requests", icon: ClipboardList, permission: "staff", ownerRoleOnly: true },
 ];
 
 function OwnerHome() {

@@ -94,6 +94,9 @@ const TABS: {
     permission: "settings",
     ownerRoleOnly: true,
   },
+  { to: "/owner/attendance", label: "Attendance", exact: false, permission: "attendance_management", ownerRoleOnly: true },
+  { to: "/owner/attendance-management", label: "Attendance Schedules", exact: false, permission: "attendance_management", ownerRoleOnly: true },
+  { to: "/owner/attendance-workflow", label: "Attendance Tasks & Requests", exact: false, permission: "attendance_management", ownerRoleOnly: true },
 
 ];
 

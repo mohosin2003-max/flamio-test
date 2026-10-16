@@ -20,6 +20,7 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as OffersRouteImport } from './routes/offers'
 import { Route as AuthenticatedChangePasswordRouteImport } from './routes/_authenticated/change-password'
 import { Route as AuthenticatedKitchenRouteImport } from './routes/_authenticated/kitchen'
+import { Route as AuthenticatedAttendanceRouteImport } from './routes/_authenticated/attendance'
 import { Route as AuthenticatedOwnerRouteImport } from './routes/_authenticated/owner'
 import { Route as MenuIndexRouteImport } from './routes/menu.index'
 import { Route as MenuProductSlugRouteImport } from './routes/menu.$productSlug'
@@ -43,6 +44,9 @@ import { Route as AuthenticatedOwnerCombosRouteImport } from './routes/_authenti
 import { Route as AuthenticatedOwnerCouponsRouteImport } from './routes/_authenticated/owner.coupons'
 import { Route as AuthenticatedOwnerCustomersRouteImport } from './routes/_authenticated/owner.customers'
 import { Route as AuthenticatedOwnerDataStorageRouteImport } from './routes/_authenticated/owner.data-storage'
+import { Route as AuthenticatedOwnerAttendanceRouteImport } from './routes/_authenticated/owner.attendance'
+import { Route as AuthenticatedOwnerAttendanceManagementRouteImport } from './routes/_authenticated/owner.attendance-management'
+import { Route as AuthenticatedOwnerAttendanceWorkflowRouteImport } from './routes/_authenticated/owner.attendance-workflow'
 import { Route as AuthenticatedOwnerDeliveryRouteImport } from './routes/_authenticated/owner.delivery'
 import { Route as AuthenticatedOwnerFinanceRouteImport } from './routes/_authenticated/owner.finance'
 import { Route as AuthenticatedOwnerInboxRouteImport } from './routes/_authenticated/owner.inbox'
@@ -125,6 +129,11 @@ const AuthenticatedChangePasswordRoute =
 const AuthenticatedKitchenRoute = AuthenticatedKitchenRouteImport.update({
   id: '/kitchen',
   path: '/kitchen',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedAttendanceRoute = AuthenticatedAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedOwnerRoute = AuthenticatedOwnerRouteImport.update({
@@ -259,6 +268,21 @@ const AuthenticatedOwnerDataStorageRoute =
     path: '/data-storage',
     getParentRoute: () => AuthenticatedOwnerRoute,
   } as any)
+const AuthenticatedOwnerAttendanceRoute = AuthenticatedOwnerAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
+  getParentRoute: () => AuthenticatedOwnerRoute,
+} as any)
+const AuthenticatedOwnerAttendanceManagementRoute = AuthenticatedOwnerAttendanceManagementRouteImport.update({
+  id: '/attendance-management',
+  path: '/attendance-management',
+  getParentRoute: () => AuthenticatedOwnerRoute,
+} as any)
+const AuthenticatedOwnerAttendanceWorkflowRoute = AuthenticatedOwnerAttendanceWorkflowRouteImport.update({
+  id: '/attendance-workflow',
+  path: '/attendance-workflow',
+  getParentRoute: () => AuthenticatedOwnerRoute,
+} as any)
 const AuthenticatedOwnerDeliveryRoute =
   AuthenticatedOwnerDeliveryRouteImport.update({
     id: '/delivery',
@@ -454,6 +478,10 @@ export interface FileRoutesByFullPath {
   '/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
   '/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
+  '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -516,6 +544,10 @@ export interface FileRoutesByTo {
   '/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
   '/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
+  '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -580,6 +612,10 @@ export interface FileRoutesById {
   '/_authenticated/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
   '/_authenticated/owner/customers': typeof AuthenticatedOwnerCustomersRouteWithChildren
   '/_authenticated/owner/data-storage': typeof AuthenticatedOwnerDataStorageRoute
+  '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
+  '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/delivery': typeof AuthenticatedOwnerDeliveryRoute
   '/_authenticated/owner/finance': typeof AuthenticatedOwnerFinanceRoute
   '/_authenticated/owner/inbox': typeof AuthenticatedOwnerInboxRoute
@@ -645,6 +681,10 @@ export interface FileRouteTypes {
     | '/owner/coupons'
     | '/owner/customers'
     | '/owner/data-storage'
+    | '/attendance'
+    | '/owner/attendance'
+    | '/owner/attendance-management'
+    | '/owner/attendance-workflow'
     | '/owner/delivery'
     | '/owner/finance'
     | '/owner/inbox'
@@ -707,6 +747,7 @@ export interface FileRouteTypes {
     | '/owner/coupons'
     | '/owner/customers'
     | '/owner/data-storage'
+    | '/owner/attendance'
     | '/owner/delivery'
     | '/owner/finance'
     | '/owner/inbox'
@@ -770,6 +811,10 @@ export interface FileRouteTypes {
     | '/_authenticated/owner/coupons'
     | '/_authenticated/owner/customers'
     | '/_authenticated/owner/data-storage'
+    | '/_authenticated/attendance'
+    | '/_authenticated/owner/attendance'
+    | '/_authenticated/owner/attendance-management'
+    | '/_authenticated/owner/attendance-workflow'
     | '/_authenticated/owner/delivery'
     | '/_authenticated/owner/finance'
     | '/_authenticated/owner/inbox'
@@ -899,6 +944,13 @@ declare module '@tanstack/react-router' {
       path: '/kitchen'
       fullPath: '/kitchen'
       preLoaderRoute: typeof AuthenticatedKitchenRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/attendance': {
+      id: '/_authenticated/attendance'
+      path: '/attendance'
+      fullPath: '/attendance'
+      preLoaderRoute: typeof AuthenticatedAttendanceRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/owner': {
@@ -1060,6 +1112,27 @@ declare module '@tanstack/react-router' {
       path: '/data-storage'
       fullPath: '/owner/data-storage'
       preLoaderRoute: typeof AuthenticatedOwnerDataStorageRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance': {
+      id: '/_authenticated/owner/attendance'
+      path: '/attendance'
+      fullPath: '/owner/attendance'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-management': {
+      id: '/_authenticated/owner/attendance-management'
+      path: '/attendance-management'
+      fullPath: '/owner/attendance-management'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceManagementRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-workflow': {
+      id: '/_authenticated/owner/attendance-workflow'
+      path: '/attendance-workflow'
+      fullPath: '/owner/attendance-workflow'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceWorkflowRouteImport
       parentRoute: typeof AuthenticatedOwnerRoute
     }
     '/_authenticated/owner/delivery': {
@@ -1300,6 +1373,9 @@ interface AuthenticatedOwnerRouteChildren {
   AuthenticatedOwnerCouponsRoute: typeof AuthenticatedOwnerCouponsRoute
   AuthenticatedOwnerCustomersRoute: typeof AuthenticatedOwnerCustomersRouteWithChildren
   AuthenticatedOwnerDataStorageRoute: typeof AuthenticatedOwnerDataStorageRoute
+  AuthenticatedOwnerAttendanceRoute: typeof AuthenticatedOwnerAttendanceRoute
+  AuthenticatedOwnerAttendanceManagementRoute: typeof AuthenticatedOwnerAttendanceManagementRoute
+  AuthenticatedOwnerAttendanceWorkflowRoute: typeof AuthenticatedOwnerAttendanceWorkflowRoute
   AuthenticatedOwnerDeliveryRoute: typeof AuthenticatedOwnerDeliveryRoute
   AuthenticatedOwnerFinanceRoute: typeof AuthenticatedOwnerFinanceRoute
   AuthenticatedOwnerInboxRoute: typeof AuthenticatedOwnerInboxRoute
@@ -1332,6 +1408,9 @@ const AuthenticatedOwnerRouteChildren: AuthenticatedOwnerRouteChildren = {
   AuthenticatedOwnerCustomersRoute:
     AuthenticatedOwnerCustomersRouteWithChildren,
   AuthenticatedOwnerDataStorageRoute: AuthenticatedOwnerDataStorageRoute,
+  AuthenticatedOwnerAttendanceRoute: AuthenticatedOwnerAttendanceRoute,
+  AuthenticatedOwnerAttendanceManagementRoute: AuthenticatedOwnerAttendanceManagementRoute,
+  AuthenticatedOwnerAttendanceWorkflowRoute: AuthenticatedOwnerAttendanceWorkflowRoute,
   AuthenticatedOwnerDeliveryRoute: AuthenticatedOwnerDeliveryRoute,
   AuthenticatedOwnerFinanceRoute: AuthenticatedOwnerFinanceRoute,
   AuthenticatedOwnerInboxRoute: AuthenticatedOwnerInboxRoute,
@@ -1359,6 +1438,7 @@ const AuthenticatedOwnerRouteWithChildren =
   AuthenticatedOwnerRoute._addFileChildren(AuthenticatedOwnerRouteChildren)
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAttendanceRoute: typeof AuthenticatedAttendanceRoute
   AuthenticatedChangePasswordRoute: typeof AuthenticatedChangePasswordRoute
   AuthenticatedKitchenRoute: typeof AuthenticatedKitchenRoute
   AuthenticatedOwnerRoute: typeof AuthenticatedOwnerRouteWithChildren
@@ -1376,6 +1456,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAttendanceRoute: AuthenticatedAttendanceRoute,
   AuthenticatedChangePasswordRoute: AuthenticatedChangePasswordRoute,
   AuthenticatedKitchenRoute: AuthenticatedKitchenRoute,
   AuthenticatedOwnerRoute: AuthenticatedOwnerRouteWithChildren,
