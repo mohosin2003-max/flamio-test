@@ -183,9 +183,13 @@ export const staffClockIn = createServerFn({ method: "POST" })
 
     if (settings.qr_verification_enabled) {
       if (!data.qrToken) throw new Error("The Owner enabled QR verification. Scan a valid station QR before clocking in.");
+      if (!shift?.station_id) throw new Error("QR verification requires a station-linked shift.");
       const tokenHash = createHash("sha256").update(data.qrToken, "utf8").digest("hex");
-      const { data: consumed, error: qrError } = await db.rpc("attendance_consume_qr_challenge", { _token_hash: tokenHash });
-      if (qrError || !Array.isArray(consumed) || consumed.length !== 1 || consumed[0]?.station_id !== shift?.station_id) {
+      const { data: consumed, error: qrError } = await db.rpc("attendance_consume_qr_challenge", {
+        _token_hash: tokenHash,
+        _expected_station_id: shift.station_id,
+      });
+      if (qrError || !Array.isArray(consumed) || consumed.length !== 1 || consumed[0]?.station_id !== shift.station_id) {
         console.error("Attendance QR verification failed", qrError?.message ?? "Invalid station or consumed challenge");
         throw new Error("QR verification failed. Scan a fresh QR code for your assigned station.");
       }
