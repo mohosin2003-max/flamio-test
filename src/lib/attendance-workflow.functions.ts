@@ -32,7 +32,9 @@ async function audit(db: any, input: {
     actor_id: input.actorId,
     subject_user_id: input.subjectUserId ?? null,
     old_data: input.oldData ?? null,
-    new_data: input.newData ?? null,
+    new_data: input.newData && typeof input.newData === "object" && !Array.isArray(input.newData)
+      ? { ...(input.newData as Record<string, unknown>), _attendance_event: input.action }
+      : { _attendance_event: input.action, value: input.newData ?? null },
   });
   if (error) console.error("Attendance audit log insert failed", error.message);
 }
