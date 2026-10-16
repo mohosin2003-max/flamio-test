@@ -3,6 +3,7 @@
 **Report date:** 2026-10-16  
 **Repository:** `mohosin2003-max/flamio-test`  
 **Branch inspected:** `feature/attendance-master-safe`  
+**Documentation commits created during this review:** `e7c1c86bb786a026b835cf6022b7ee9f7e52f98b` (SQL review draft), `f1fd537dec8ea6db0f318979bd2ae03bc6fc80ca` (status report)  
 **TEST Supabase reference supplied by project owner:** `avwrptztixaketchgmsh`  
 **Production reference:** `wubsldblxvkusauafwfd` — explicitly out of scope  
 **Database actions in this work:** None. No SQL executed, no migrations applied, no live data changed.
@@ -89,7 +90,13 @@ The draft covers:
 | TEST database mutation | None | No SQL executed; no data/schema/policies changed |
 | Production mutation | None | Production is out of scope |
 
-## 5. Outstanding work
+## 5. Changes made in this review
+
+- Added `docs/sql/attendance_review_draft_v2.sql` as a commented, review-only proposal. It contains no active SQL statements and has not been executed.
+- Added this status report at `docs/ATTENDANCE_MASTER_STATUS.md`.
+- No application source files were modified in this review because the expected staff duty route and several claimed server-function signatures could not be verified in the target branch. Creating navigation links without a confirmed route or wiring push calls to unverified functions would risk breaking the app.
+
+## 6. Outstanding work
 
 1. Add My Duty navigation with the actual route and correct permission gating; verify the route exists in the current branch before linking it.
 2. Replace/extend the existing Owner Attendance page with the required six-tab dashboard only after locating and verifying all real server-function signatures and database column names.
@@ -101,6 +108,6 @@ The draft covers:
 8. Perform role-based end-to-end checks: staff self-only data access, manager permitted actions, owner-only settings, duplicate approval prevention, GPS stale/accuracy handling, and push behavior.
 9. Keep the pull request Draft and unmerged until the owner explicitly authorizes further release steps.
 
-## 6. Release assessment
+## 7. Release assessment
 
 **Not production-ready.** This inspection found a partially implemented Attendance overview and missing navigation integration. Runtime behavior, approval-trigger reconciliation, push delivery, role-based end-to-end access, and all requested build checks remain unverified. No destructive retention workflow should be enabled.
