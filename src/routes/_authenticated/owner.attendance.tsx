@@ -15,7 +15,7 @@ import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functio
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export const Route = createFileRoute("/_authenticated/owner/attendance")({
+export const Route = createFileRoute("/owner/attendance")({
   head: () => ({
     meta: [
       { title: "Staff Duty Monitoring — Flamio" },
