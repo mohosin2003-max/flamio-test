@@ -22,6 +22,12 @@ export const Route = createFileRoute("/_authenticated/attendance")({
   component: MyAttendance,
 });
 
+type AttendanceShift = { id: string; start_time: string; end_time: string; is_overnight: boolean; duty_role: string | null; planned_break_minutes: number; status: string };
+type AttendanceSession = { id: string; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
+type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean };
+type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null };
+type AttendanceWorkspace = { shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string } | null };
+
 function MyAttendance() {
   const qc = useQueryClient();
   const getWorkspace = useServerFn(staffGetAttendanceWorkspace);
@@ -56,7 +62,7 @@ function MyAttendance() {
   };
   if (query.isLoading) return <div className="space-y-3"><Skeleton className="h-32 w-full"/><Skeleton className="h-48 w-full"/></div>;
   if (query.error || !query.data) return <EmptyState title="Attendance unavailable" description="Your attendance workspace could not be loaded." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
-  const { shifts, sessions, tasks, requests, activeBreak } = query.data;
+  const { shifts, sessions, tasks, requests, activeBreak } = query.data as AttendanceWorkspace;
   const activeSession = sessions.find((s) => !s.clock_out_at);
   const pendingTasks = tasks.filter((t) => !["completed","verified","cancelled"].includes(t.status));
   const dateTime = (v: string) => new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
