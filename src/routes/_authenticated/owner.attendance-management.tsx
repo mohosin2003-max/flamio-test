@@ -20,7 +20,7 @@ import {
   ownerSetAttendanceStationActive,
 } from "@/lib/attendance-management.functions";
 
-export const Route = createFileRoute("/owner/attendance-management")({
+export const Route = createFileRoute("/_authenticated/owner/attendance-management")({
   head: () => ({ meta: [{ title: "Attendance Schedules — Flamio" }, { name: "robots", content: "noindex" }] }),
   component: AttendanceManagement,
 });
