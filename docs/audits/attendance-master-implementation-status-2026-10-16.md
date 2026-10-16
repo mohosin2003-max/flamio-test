@@ -1,6 +1,6 @@
 # FLAMIO ATTENDANCE MASTER — Implementation Status & Release Gate
 
-**Updated:** 2026-10-16 (security-draft follow-up)  
+**Updated:** 2026-10-16 (TEST security migration and CI verification)  
 **Decision:** INCOMPLETE — do not merge or deploy  
 **Repository:** `mohosin2003-max/flamio-test`  
 **Branch:** `feature/attendance-master-safe`  
@@ -16,41 +16,42 @@
 - Staff workspace for own attendance history, clock-in/out, breaks, today's shift list, assigned tasks, interactive checklist items, and leave/correction/missed-punch/overtime requests.
 - Owner workflow UI for task assignment with checklist items, task verification/return, and request approve/reject.
 - Audit-log inserts are attempted for the main attendance mutations. Logging failures are recorded to server logs; they do not roll back the primary mutation.
-- Expanded GitHub Actions validation workflow to build and lint the Attendance implementation files.
-- PR #1 body updated to reflect the actual implementation and remaining gaps.
-- Review-only schema draft now explicitly restricts settings updates to Owner, revokes `has_role()` from PUBLIC/anon while granting authenticated/service_role, and removes staff phone from the team-directory RPC return contract.
-- Added `docs/sql/attendance_master_completion_extension.sql` as an unapplied draft for geofence/verification settings, station coordinates, atomic single-use QR challenge consumption, and 30-day closed-session retention. It is not wired end-to-end and does not configure a scheduler.
+- GitHub Actions validation workflow builds the app, runs TypeScript checking, and lints the Attendance implementation files.
+- Added `supabase/migrations/20261016120000_attendance_security_verification_extension.sql` and applied it to TEST only. It restricts attendance settings updates to Owner, revokes `has_role()` execution from PUBLIC/anon, removes staff phone from the team-directory RPC result, adds geofence/verification settings and station coordinates/radius, and creates a hash-only single-use QR challenge table plus atomic consume RPC.
+- Migration application was confirmed by Supabase migration history (`20261016074823`, `attendance_security_verification_extension_20261016`). Read-only post-migration checks confirmed the new columns, Owner-only update policy, QR table, and fixed-search-path SECURITY DEFINER RPCs exist.
+- The new GitHub Actions run for commit `df868a927050360346932765645c50028ca89be8` completed successfully: dependency install, production build/route generation, TypeScript check, and scoped ESLint all passed.
 
 ## TEST database safety and live state
 
-- Read-only policy query still shows the live `attendance_settings_manager_update` using `attendance_is_manager(auth.uid())`. The live policy has NOT been changed. The SQL draft correction is code-only and requires separate explicit approval before execution.
-- The latest TEST ACL query showed `has_role()` EXECUTE for `authenticated`, `postgres`, and `service_role`; it did not show PUBLIC/anon grants. The source SQL now explicitly revokes PUBLIC/anon to make the intended contract unambiguous, but the live ACL was not changed.
-- No SQL or migration was executed. No schema, policy, grants, or live data was changed. No live attendance write test was performed.
-- No production deployment or production database mutation occurred.
+- Only Supabase TEST ref `avwrptztixaketchgmsh` was used for the migration. Production ref `wubsldblxvkusauafwfd` was not targeted.
+- The applied migration did not delete attendance data and did not configure a retention scheduler.
+- The settings update policy is now `attendance_settings_owner_update`, using Owner-only checks in both USING and WITH CHECK.
+- `attendance_team_directory()` now returns user ID, full name and roles, not phone numbers. Confirm all callers are compatible before release.
+- QR challenge rows store token hashes, not raw QR payloads. Issuance UI and end-to-end clock-in integration remain incomplete.
+- No deployment, PR merge, attendance data write test, or Owner/Admin/Staff end-to-end acceptance cycle has been performed.
 - PR #1 remains Draft and unmerged.
 
 ## Verification evidence and limits
 
-- GitHub workflow-run lookup for the latest checked PR head returned no workflow runs.
-- Combined commit status lookup returned no status checks.
-- Therefore build/lint/typecheck success is NOT established. Do not claim CI passed.
-- No end-to-end tests with separate Owner/Admin/Staff accounts were run. No 3–4 successful test cycles can honestly be claimed.
-- The read-only TEST database policy inventory confirms the settings RLS issue remains unresolved.
+- CI run: [Attendance branch validation #122](https://github.com/mohosin2003-max/flamio-test/actions/runs/38869038124) — success for the current commit.
+- Supabase migration history and read-only post-migration schema/policy/function queries confirmed the TEST migration is present.
+- CI success does not prove runtime permissions, clock-in/out correctness, notification delivery, GPS accuracy, QR replay resistance in the complete UI, or acceptance with separate real user roles.
+- No claim is made that the full product is complete.
 
 ## Remaining release blockers
 
-1. **Security/RLS:** apply the reviewed security correction in TEST only after separate approval; test Owner vs Admin/Staff access. The draft removes phone from the team-directory RPC, but live function contract remains unchanged until applied.
-2. **Feature switches:** schema-backed toggles for geofence/GPS, selfie, QR and task workflow are not implemented in the live schema/UI.
-3. **Geofence/GPS:** no complete server-validated location event pipeline, configurable radius, entry/exit/re-entry alerts, or abuse/spoofing controls.
-4. **Notifications:** no completed push/in-app delivery worker, retry/idempotency strategy, owner sound alert, or delivery verification.
-5. **Selfie/QR:** QR challenge table and atomic consume RPC are only drafted in unapplied SQL; challenge issuance, UI, integration with clock-in, and end-to-end replay tests are missing. Selfie identity verification remains missing; no images are retained or verified.
-6. **Retention:** a 30-day closed-session purge function is drafted but not applied or scheduled. No cleanup/deletion job was run; tasks and audit logs are intentionally not deleted by the draft.
-7. **Scheduling:** editing, recurring weekday schedules, date-specific overrides, leave/calendar integration, and full schedule history are incomplete.
-8. **Request workflow:** approve/reject decisions are recorded, but all request types do not yet apply the approved changes to attendance/leave/overtime records.
-9. **Task status:** confirm the database task status transitions against the UI and test Owner verification/rejection. The current implementation needs an integration test to verify every transition against live CHECK constraints.
-10. **Request approvals:** Owner approve/reject currently records a decision only; approved leave/correction/missed-punch/overtime is not applied to the underlying shift/session data.
-11. **Testing:** run and capture the current CI build and scoped lint; add repeatable unit/integration/end-to-end tests for authorization, shifts, clock-in/out, breaks, tasks, requests, notification delivery, QR replay, privacy, retention, and regressions.
+1. **End-to-end security tests:** verify anonymous, Staff-own-row, Staff-other-row, Admin, Owner and service-role access with separate TEST identities. Confirm direct RLS access and every SECURITY DEFINER function's grants.
+2. **Feature switches/UI:** geofence, selfie, QR and attendance-alert settings columns now exist in TEST, but Owner configuration UI and end-to-end behavior are not complete.
+3. **Geofence/GPS:** no complete server-validated location event pipeline, configurable-radius enforcement, entry/exit/re-entry event tracking, or spoofing controls.
+4. **Notifications:** no verified attendance delivery worker/retry strategy, delivery record, Owner loud-sound behavior, or end-to-end push test.
+5. **QR:** challenge storage and atomic consumption exist in TEST, but challenge issuance, cryptographically random raw token generation, short expiry, UI, clock-in integration, and replay acceptance tests are missing.
+6. **Selfie:** identity verification remains missing. No image bytes or permanent photo URL should be retained; use a separately reviewed ephemeral/provider-backed flow if this remains a requirement.
+7. **Retention:** no session purge function or scheduler was added by the applied migration. No cleanup/deletion job was run. Retention requirements for sessions, location events and notification records need approval and dry-run tests before any destructive job is created.
+8. **Scheduling:** recurring weekday schedules, date-specific overrides, leave/calendar integration, and complete schedule history remain incomplete.
+9. **Request workflow:** approve/reject decisions are recorded, but approved leave/correction/missed-punch/overtime is not fully applied to underlying attendance records.
+10. **Task status:** verify all task transitions against database CHECK constraints and acceptance cases.
+11. **Acceptance:** run repeated tests for clock-in/out concurrency, breaks, overnight/overlap shifts, tasks, request application, QR replay, geofence boundaries, notification retry, and regressions.
 
 ## Release gate
 
-**Not production-ready.** Keep PR #1 Draft and unmerged. Continue only on this repository branch and TEST project. Before any database mutation, explain exact impact and rollback in Bengali and obtain separate explicit approval. Never target Production ref `wubsldblxvkusauafwfd`.
+**Not production-ready.** Keep PR #1 Draft and unmerged. Continue only on this repository branch and TEST project. Any further destructive retention work, deployment, or PR merge requires its own explicit approval. Never target Production ref `wubsldblxvkusauafwfd`.
