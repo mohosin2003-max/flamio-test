@@ -18,6 +18,7 @@ import { Route as CombosRouteImport } from './routes/combos'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as OffersRouteImport } from './routes/offers'
+import { Route as AuthenticatedAttendanceRouteImport } from './routes/_authenticated/attendance'
 import { Route as AuthenticatedChangePasswordRouteImport } from './routes/_authenticated/change-password'
 import { Route as AuthenticatedKitchenRouteImport } from './routes/_authenticated/kitchen'
 import { Route as AuthenticatedOwnerRouteImport } from './routes/_authenticated/owner'
@@ -37,6 +38,9 @@ import { Route as AuthenticatedAccountVouchersRouteImport } from './routes/_auth
 import { Route as AuthenticatedOnboardingLocationRouteImport } from './routes/_authenticated/onboarding.location'
 import { Route as AuthenticatedOwnerIndexRouteImport } from './routes/_authenticated/owner.index'
 import { Route as AuthenticatedOwnerAccountRouteImport } from './routes/_authenticated/owner.account'
+import { Route as AuthenticatedOwnerAttendanceRouteImport } from './routes/_authenticated/owner.attendance'
+import { Route as AuthenticatedOwnerAttendanceManagementRouteImport } from './routes/_authenticated/owner.attendance-management'
+import { Route as AuthenticatedOwnerAttendanceWorkflowRouteImport } from './routes/_authenticated/owner.attendance-workflow'
 import { Route as AuthenticatedOwnerBannersRouteImport } from './routes/_authenticated/owner.banners'
 import { Route as AuthenticatedOwnerChallengesRouteImport } from './routes/_authenticated/owner.challenges'
 import { Route as AuthenticatedOwnerCombosRouteImport } from './routes/_authenticated/owner.combos'
@@ -116,6 +120,11 @@ const OffersRoute = OffersRouteImport.update({
   id: '/offers',
   path: '/offers',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedAttendanceRoute = AuthenticatedAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedChangePasswordRoute =
   AuthenticatedChangePasswordRouteImport.update({
@@ -222,6 +231,24 @@ const AuthenticatedOwnerAccountRoute =
   AuthenticatedOwnerAccountRouteImport.update({
     id: '/account',
     path: '/account',
+    getParentRoute: () => AuthenticatedOwnerRoute,
+  } as any)
+const AuthenticatedOwnerAttendanceRoute =
+  AuthenticatedOwnerAttendanceRouteImport.update({
+    id: '/attendance',
+    path: '/attendance',
+    getParentRoute: () => AuthenticatedOwnerRoute,
+  } as any)
+const AuthenticatedOwnerAttendanceManagementRoute =
+  AuthenticatedOwnerAttendanceManagementRouteImport.update({
+    id: '/attendance-management',
+    path: '/attendance-management',
+    getParentRoute: () => AuthenticatedOwnerRoute,
+  } as any)
+const AuthenticatedOwnerAttendanceWorkflowRoute =
+  AuthenticatedOwnerAttendanceWorkflowRouteImport.update({
+    id: '/attendance-workflow',
+    path: '/attendance-workflow',
     getParentRoute: () => AuthenticatedOwnerRoute,
   } as any)
 const AuthenticatedOwnerBannersRoute =
@@ -437,6 +464,7 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/offers': typeof OffersRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
   '/change-password': typeof AuthenticatedChangePasswordRoute
   '/kitchen': typeof AuthenticatedKitchenRoute
   '/owner': typeof AuthenticatedOwnerRouteWithChildren
@@ -454,6 +482,9 @@ export interface FileRoutesByFullPath {
   '/account/vouchers': typeof AuthenticatedAccountVouchersRoute
   '/onboarding/location': typeof AuthenticatedOnboardingLocationRoute
   '/owner/account': typeof AuthenticatedOwnerAccountRoute
+  '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/banners': typeof AuthenticatedOwnerBannersRoute
   '/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
   '/owner/combos': typeof AuthenticatedOwnerCombosRoute
@@ -501,6 +532,7 @@ export interface FileRoutesByTo {
   '/contact': typeof ContactRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/offers': typeof OffersRoute
+  '/attendance': typeof AuthenticatedAttendanceRoute
   '/change-password': typeof AuthenticatedChangePasswordRoute
   '/kitchen': typeof AuthenticatedKitchenRoute
   '/menu/$productSlug': typeof MenuProductSlugRoute
@@ -517,6 +549,9 @@ export interface FileRoutesByTo {
   '/account/vouchers': typeof AuthenticatedAccountVouchersRoute
   '/onboarding/location': typeof AuthenticatedOnboardingLocationRoute
   '/owner/account': typeof AuthenticatedOwnerAccountRoute
+  '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/banners': typeof AuthenticatedOwnerBannersRoute
   '/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
   '/owner/combos': typeof AuthenticatedOwnerCombosRoute
@@ -565,6 +600,7 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/offers': typeof OffersRoute
+  '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
   '/_authenticated/change-password': typeof AuthenticatedChangePasswordRoute
   '/_authenticated/kitchen': typeof AuthenticatedKitchenRoute
   '/_authenticated/owner': typeof AuthenticatedOwnerRouteWithChildren
@@ -582,6 +618,9 @@ export interface FileRoutesById {
   '/_authenticated/account/vouchers': typeof AuthenticatedAccountVouchersRoute
   '/_authenticated/onboarding/location': typeof AuthenticatedOnboardingLocationRoute
   '/_authenticated/owner/account': typeof AuthenticatedOwnerAccountRoute
+  '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
+  '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
+  '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/banners': typeof AuthenticatedOwnerBannersRoute
   '/_authenticated/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
   '/_authenticated/owner/combos': typeof AuthenticatedOwnerCombosRoute
@@ -631,6 +670,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/forgot-password'
     | '/offers'
+    | '/attendance'
     | '/change-password'
     | '/kitchen'
     | '/owner'
@@ -648,6 +688,9 @@ export interface FileRouteTypes {
     | '/account/vouchers'
     | '/onboarding/location'
     | '/owner/account'
+    | '/owner/attendance'
+    | '/owner/attendance-management'
+    | '/owner/attendance-workflow'
     | '/owner/banners'
     | '/owner/challenges'
     | '/owner/combos'
@@ -695,6 +738,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/forgot-password'
     | '/offers'
+    | '/attendance'
     | '/change-password'
     | '/kitchen'
     | '/menu/$productSlug'
@@ -711,6 +755,9 @@ export interface FileRouteTypes {
     | '/account/vouchers'
     | '/onboarding/location'
     | '/owner/account'
+    | '/owner/attendance'
+    | '/owner/attendance-management'
+    | '/owner/attendance-workflow'
     | '/owner/banners'
     | '/owner/challenges'
     | '/owner/combos'
@@ -758,6 +805,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/forgot-password'
     | '/offers'
+    | '/_authenticated/attendance'
     | '/_authenticated/change-password'
     | '/_authenticated/kitchen'
     | '/_authenticated/owner'
@@ -775,6 +823,9 @@ export interface FileRouteTypes {
     | '/_authenticated/account/vouchers'
     | '/_authenticated/onboarding/location'
     | '/_authenticated/owner/account'
+    | '/_authenticated/owner/attendance'
+    | '/_authenticated/owner/attendance-management'
+    | '/_authenticated/owner/attendance-workflow'
     | '/_authenticated/owner/banners'
     | '/_authenticated/owner/challenges'
     | '/_authenticated/owner/combos'
@@ -898,6 +949,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/offers'
       preLoaderRoute: typeof OffersRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/attendance': {
+      id: '/_authenticated/attendance'
+      path: '/attendance'
+      fullPath: '/attendance'
+      preLoaderRoute: typeof AuthenticatedAttendanceRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/change-password': {
       id: '/_authenticated/change-password'
@@ -1030,6 +1088,27 @@ declare module '@tanstack/react-router' {
       path: '/account'
       fullPath: '/owner/account'
       preLoaderRoute: typeof AuthenticatedOwnerAccountRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance': {
+      id: '/_authenticated/owner/attendance'
+      path: '/attendance'
+      fullPath: '/owner/attendance'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-management': {
+      id: '/_authenticated/owner/attendance-management'
+      path: '/attendance-management'
+      fullPath: '/owner/attendance-management'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceManagementRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-workflow': {
+      id: '/_authenticated/owner/attendance-workflow'
+      path: '/attendance-workflow'
+      fullPath: '/owner/attendance-workflow'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceWorkflowRouteImport
       parentRoute: typeof AuthenticatedOwnerRoute
     }
     '/_authenticated/owner/banners': {
@@ -1313,6 +1392,9 @@ const AuthenticatedOwnerOrdersRouteWithChildren =
 
 interface AuthenticatedOwnerRouteChildren {
   AuthenticatedOwnerAccountRoute: typeof AuthenticatedOwnerAccountRoute
+  AuthenticatedOwnerAttendanceRoute: typeof AuthenticatedOwnerAttendanceRoute
+  AuthenticatedOwnerAttendanceManagementRoute: typeof AuthenticatedOwnerAttendanceManagementRoute
+  AuthenticatedOwnerAttendanceWorkflowRoute: typeof AuthenticatedOwnerAttendanceWorkflowRoute
   AuthenticatedOwnerBannersRoute: typeof AuthenticatedOwnerBannersRoute
   AuthenticatedOwnerChallengesRoute: typeof AuthenticatedOwnerChallengesRoute
   AuthenticatedOwnerCombosRoute: typeof AuthenticatedOwnerCombosRoute
@@ -1345,6 +1427,11 @@ interface AuthenticatedOwnerRouteChildren {
 
 const AuthenticatedOwnerRouteChildren: AuthenticatedOwnerRouteChildren = {
   AuthenticatedOwnerAccountRoute: AuthenticatedOwnerAccountRoute,
+  AuthenticatedOwnerAttendanceRoute: AuthenticatedOwnerAttendanceRoute,
+  AuthenticatedOwnerAttendanceManagementRoute:
+    AuthenticatedOwnerAttendanceManagementRoute,
+  AuthenticatedOwnerAttendanceWorkflowRoute:
+    AuthenticatedOwnerAttendanceWorkflowRoute,
   AuthenticatedOwnerBannersRoute: AuthenticatedOwnerBannersRoute,
   AuthenticatedOwnerChallengesRoute: AuthenticatedOwnerChallengesRoute,
   AuthenticatedOwnerCombosRoute: AuthenticatedOwnerCombosRoute,
@@ -1380,6 +1467,7 @@ const AuthenticatedOwnerRouteWithChildren =
   AuthenticatedOwnerRoute._addFileChildren(AuthenticatedOwnerRouteChildren)
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAttendanceRoute: typeof AuthenticatedAttendanceRoute
   AuthenticatedChangePasswordRoute: typeof AuthenticatedChangePasswordRoute
   AuthenticatedKitchenRoute: typeof AuthenticatedKitchenRoute
   AuthenticatedOwnerRoute: typeof AuthenticatedOwnerRouteWithChildren
@@ -1397,6 +1485,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAttendanceRoute: AuthenticatedAttendanceRoute,
   AuthenticatedChangePasswordRoute: AuthenticatedChangePasswordRoute,
   AuthenticatedKitchenRoute: AuthenticatedKitchenRoute,
   AuthenticatedOwnerRoute: AuthenticatedOwnerRouteWithChildren,
