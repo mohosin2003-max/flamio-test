@@ -12,7 +12,7 @@ export const ownerGetAttendanceOverview = createServerFn({ method: "GET" })
 
     const [settingsResult, sessionsResult, tasksResult] = await Promise.all([
       db.from("attendance_settings")
-        .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, updated_at")
+        .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled, updated_at")
         .eq("id", true)
         .maybeSingle(),
       db.from("attendance_sessions")
