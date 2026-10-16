@@ -946,6 +946,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKitchenRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/attendance': {
+      id: '/_authenticated/attendance'
+      path: '/attendance'
+      fullPath: '/attendance'
+      preLoaderRoute: typeof AuthenticatedAttendanceRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/owner': {
       id: '/_authenticated/owner'
       path: '/owner'
@@ -1105,6 +1112,27 @@ declare module '@tanstack/react-router' {
       path: '/data-storage'
       fullPath: '/owner/data-storage'
       preLoaderRoute: typeof AuthenticatedOwnerDataStorageRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance': {
+      id: '/_authenticated/owner/attendance'
+      path: '/attendance'
+      fullPath: '/owner/attendance'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-management': {
+      id: '/_authenticated/owner/attendance-management'
+      path: '/attendance-management'
+      fullPath: '/owner/attendance-management'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceManagementRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-workflow': {
+      id: '/_authenticated/owner/attendance-workflow'
+      path: '/attendance-workflow'
+      fullPath: '/owner/attendance-workflow'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceWorkflowRouteImport
       parentRoute: typeof AuthenticatedOwnerRoute
     }
     '/_authenticated/owner/delivery': {
