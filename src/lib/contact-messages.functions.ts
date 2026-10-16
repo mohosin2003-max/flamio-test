@@ -154,6 +154,8 @@ export const ownerListContactThreads = createServerFn({ method: "GET" })
       .from("customer_conversations")
       .select("id, customer_user_id, last_message_at")
       .order("last_message_at", { ascending: false });
+    // Table absent (e.g. attendance-only TEST database): show an empty inbox instead of crashing.
+    if (error?.code === "PGRST205") return [];
     if (error) throw new Error("We couldn't load customer conversations. Please try again.");
     const ids = (conversations ?? []).map((row) => row.customer_user_id as string);
     const conversationIds = (conversations ?? []).map((row) => row.id as string);
