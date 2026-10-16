@@ -56,7 +56,9 @@ function AttendanceManagement() {
   if (query.isLoading) return <div className="space-y-3"><Skeleton className="h-32 w-full" /><Skeleton className="h-48 w-full" /></div>;
   if (query.error || !query.data) return <EmptyState title="Attendance management unavailable" description="Could not load staff schedules from the TEST database." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
 
-  const { stations, shifts, staff } = query.data;
+  const stations: { id: string; name: string; description: string | null; isActive: boolean; sortOrder: number }[] = query.data.stations;
+  const shifts: { id: string; staffName: string; dutyRole: string | null; shiftDate: string; startTime: string; endTime: string; isOvernight: boolean; stationId: string | null; plannedBreakMinutes: number; status: string; notes: string | null }[] = query.data.shifts;
+  const staff: { id: string; name: string }[] = query.data.staff;
   return <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="font-display text-xl font-bold">Attendance schedules</h2><p className="text-sm text-muted-foreground">Owner-only controls · TEST environment</p></div>
