@@ -17,7 +17,7 @@ import {
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
 
-export const Route = createFileRoute("/attendance")({
+export const Route = createFileRoute("/_authenticated/attendance")({
   head: () => ({ meta: [{ title: "My Attendance — Flamio" }, { name: "robots", content: "noindex" }] }),
   component: MyAttendance,
 });
