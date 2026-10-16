@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -152,6 +153,29 @@ export const ownerCreateAttendanceStation = createServerFn({ method: "POST" })
       throw new Error("Could not create station.");
     }
     return { ok: true };
+  });
+
+export const ownerIssueAttendanceQrChallenge = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ stationId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    await requireAttendanceOwner(context.userId);
+    const { untypedAdmin } = await import("@/lib/untyped-db.server");
+    const db = await untypedAdmin();
+    const { data: station, error: stationError } = await db.from("attendance_stations")
+      .select("id, name, is_active").eq("id", data.stationId).maybeSingle();
+    if (stationError || !station?.is_active) throw new Error("Choose an active station to generate a QR challenge.");
+    const token = randomBytes(32).toString("base64url");
+    const tokenHash = createHash("sha256").update(token, "utf8").digest("hex");
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const { error } = await db.from("attendance_qr_challenges").insert({
+      station_id: station.id, token_hash: tokenHash, created_by: context.userId, expires_at: expiresAt,
+    });
+    if (error) {
+      console.error("Attendance QR challenge issue failed", error.message);
+      throw new Error("Could not generate a station QR challenge.");
+    }
+    return { stationId: station.id, stationName: station.name, token, expiresAt };
   });
 
 export const ownerSetAttendanceStationActive = createServerFn({ method: "POST" })
