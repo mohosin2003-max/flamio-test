@@ -8,7 +8,7 @@ const noteSchema = z.string().trim().max(500).nullable().optional();
 
 async function dbForUser(userId: string) {
   const access = await getAccessProfile(userId);
-  if (!access.roles?.includes("staff") && !access.isOwner) {
+  if (!access.isStaff && !access.isOwner) {
     throw new Error("Only authorized staff or the Owner can access attendance operations.");
   }
   const { untypedAdmin } = await import("@/lib/untyped-db.server");
@@ -43,7 +43,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const [settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult] = await Promise.all([
       db.from("attendance_settings")
         .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in")
@@ -97,7 +97,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
       .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in")
       .eq("id", true).maybeSingle();
@@ -169,7 +169,7 @@ export const staffClockOut = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ note: noteSchema }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const now = new Date();
     const { data: session, error: readError } = await db.from("attendance_sessions")
       .select("id, user_id, shift_id, clock_in_at, break_minutes, status")
@@ -205,7 +205,7 @@ export const staffStartBreak = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: session, error } = await db.from("attendance_sessions")
       .select("id").eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !session) throw new Error("Clock in before starting a break.");
@@ -225,7 +225,7 @@ export const staffEndBreak = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: openBreak, error } = await db.from("attendance_breaks").select("id, session_id, started_at")
       .eq("user_id", context.userId).is("ended_at", null).order("started_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !openBreak) throw new Error("No active break was found.");
@@ -248,7 +248,7 @@ export const staffCompleteAttendanceTask = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ taskId: z.string().uuid(), completionNote: z.string().trim().max(1000).nullable().optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: task, error } = await db.from("attendance_tasks")
       .select("id, assigned_to, status, requires_verification").eq("id", data.taskId).eq("assigned_to", context.userId).maybeSingle();
     if (error || !task) throw new Error("Task not found.");
@@ -279,7 +279,7 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
   }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.").refine((v) => v.requestType !== "correction" || Boolean(v.sessionId && (v.requestedClockIn || v.requestedClockOut)), "Correction requires a session and a requested time.").refine((v) => v.requestType !== "missed_punch" || Boolean(v.targetDate && v.requestedClockIn && v.requestedClockOut), "Missed punch requires a date and both times.").refine((v) => v.requestType !== "overtime" || Boolean(v.sessionId && v.requestedOvertimeMinutes), "Overtime requires a session and minutes.").parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: request, error } = await db.from("attendance_requests").insert({
       user_id: context.userId, request_type: data.requestType, session_id: data.sessionId ?? null, leave_type: data.leaveType ?? null,
       leave_start_date: data.leaveStartDate ?? null, leave_end_date: data.leaveEndDate ?? null,
@@ -398,7 +398,7 @@ export const staffToggleAttendanceTaskItem = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ itemId: z.string().uuid(), isDone: z.boolean() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.roles?.includes("staff")) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: item, error: readError } = await db.from("attendance_task_items")
       .select("id, task_id, label, is_done").eq("id", data.itemId).maybeSingle();
     if (readError || !item) throw new Error("Checklist item not found.");
