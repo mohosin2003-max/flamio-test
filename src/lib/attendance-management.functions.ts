@@ -13,7 +13,10 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 const stationInput = z.object({
   name: z.string().trim().min(2).max(80),
   description: z.string().trim().max(300).nullable().optional(),
-});
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  geofenceRadiusMeters: z.number().int().min(25).max(1000).default(100),
+}).refine((value) => (value.latitude == null) === (value.longitude == null), "Latitude and longitude must both be supplied.");
 
 const shiftInput = z.object({
   userId: z.string().uuid(),
@@ -70,7 +73,7 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
     const db = await untypedAdmin();
     const [stationsResult, shiftsResult, profilesResult, tasksResult] = await Promise.all([
       db.from("attendance_stations")
-        .select("id, name, description, is_active, sort_order")
+        .select("id, name, description, is_active, sort_order, latitude, longitude, geofence_radius_meters")
         .order("sort_order")
         .order("name"),
       db.from("attendance_shifts")
@@ -102,6 +105,9 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
       stations: (stationsResult.data ?? []).map((s: Record<string, unknown>) => ({
         id: String(s.id), name: String(s.name), description: s.description ? String(s.description) : null,
         isActive: Boolean(s.is_active), sortOrder: Number(s.sort_order ?? 0),
+        latitude: s.latitude == null ? null : Number(s.latitude),
+        longitude: s.longitude == null ? null : Number(s.longitude),
+        geofenceRadiusMeters: Number(s.geofence_radius_meters ?? 100),
       })),
       tasks: (tasksResult.data ?? []).map((t: Record<string, unknown>) => ({
         id: String(t.id), assignedTo: String(t.assigned_to), staffName: names.get(String(t.assigned_to)) ?? "Staff member",
@@ -136,6 +142,9 @@ export const ownerCreateAttendanceStation = createServerFn({ method: "POST" })
     const { error } = await db.from("attendance_stations").insert({
       name: data.name,
       description: data.description ?? null,
+      latitude: data.latitude ?? null,
+      longitude: data.longitude ?? null,
+      geofence_radius_meters: data.geofenceRadiusMeters,
       created_by: context.userId,
     });
     if (error) {
