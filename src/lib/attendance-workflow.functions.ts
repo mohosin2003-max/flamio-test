@@ -157,6 +157,10 @@ export const staffClockIn = createServerFn({ method: "POST" })
       throw new Error("Clock-in failed. Please refresh and try again.");
     }
     await audit(db, { tableName: "attendance_sessions", rowId: session.id, action: "clock_in", actorId: context.userId, subjectUserId: context.userId, newData: session });
+    if (lateMinutes > 0) {
+      const { sendLateArrivalAlert } = await import("@/lib/attendance-push.server");
+      await sendLateArrivalAlert({ sessionId: session.id, userId: context.userId, minutesLate: lateMinutes });
+    }
     return { ok: true, session };
   });
 
@@ -285,6 +289,8 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
     }).select("id, request_type, status, created_at").single();
     if (error || !request) throw new Error("Could not submit attendance request.");
     await audit(db, { tableName: "attendance_requests", rowId: request.id, action: "request_created", actorId: context.userId, subjectUserId: context.userId, newData: request });
+    const { sendPendingRequestAlert } = await import("@/lib/attendance-push.server");
+    await sendPendingRequestAlert({ requestId: request.id, userId: context.userId, requestType: request.request_type });
     return { ok: true, request };
   });
 
@@ -314,11 +320,20 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
     if (readError || !current) throw new Error("Attendance request not found.");
     if (current.status !== "pending") throw new Error("This request has already been reviewed.");
     const now = new Date().toISOString();
-    const { error } = await db.from("attendance_requests").update({
+    const { data: updated, error } = await db.from("attendance_requests").update({
       status: data.decision, reviewed_by: context.userId, reviewed_at: now, review_note: data.reviewNote ?? null,
-    }).eq("id", current.id).eq("status", "pending");
+    }).eq("id", current.id).eq("status", "pending").select("id").maybeSingle();
     if (error) throw new Error("Could not review attendance request.");
+    if (!updated) throw new Error("This request has already been reviewed.");
     await audit(db, { tableName: "attendance_requests", rowId: current.id, action: data.decision, actorId: context.userId, subjectUserId: current.user_id, oldData: current, newData: { status: data.decision, reviewedAt: now, reviewNote: data.reviewNote ?? null } });
+    const { sendRequestDecisionAlert } = await import("@/lib/attendance-push.server");
+    await sendRequestDecisionAlert({
+      requestId: current.id,
+      userId: current.user_id,
+      requestType: current.request_type,
+      approved: data.decision === "approved",
+      note: data.reviewNote ?? null,
+    });
     return { ok: true };
   });
 
