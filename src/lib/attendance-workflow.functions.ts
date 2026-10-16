@@ -28,7 +28,7 @@ async function audit(db: any, input: {
   const { error } = await db.from("attendance_audit_log").insert({
     table_name: input.tableName,
     row_id: input.rowId ?? null,
-    action: input.action,
+    action: ["clock_in", "break_start", "request_created", "task_created"].includes(input.action) ? "INSERT" : "UPDATE",
     actor_id: input.actorId,
     subject_user_id: input.subjectUserId ?? null,
     old_data: input.oldData ?? null,
