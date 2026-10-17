@@ -10,7 +10,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -19,11 +19,7 @@ import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { FloatingCartBar, FloatingCartSpacer } from "@/components/cart/FloatingCartBar";
 import { BottomNav, BottomNavSpacer } from "@/components/layout/BottomNav";
-// Staff-only navigation is downloaded only when a staff workspace page opens.
-const StaffBottomNav = lazy(() =>
-  import("@/components/layout/StaffBottomNav").then((m) => ({ default: m.StaffBottomNav })),
-);
-const StaffBottomNavSpacer = () => <div aria-hidden="true" className="h-20" />;
+import { StaffBottomNav, StaffBottomNavSpacer } from "@/components/layout/StaffBottomNav";
 import { Toaster } from "@/components/ui/sonner";
 import { CartProvider } from "@/context/cart";
 import { useAuth } from "@/hooks/use-auth";
