@@ -12,3 +12,4 @@
 - Opening hours and scheduled-order slots live in `src/lib/opening-hours.ts` (pure, Asia/Dhaka) with the server read in `opening-hours.server.ts`; placeOrder and game play re-check them server-side — one source of truth for browser preview and server enforcement.
 - Scheduled pre-orders are ordinary `orders` rows with status `scheduled`; `activate_due_scheduled_orders()` (run by the minute dispatcher) flips them to `placed`, which reuses the existing alert/Kitchen/alarm path — no parallel order system.
 - Home install UI is isolated in InstallAppBanner; it consumes browser install events without registering or changing service workers, keeping notification delivery independent.
+- Keep shared staff navigation eagerly imported by the root layout so a separate lazy navigation download cannot replace the entire workspace with a route error.
