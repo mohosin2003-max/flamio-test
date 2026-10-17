@@ -13,7 +13,8 @@ const settingsInput = z.object({
   allowUnscheduledClockIn: z.boolean(),
   geofenceEnabled: z.boolean(),
   qrVerificationEnabled: z.boolean(),
-  selfieVerificationEnabled: z.boolean(),
+  // Fail closed until the selfie capture flow is implemented end-to-end.
+  selfieVerificationEnabled: z.literal(false),
   attendanceAlertsEnabled: z.boolean(),
 });
 
