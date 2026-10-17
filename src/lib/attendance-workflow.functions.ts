@@ -119,7 +119,27 @@ export const staffClockIn = createServerFn({ method: "POST" })
     const { data: active, error: activeError } = await db.from("attendance_sessions")
       .select("id").eq("user_id", context.userId).is("clock_out_at", null).limit(1);
     if (activeError) throw new Error("Could not check current duty status.");
-    if (active?.length) throw new Error("You are already clocked in.");
+    if (active?.length) {
+      // Recover only sessions that have exceeded the configured maximum, capped at
+      // clock_in_at + max_session_hours. The DB RPC closes the session and open
+      // break atomically and flags the record for Owner review.
+      const { data: recovered, error: recoveryError } = await db.rpc(
+        "attendance_auto_close_stale_session",
+        { _user_id: context.userId, _max_session_hours: Number(settings.max_session_hours) },
+      );
+      if (recoveryError) {
+        console.error("Attendance stale-session recovery failed", recoveryError.message);
+        throw new Error("An earlier duty session needs Owner review before you can clock in.");
+      }
+      if (!recovered) throw new Error("You are already clocked in.");
+      await audit(db, {
+        tableName: "attendance_sessions",
+        action: "stale_session_auto_closed",
+        actorId: context.userId,
+        subjectUserId: context.userId,
+        newData: { maxSessionHours: Number(settings.max_session_hours), reviewRequired: true },
+      });
+    }
     const { data: latest, error: latestError } = await db.from("attendance_sessions")
       .select("clock_in_at, clock_out_at").eq("user_id", context.userId)
       .order("clock_in_at", { ascending: false }).limit(1);
