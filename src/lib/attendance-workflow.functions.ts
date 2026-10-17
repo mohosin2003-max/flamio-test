@@ -111,9 +111,12 @@ export const staffClockIn = createServerFn({ method: "POST" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
-      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, attendance_alerts_enabled")
+      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
+    if (settings.selfie_verification_enabled) {
+      throw new Error("Selfie verification is enabled but the capture flow is not available yet. Ask the Owner to disable it before clocking in.");
+    }
     const now = new Date();
     const nowIso = now.toISOString();
     const { data: active, error: activeError } = await db.from("attendance_sessions")
