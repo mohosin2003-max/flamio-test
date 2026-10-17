@@ -111,15 +111,38 @@ export const staffClockIn = createServerFn({ method: "POST" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
-      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, attendance_alerts_enabled")
+      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
+    if (settings.selfie_verification_enabled) {
+      throw new Error("Selfie verification is enabled but the capture flow is not available yet. Ask the Owner to disable it before clocking in.");
+    }
     const now = new Date();
     const nowIso = now.toISOString();
     const { data: active, error: activeError } = await db.from("attendance_sessions")
       .select("id").eq("user_id", context.userId).is("clock_out_at", null).limit(1);
     if (activeError) throw new Error("Could not check current duty status.");
-    if (active?.length) throw new Error("You are already clocked in.");
+    if (active?.length) {
+      // Recover only sessions that have exceeded the configured maximum, capped at
+      // clock_in_at + max_session_hours. The DB RPC closes the session and open
+      // break atomically and flags the record for Owner review.
+      const { data: recovered, error: recoveryError } = await db.rpc(
+        "attendance_auto_close_stale_session",
+        { _user_id: context.userId, _max_session_hours: Number(settings.max_session_hours) },
+      );
+      if (recoveryError) {
+        console.error("Attendance stale-session recovery failed", recoveryError.message);
+        throw new Error("An earlier duty session needs Owner review before you can clock in.");
+      }
+      if (!recovered) throw new Error("You are already clocked in.");
+      await audit(db, {
+        tableName: "attendance_sessions",
+        action: "stale_session_auto_closed",
+        actorId: context.userId,
+        subjectUserId: context.userId,
+        newData: { maxSessionHours: Number(settings.max_session_hours), reviewRequired: true },
+      });
+    }
     const { data: latest, error: latestError } = await db.from("attendance_sessions")
       .select("clock_in_at, clock_out_at").eq("user_id", context.userId)
       .order("clock_in_at", { ascending: false }).limit(1);
@@ -354,6 +377,34 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
       await sendPendingRequestAlert({ requestId: request.id, userId: context.userId, requestType: request.request_type });
     }
     return { ok: true, request };
+  });
+
+
+export const staffCancelAttendanceRequest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ requestId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { access, db } = await dbForUser(context.userId);
+    if (!access.isStaff) throw new Error("Only staff accounts can cancel attendance requests.");
+    const { data: updated, error } = await db.from("attendance_requests")
+      .update({ status: "cancelled" })
+      .eq("id", data.requestId)
+      .eq("user_id", context.userId)
+      .eq("status", "pending")
+      .select("id, user_id, request_type, status")
+      .maybeSingle();
+    if (error || !updated) {
+      throw new Error("This request is no longer pending or does not belong to you.");
+    }
+    await audit(db, {
+      tableName: "attendance_requests",
+      rowId: updated.id,
+      action: "staff_cancelled",
+      actorId: context.userId,
+      subjectUserId: context.userId,
+      newData: updated,
+    });
+    return { ok: true, status: updated.status };
   });
 
 export const ownerListAttendanceRequests = createServerFn({ method: "GET" })

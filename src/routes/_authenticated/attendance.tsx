@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { CheckCircle2, Coffee, LogIn, LogOut, RefreshCw, Send } from "lucide-react";
+import { Camera, CheckCircle2, Coffee, LogIn, LogOut, RefreshCw, Send, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { QrScannerDialog } from "@/components/attendance/QrScannerDialog";
 import {
-  staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
+  staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
 
@@ -38,9 +39,11 @@ function MyAttendance() {
   const completeTask = useServerFn(staffCompleteAttendanceTask);
   const toggleTaskItem = useServerFn(staffToggleAttendanceTaskItem);
   const createRequest = useServerFn(staffCreateAttendanceRequest);
+  const cancelRequest = useServerFn(staffCancelAttendanceRequest);
   const [shiftId, setShiftId] = useState("");
   const [note, setNote] = useState("");
   const [qrToken, setQrToken] = useState("");
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [completionNotes, setCompletionNotes] = useState<Record<string,string>>({});
   const [requestType, setRequestType] = useState<"leave"|"correction"|"missed_punch"|"overtime">("leave");
   const [leaveType, setLeaveType] = useState("annual");
@@ -74,7 +77,7 @@ function MyAttendance() {
       {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p><div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void run(() => endBreak(), "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void run(() => startBreak(), "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => void run(() => clockOut({ data: { note: note.trim() || null } }), "Clocked out")}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void run(async () => { const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; qrToken?: string } = { shiftId: shiftId || null, note: note.trim() || null }; if (settings?.geofence_enabled) { if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; } if (settings?.qr_verification_enabled) { if (!qrToken.trim()) throw new Error("Enter the station QR token before clocking in."); payload.qrToken = qrToken.trim(); } await clockIn({ data: payload }); }, "Clocked in");}}>
         <div className="space-y-1"><Label htmlFor="attendance-shift">Today's shift</Label><select id="attendance-shift" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={shiftId} onChange={(e)=>setShiftId(e.target.value)}><option value="">Unscheduled / automatic selection</option>{shifts.filter((s) =>s.status==="scheduled").map((s) =><option key={s.id} value={s.id}>{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" overnight":""}{s.duty_role?" · "+s.duty_role:""}</option>)}</select></div>
         <div className="space-y-1"><Label htmlFor="punch-note">Note (optional)</Label><Input id="punch-note" maxLength={500} value={note} onChange={(e)=>setNote(e.target.value)}/></div>
-        {settings?.geofence_enabled ? <p className="text-xs text-muted-foreground">GPS geofence is enabled. Allow precise location when prompted; location is checked against your assigned station on the server.</p> : null}{settings?.qr_verification_enabled ? <div className="space-y-1"><Label htmlFor="attendance-qr-token">Station QR token</Label><Input id="attendance-qr-token" autoComplete="off" maxLength={512} value={qrToken} onChange={(e) => setQrToken(e.target.value)} placeholder="Paste the token from your station QR"/></div> : null}<p className="text-xs text-muted-foreground">Clock-in uses server time and current Owner settings. Selfie verification is not available.</p><Button disabled={busy}><LogIn className="mr-2 h-4 w-4"/>Clock in</Button>
+        {settings?.geofence_enabled ? <p className="text-xs text-muted-foreground">GPS geofence is enabled. Allow precise location when prompted; location is checked against your assigned station on the server.</p> : null}{settings?.qr_verification_enabled ? <div className="space-y-2"><Label htmlFor="attendance-qr-token">Station QR token</Label><Input id="attendance-qr-token" autoComplete="off" maxLength={512} value={qrToken} onChange={(e) => setQrToken(e.target.value)} placeholder="Paste the token from your station QR"/><Button type="button" variant="outline" disabled={busy} onClick={()=>setQrScannerOpen(true)}><Camera className="mr-2 h-4 w-4"/>Scan station QR</Button><p className="text-xs text-muted-foreground">Camera scanning requires permission and a supported Android browser. Manual token entry remains available.</p></div> : null}<p className="text-xs text-muted-foreground">Clock-in uses server time and current Owner settings. Selfie verification is not available.</p><Button disabled={busy}><LogIn className="mr-2 h-4 w-4"/>Clock in</Button>
       </form>}
     </CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Today's schedule</h3>{shifts.length?shifts.map((s) =><div key={s.id} className="rounded-lg border p-3"><p className="font-semibold">{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" · overnight":""}</p><p className="text-sm text-muted-foreground">{s.duty_role||"Scheduled duty"} · break {s.planned_break_minutes} min · {s.status}</p></div>):<p className="text-sm text-muted-foreground">No shift assigned for today.</p>}</CardContent></Card>
@@ -86,7 +89,8 @@ function MyAttendance() {
       {requestType!=="leave"?<>{(requestType==="correction"||requestType==="overtime")?<div className="space-y-1 sm:col-span-2"><Label htmlFor="request-session">Attendance session</Label><select id="request-session" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={requestSessionId} onChange={(e)=>setRequestSessionId(e.target.value)}><option value="">Select session</option>{sessions.map((s) =><option key={s.id} value={s.id}>{s.duty_date} · {dateTime(s.clock_in_at)}</option>)}</select></div>:null}<div className="space-y-1"><Label htmlFor="request-date">Target date</Label><Input id="request-date" type="date" required value={targetDate} onChange={(e)=>setTargetDate(e.target.value)}/></div>{requestType==="correction"||requestType==="missed_punch"?<><div className="space-y-1"><Label htmlFor="requested-in">Requested clock-in</Label><Input id="requested-in" type="datetime-local" required value={requestedIn} onChange={(e)=>setRequestedIn(e.target.value)}/></div><div className="space-y-1"><Label htmlFor="requested-out">Requested clock-out</Label><Input id="requested-out" type="datetime-local" required value={requestedOut} onChange={(e)=>setRequestedOut(e.target.value)}/></div></>:<div className="space-y-1"><Label htmlFor="overtime-minutes">Overtime minutes</Label><Input id="overtime-minutes" type="number" min={1} max={960} value={overtime} onChange={(e)=>setOvertime(e.target.value)}/></div>}</>:null}
       <div className="space-y-1 sm:col-span-2"><Label htmlFor="request-reason">Reason</Label><Textarea id="request-reason" required minLength={5} maxLength={1000} value={reason} onChange={(e)=>setReason(e.target.value)}/></div><Button disabled={busy} className="sm:col-span-2"><Send className="mr-2 h-4 w-4"/>Submit request</Button>
     </form>
-    <div className="space-y-2">{requests.map((r) =><div key={r.id} className="rounded-lg border p-3"><div className="flex justify-between gap-2"><p className="font-semibold">{r.request_type.replaceAll("_"," ")}</p><span className="text-xs">{r.status}</span></div><p className="text-sm text-muted-foreground">{r.reason}</p>{r.review_note?<p className="text-xs">Owner note: {r.review_note}</p>:null}</div>)}</div>
+    <div className="space-y-2">{requests.map((r) =><div key={r.id} className="rounded-lg border p-3"><div className="flex justify-between gap-2"><p className="font-semibold">{r.request_type.replaceAll("_"," ")}</p><span className="text-xs">{r.status}</span></div><p className="text-sm text-muted-foreground">{r.reason}</p>{r.review_note?<p className="text-xs">Owner note: {r.review_note}</p>:null}{r.status==="pending"?<Button type="button" size="sm" variant="outline" disabled={busy} onClick={()=>void run(()=>cancelRequest({data:{requestId:r.id}}),"Request cancelled")}><XCircle className="mr-1 h-4 w-4"/>Cancel request</Button>:null}</div>)}</div>
     </CardContent></Card>
+    <QrScannerDialog open={qrScannerOpen} onOpenChange={setQrScannerOpen} onScan={(token)=>{setQrToken(token);toast.success("Station QR scanned");}} />
   </div>;
 }
