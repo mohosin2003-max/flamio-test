@@ -22,6 +22,10 @@ type QrScannerDialogProps = {
 /** Android-browser QR scanning; manual token entry remains the fallback. */
 export function QrScannerDialog({ open, onOpenChange, onScan }: QrScannerDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const onOpenChangeRef = useRef(onOpenChange);
+  const onScanRef = useRef(onScan);
+  onOpenChangeRef.current = onOpenChange;
+  onScanRef.current = onScan;
   const [message, setMessage] = useState("Starting camera…");
 
   useEffect(() => {
@@ -73,8 +77,8 @@ export function QrScannerDialog({ open, onOpenChange, onScan }: QrScannerDialogP
               const token = codes.find((code) => code.rawValue?.trim())?.rawValue?.trim();
               if (token) {
                 stop();
-                onScan(token);
-                onOpenChange(false);
+                onScanRef.current(token);
+                onOpenChangeRef.current(false);
                 return;
               }
             } catch {
@@ -91,7 +95,7 @@ export function QrScannerDialog({ open, onOpenChange, onScan }: QrScannerDialogP
 
     void start();
     return stop;
-  }, [open, onOpenChange, onScan]);
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
