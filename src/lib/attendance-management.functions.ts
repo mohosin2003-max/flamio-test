@@ -155,6 +155,31 @@ export const ownerCreateAttendanceStation = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const ownerUpdateAttendanceStation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => stationInput.extend({ stationId: z.string().uuid(), isActive: z.boolean().optional() }).parse(input))
+  .handler(async ({ data, context }) => {
+    await requireAttendanceOwner(context.userId);
+    const { untypedAdmin } = await import("@/lib/untyped-db.server");
+    const db = await untypedAdmin();
+    const { stationId, isActive, ...fields } = data;
+    const update: Record<string, unknown> = {
+      name: fields.name,
+      description: fields.description ?? null,
+      latitude: fields.latitude ?? null,
+      longitude: fields.longitude ?? null,
+      geofence_radius_meters: fields.geofenceRadiusMeters,
+    };
+    if (isActive !== undefined) update.is_active = isActive;
+    const { data: station, error } = await db.from("attendance_stations")
+      .update(update).eq("id", stationId).select("id").maybeSingle();
+    if (error || !station) {
+      console.error("Attendance station update failed", error?.message ?? "Station not found");
+      throw new Error("Could not update station.");
+    }
+    return { ok: true };
+  });
+
 export const ownerIssueAttendanceQrChallenge = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({ stationId: z.string().uuid() }).parse(input))
