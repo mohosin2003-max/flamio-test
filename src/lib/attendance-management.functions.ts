@@ -157,7 +157,7 @@ export const ownerCreateAttendanceStation = createServerFn({ method: "POST" })
 
 export const ownerUpdateAttendanceStation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => stationInput.extend({ stationId: z.string().uuid(), isActive: z.boolean().optional() }).parse(input))
+  .inputValidator((input: unknown) => z.object({ stationId: z.string().uuid(), isActive: z.boolean().optional(), name: z.string().trim().min(2).max(80), description: z.string().trim().max(300).nullable().optional(), latitude: z.number().min(-90).max(90).nullable().optional(), longitude: z.number().min(-180).max(180).nullable().optional(), geofenceRadiusMeters: z.number().int().min(25).max(1000).default(100) }).refine((value) => (value.latitude == null) === (value.longitude == null), "Latitude and longitude must both be supplied.").parse(input))
   .handler(async ({ data, context }) => {
     await requireAttendanceOwner(context.userId);
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
