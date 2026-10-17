@@ -115,3 +115,19 @@ The draft covers:
 ## 7. Release assessment
 
 **Not production-ready.** Navigation and best-effort push hooks have been added, and the existing schedule/task/request routes are linked from the overview. Runtime behavior, approval-trigger reconciliation, notification delivery, role-based end-to-end access, and all build checks remain unverified. No destructive retention workflow should be enabled.
+
+
+## Assistant-led TEST code enhancements — 2026-10-17
+
+Changes committed to the TEST branch in this update:
+- Added a staff-owned, pending-only attendance request cancellation server function with an audit entry.
+- Added a staff UI action to cancel only pending requests.
+- Replaced Owner task-return and request-rejection browser prompts with accessible dialogs and validated task return notes.
+- Added an Android-browser QR camera scanner using the built-in BarcodeDetector API, with manual token entry preserved as fallback.
+
+Verification status:
+- GitHub Actions must run against the updated commit before claiming this change passes CI.
+- No Supabase migration was applied; Migration 5 remains blocked pending actual PostgreSQL catalog evidence.
+- The global attendance kill switch, recurring shifts, station edit UI, automatic forgotten-punch closure, and retention deletion worker are not represented as complete by this update.
+- Camera scanning requires a secure browser context, camera permission, and a browser implementing BarcodeDetector. Real-device acceptance is still required.
+- Production was not accessed or changed.

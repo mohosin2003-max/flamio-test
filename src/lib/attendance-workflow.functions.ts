@@ -356,6 +356,34 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
     return { ok: true, request };
   });
 
+
+export const staffCancelAttendanceRequest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ requestId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { access, db } = await dbForUser(context.userId);
+    if (!access.isStaff) throw new Error("Only staff accounts can cancel attendance requests.");
+    const { data: updated, error } = await db.from("attendance_requests")
+      .update({ status: "cancelled" })
+      .eq("id", data.requestId)
+      .eq("user_id", context.userId)
+      .eq("status", "pending")
+      .select("id, user_id, request_type, status")
+      .maybeSingle();
+    if (error || !updated) {
+      throw new Error("This request is no longer pending or does not belong to you.");
+    }
+    await audit(db, {
+      tableName: "attendance_requests",
+      rowId: updated.id,
+      action: "staff_cancelled",
+      actorId: context.userId,
+      subjectUserId: context.userId,
+      newData: updated,
+    });
+    return { ok: true, status: updated.status };
+  });
+
 export const ownerListAttendanceRequests = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
