@@ -65,8 +65,8 @@ function MyAttendance() {
   const [now, setNow] = useState(() => Date.now());
   const sendQueued = useCallback(async (item: QueuedAction) => {
     const p = (item.payload ?? {}) as Record<string, unknown>;
-    if (item.kind === "clock_in") await clockIn({ data: p as Parameters<typeof clockIn>[0]["data"] });
-    else if (item.kind === "clock_out") await clockOut({ data: p as Parameters<typeof clockOut>[0]["data"] });
+    if (item.kind === "clock_in") await clockIn({ data: p as never });
+    else if (item.kind === "clock_out") await clockOut({ data: p as never });
     else if (item.kind === "break_start") await startBreak();
     else await endBreak();
   }, [clockIn, clockOut, startBreak, endBreak]);
