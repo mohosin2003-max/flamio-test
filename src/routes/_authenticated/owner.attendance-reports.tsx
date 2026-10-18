@@ -53,8 +53,12 @@ function AttendanceReports() {
   const checklists = useQuery({ queryKey: ["att-checklists"], queryFn: () => listChecklists() });
   const retention = useQuery({ queryKey: ["att-retention"], queryFn: () => previewRetention() });
 
-  const staff = mgmt.data?.staff ?? [];
-  const stations = (mgmt.data?.stations ?? []).filter((s) => s.isActive);
+  type Issues = { overlongBreaks: { id: string; staffName: string; minutes: number; startedAt: string }[]; missedClockOuts: { id: string; staffName: string; clockInAt: string; shiftEndsAt: string | null }[]; alertsEnabled: boolean };
+  type Checklist = { id: string; title: string; status: string; staffName: string; items: { label: string; isDone: boolean; doneAt: string | null; doneBy: string | null }[] };
+  const issuesData = issues.data as Issues | undefined;
+  const checklistData = checklists.data as Checklist[] | undefined;
+  const staff: { id: string; name: string }[] = (mgmt.data as { staff?: { id: string; name: string }[] } | undefined)?.staff ?? [];
+  const stations: { id: string; name: string; isActive: boolean }[] = ((mgmt.data as { stations?: { id: string; name: string; isActive: boolean }[] } | undefined)?.stations ?? []).filter((s) => s.isActive);
   const [rec, setRec] = useState({ userId: "", stationId: "", from: today, to: today, weekdays: [6, 0, 1, 2, 3] as number[], start: "10:00", end: "18:00", breakMin: 30 });
   const [cl, setCl] = useState({ kind: "opening" as "opening" | "closing", userId: "", date: today });
   const [confirmText, setConfirmText] = useState("");
@@ -98,9 +102,9 @@ function AttendanceReports() {
         {issues.isLoading ? <p className="text-sm text-muted-foreground">Checking…</p> : issues.error ? <p className="text-sm text-destructive">{errMsg(issues.error)}</p> : (
           <>
             <p className="text-sm font-semibold">Long breaks (over 30 min)</p>
-            {issues.data?.overlongBreaks.length ? issues.data.overlongBreaks.map((b) => <p key={b.id} className="text-sm">{b.staffName} · on break {formatMinutes(b.minutes)} since {dt(b.startedAt)}</p>) : <p className="text-sm text-muted-foreground">None.</p>}
+            {issuesData?.overlongBreaks.length ? issuesData!.overlongBreaks.map((b) => <p key={b.id} className="text-sm">{b.staffName} · on break {formatMinutes(b.minutes)} since {dt(b.startedAt)}</p>) : <p className="text-sm text-muted-foreground">None.</p>}
             <p className="text-sm font-semibold">Possible missed clock-outs</p>
-            {issues.data?.missedClockOuts.length ? issues.data.missedClockOuts.map((m) => (
+            {issuesData?.missedClockOuts.length ? issuesData!.missedClockOuts.map((m) => (
               <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">
                 <span>{m.staffName} · in since {dt(m.clockInAt)}{m.shiftEndsAt ? ` · shift ended ${dt(m.shiftEndsAt)}` : " · unscheduled"}</span>
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(() => recover({ data: { sessionId: m.id } }), "Recovery requested — check the record is flagged for review", [["att-issues"]])}>Close if over max length</Button>
@@ -149,7 +153,7 @@ function AttendanceReports() {
           <Button disabled={busy}>Assign</Button>
         </form>
         <p className="text-xs text-muted-foreground">Staff tick items in My duty. Approve or return completed checklists in Tasks & Requests.</p>
-        {checklists.data?.length ? checklists.data.map((c) => (
+        {checklistData?.length ? checklistData.map((c) => (
           <div key={c.id} className="rounded border p-2 text-sm">
             <div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">{c.title}</span><span className="text-xs">{c.status} · {c.staffName}</span></div>
             <ul className="mt-1 space-y-0.5 text-xs">{c.items.map((i) => <li key={i.label} className={i.isDone ? "" : "text-muted-foreground"}>{i.isDone ? "✓" : "○"} {i.label}{i.isDone && i.doneAt ? ` — ${i.doneBy ?? ""} ${dt(i.doneAt)}` : ""}</li>)}</ul>
