@@ -93,7 +93,10 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       .select("id, shift_date, start_time, end_time, starts_at, ends_at, is_overnight, planned_break_minutes, station_id, duty_role, status")
       .eq("user_id", context.userId).eq("shift_date", today).neq("status", "cancelled").order("starts_at");
     if (todayShiftResult.error) throw new Error("Today's shift could not be loaded.");
+    const { loadFeatureToggles } = await import("@/lib/attendance-features.server");
+    const features = await loadFeatureToggles(db);
     return {
+      features,
       settings: settingsResult.data,
       today,
       shifts: todayShiftResult.data ?? [],
@@ -110,6 +113,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
       .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
@@ -250,6 +254,7 @@ export const staffClockOut = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const now = new Date();
     const { data: session, error: readError } = await db.from("attendance_sessions")
       .select("id, user_id, shift_id, clock_in_at, break_minutes, status")
@@ -286,6 +291,7 @@ export const staffStartBreak = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: session, error } = await db.from("attendance_sessions")
       .select("id").eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !session) throw new Error("Clock in before starting a break.");
@@ -306,6 +312,7 @@ export const staffEndBreak = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: openBreak, error } = await db.from("attendance_breaks").select("id, session_id, started_at")
       .eq("user_id", context.userId).is("ended_at", null).order("started_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !openBreak) throw new Error("No active break was found.");
@@ -329,6 +336,7 @@ export const staffCompleteAttendanceTask = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    { const { requireTasksFeature } = await import("@/lib/attendance-features.server"); await requireTasksFeature(db); }
     const { data: task, error } = await db.from("attendance_tasks")
       .select("id, assigned_to, status, requires_verification").eq("id", data.taskId).eq("assigned_to", context.userId).maybeSingle();
     if (error || !task) throw new Error("Task not found.");
@@ -486,6 +494,7 @@ export const ownerCreateAttendanceTask = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isOwner) throw new Error("Only the Owner can assign attendance tasks.");
+    { const { requireTasksFeature } = await import("@/lib/attendance-features.server"); await requireTasksFeature(db); }
     const { data: role, error: roleError } = await db.from("user_roles").select("user_id").eq("user_id", data.assignedTo).eq("role", "staff").maybeSingle();
     if (roleError || !role) throw new Error("Choose an existing staff account.");
     if (data.stationId) {
@@ -536,6 +545,7 @@ export const staffToggleAttendanceTaskItem = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+    { const { requireTasksFeature } = await import("@/lib/attendance-features.server"); await requireTasksFeature(db); }
     const { data: item, error: readError } = await db.from("attendance_task_items")
       .select("id, task_id, label, is_done").eq("id", data.itemId).maybeSingle();
     if (readError || !item) throw new Error("Checklist item not found.");

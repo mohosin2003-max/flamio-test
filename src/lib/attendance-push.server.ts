@@ -120,3 +120,31 @@ export async function sendRequestDecisionAlert(input: {
     );
   });
 }
+
+/** Overlong break / missed clock-out alert. dedupeKey makes repeats no-ops. */
+export async function sendAttendanceIssueAlert(input: {
+  kind: "overlong_break" | "missed_clock_out";
+  recordId: string;
+  userId: string;
+  minutes: number;
+}): Promise<boolean> {
+  let sent = false;
+  await bestEffort(input.kind, async () => {
+    const recipients = await managerUserIds();
+    if (!recipients.length) return;
+    const name = await staffDisplayName(input.userId);
+    const title = input.kind === "overlong_break" ? `Long break: ${name}` : `Missed clock-out: ${name}`;
+    const body = input.kind === "overlong_break"
+      ? `${name} has been on break for ${Math.floor(input.minutes)} minutes.`
+      : `${name} is still clocked in after the shift should have ended.`;
+    await notifyUsers(
+      recipients.map((userId) => ({
+        userId, kind: "personal" as const, title, body, status: `attendance_${input.kind}`,
+        dedupeKey: `attendance:${input.kind}:${input.recordId}:${userId}`,
+      })),
+      { title, body, url: "/owner/attendance-reports", tag: `attendance-${input.kind}-${input.recordId}`, urgency: "high" },
+    );
+    sent = true;
+  });
+  return sent;
+}
