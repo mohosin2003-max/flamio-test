@@ -16,8 +16,8 @@ export interface QueuedAction {
   requestedAt: string; // device time, display only
   state: QueueState;
   attempts: number;
-  error?: string;
-  payload?: Record<string, unknown>;
+  error?: string | undefined;
+  payload?: Record<string, unknown> | undefined;
 }
 
 export interface QueueStorage {
