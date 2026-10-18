@@ -99,3 +99,43 @@ export function indexedDbStorage(dbName = "flamio-attendance", store = "queue"):
     remove: async (id) => { await run("readwrite", (s) => s.delete(id)); },
   };
 }
+
+/* ------------------------- Error classification ------------------------- */
+
+/** Auth / permission failures: never retried, never queued. */
+export function isAuthError(message: string): boolean {
+  return /unauthori[sz]ed|forbidden|permission|not allowed|sign in|jwt|session expired|only the owner/i.test(message);
+}
+
+/**
+ * True only for genuine connectivity failures (request never reached the
+ * server). Server-side validation or auth errors are NOT transient.
+ */
+export function isTransientNetworkError(err: unknown, online = true): boolean {
+  if (!online) return true;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (isAuthError(message) || isPermanentError(message)) return false;
+  return /failed to fetch|networkerror|network request failed|load failed|network error|err_internet_disconnected|timed? ?out|econnreset|offline/i.test(message);
+}
+
+/** Drop confirmed items so the queue only shows outstanding work. */
+export async function clearConfirmed(storage: QueueStorage) {
+  for (const item of await storage.all()) if (item.state === "confirmed") await storage.remove(item.id);
+}
+
+/** Retry a failed item manually (resets attempts, keeps original order). */
+export async function retryFailed(storage: QueueStorage, id: string) {
+  const item = (await storage.all()).find((i) => i.id === id);
+  if (item && item.state === "failed") await storage.put({ ...item, state: "pending", attempts: 0, error: undefined });
+}
+
+/**
+ * Browser storage: IndexedDB when available (survives reloads), else an
+ * in-memory queue that is LOST on reload — callers must disclose this.
+ */
+export async function browserQueueStorage(): Promise<{ storage: QueueStorage; persistent: boolean }> {
+  if (typeof indexedDB === "undefined") return { storage: memoryStorage(), persistent: false };
+  const storage = indexedDbStorage();
+  try { await storage.all(); return { storage, persistent: true }; }
+  catch { return { storage: memoryStorage(), persistent: false }; }
+}

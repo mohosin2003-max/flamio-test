@@ -224,3 +224,17 @@ export const STORE_CHECKLISTS = {
 } as const;
 
 export type StoreChecklistKind = keyof typeof STORE_CHECKLISTS;
+
+/* ------------------------- Staff break warning -------------------------- */
+
+/**
+ * Break state for the staff screen. `allowanceMinutes` must come from the
+ * scheduled shift's planned break; null means no schedule value exists and
+ * no limit is invented.
+ */
+export function breakStatus(startedAt: string, now: number, allowanceMinutes: number | null) {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 60000));
+  if (allowanceMinutes == null || allowanceMinutes <= 0) return { minutes, allowanceMinutes: null, overBy: 0, exceeded: false };
+  const overBy = Math.max(0, minutes - allowanceMinutes);
+  return { minutes, allowanceMinutes, overBy, exceeded: overBy > 0 };
+}
