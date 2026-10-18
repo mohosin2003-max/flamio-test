@@ -28,7 +28,7 @@ export function StaffBottomNav() {
   const getSummary = useServerFn(ownerGetDashboardSummary);
   const canMessage = signedIn && hasPermission(access.data, "customers");
   const canOrder = signedIn && (hasPermission(access.data, "online_orders") || hasPermission(access.data, "order_management"));
-  const canDuty = signedIn && hasPermission(access.data, "attendance");
+  const canDuty = signedIn && canSeeStaffDuty(access.data);
 
   const threads = useQuery({
     queryKey: ["contact-inbox", "owner"],

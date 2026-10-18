@@ -204,7 +204,7 @@ function AppExperience() {
   const navigate = useNavigate();
   const { isAuthenticated, loading, user } = useAuth();
   const access = useDashboardAccess(isAuthenticated && !loading);
-  const workspace = pathname === "/owner" || pathname.startsWith("/owner/") || pathname === "/kitchen";
+  const workspace = pathname === "/owner" || pathname.startsWith("/owner/") || pathname === "/kitchen" || pathname === "/attendance";
   const serverStaff = Boolean(access.data?.isManager || access.data?.isStaff);
   const [hint, setHint] = useState<boolean | null>(null);
   useEffect(() => setHint(readAccessHint(user?.id)), [user?.id]);
