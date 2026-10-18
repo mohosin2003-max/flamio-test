@@ -40,6 +40,7 @@ export const ownerCreateRecurringShifts = createServerFn({ method: "POST" })
     dutyRole: z.string().trim().max(80).nullable().optional(),
     fromDate: dateKey, toDate: dateKey, weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
     startTime: timeKey, endTime: timeKey, plannedBreakMinutes: z.number().int().min(0).max(240).default(0),
+    preview: z.boolean().default(false),
   }).parse(input))
   .handler(async ({ data, context }) => {
     const db = await ownerDb(context.userId);
@@ -60,6 +61,10 @@ export const ownerCreateRecurringShifts = createServerFn({ method: "POST" })
     const taken = (existing ?? []).map((e: { starts_at: string; ends_at: string }) => ({ startAt: e.starts_at, endAt: e.ends_at }));
     const fresh = windows.filter((w) => !taken.some((t: { startAt: string; endAt: string }) => overlaps(w, t)));
     const skipped = windows.length - fresh.length;
+    if (data.preview) {
+      return { preview: true as const, created: 0, skippedOverlaps: skipped,
+        items: windows.map((w) => ({ date: w.date, startAt: w.startAt, endAt: w.endAt, overnight: w.overnight, conflict: !fresh.includes(w) })) };
+    }
     if (fresh.length) {
       const { error: insertError } = await db.from("attendance_shifts").insert(fresh.map((w) => ({
         user_id: data.userId, station_id: data.stationId ?? null, duty_role: data.dutyRole ?? null,
@@ -69,7 +74,7 @@ export const ownerCreateRecurringShifts = createServerFn({ method: "POST" })
       if (insertError) { console.error("Recurring shift insert failed", insertError.message); throw new Error("Could not create the recurring shifts."); }
     }
     await auditOwner(db, context.userId, "recurring_shifts_created", { from: data.fromDate, to: data.toDate, weekdays: data.weekdays, created: fresh.length, skipped }, data.userId);
-    return { created: fresh.length, skippedOverlaps: skipped };
+    return { preview: false as const, created: fresh.length, skippedOverlaps: skipped, items: [] as { date: string; startAt: string; endAt: string; overnight: boolean; conflict: boolean }[] };
   });
 
 /* -------------------------------- Reports ------------------------------- */

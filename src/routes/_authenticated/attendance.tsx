@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CheckCircle2, Coffee, LogIn, LogOut, RefreshCw, Send, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +17,8 @@ import {
   staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
+import { browserQueueStorage, clearConfirmed, enqueue, flush, isTransientNetworkError, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
+import { breakStatus } from "@/lib/attendance-rules";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
   head: () => ({ meta: [{ title: "My Attendance — Flamio" }, { name: "robots", content: "noindex" }] }),
@@ -24,10 +26,10 @@ export const Route = createFileRoute("/_authenticated/attendance")({
 });
 
 type AttendanceShift = { id: string; start_time: string; end_time: string; is_overnight: boolean; duty_role: string | null; planned_break_minutes: number; status: string };
-type AttendanceSession = { id: string; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
+type AttendanceSession = { id: string; shift_id: string | null; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
 type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean };
 type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null };
-type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean } | null; shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string } | null };
+type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean } | null; shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; started_at: string } | null };
 
 function MyAttendance() {
   const qc = useQueryClient();
@@ -56,6 +58,49 @@ function MyAttendance() {
   const [overtime, setOvertime] = useState("60");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const queueRef = useRef<QueueStorage | null>(null);
+  const [queue, setQueue] = useState<QueuedAction[]>([]);
+  const [persistent, setPersistent] = useState(true);
+  const [online, setOnline] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
+  const sendQueued = useCallback(async (item: QueuedAction) => {
+    const p = (item.payload ?? {}) as Record<string, unknown>;
+    if (item.kind === "clock_in") await clockIn({ data: p as never });
+    else if (item.kind === "clock_out") await clockOut({ data: p as never });
+    else if (item.kind === "break_start") await startBreak();
+    else await endBreak();
+  }, [clockIn, clockOut, startBreak, endBreak]);
+  const syncQueue = useCallback(async () => {
+    const st = queueRef.current; if (!st) return;
+    await clearConfirmed(st);
+    if (navigator.onLine && (await st.all()).some((i) => i.state === "pending")) {
+      setQueue(await st.all());
+      await flush(st, async (item) => { setQueue((q) => q.map((x) => x.id === item.id ? { ...x, state: "syncing" } : x)); await sendQueued(item); });
+      await qc.invalidateQueries({ queryKey: ["my-attendance-workspace"] });
+    }
+    setQueue(await st.all());
+  }, [qc, sendQueued]);
+  useEffect(() => {
+    let alive = true;
+    setOnline(navigator.onLine);
+    void browserQueueStorage().then(({ storage, persistent: p }) => { if (!alive) return; queueRef.current = storage; setPersistent(p); void syncQueue(); });
+    const up = () => { setOnline(true); void syncQueue(); };
+    const down = () => setOnline(false);
+    window.addEventListener("online", up); window.addEventListener("offline", down);
+    const tick = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => { alive = false; window.removeEventListener("online", up); window.removeEventListener("offline", down); window.clearInterval(tick); };
+  }, [syncQueue]);
+  const punch = async (kind: QueueKind, send: () => Promise<unknown>, payload: Record<string, unknown> | undefined, success: string) => {
+    setBusy(true);
+    try { await send(); await refresh(); toast.success(success); }
+    catch (error) {
+      const st = queueRef.current;
+      const canQueue = st && !(payload && "qrToken" in payload) && isTransientNetworkError(error, navigator.onLine);
+      if (!canQueue) { toast.error(error instanceof Error ? error.message : "Action failed"); return; }
+      try { await enqueue(st, kind, crypto.randomUUID(), new Date(), payload); setQueue(await st.all()); toast.warning("No connection — saved on this phone. It is NOT recorded until it shows Confirmed."); }
+      catch (qe) { toast.error(qe instanceof Error ? qe.message : "Could not save offline"); }
+    } finally { setBusy(false); }
+  };
   const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000 });
   const refresh = async () => qc.invalidateQueries({ queryKey: ["my-attendance-workspace"] });
   const run = async (operation: () => Promise<unknown>, success: string) => {
@@ -74,7 +119,16 @@ function MyAttendance() {
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl font-bold">My Attendance & Tasks</h2><p className="text-sm text-muted-foreground">Bangladesh time · Your records only</p></div><Button variant="outline" onClick={() => void query.refetch()}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button></div>
     <Card><CardContent className="space-y-4 p-4">
       <h3 className="font-display font-bold">Duty punch</h3>
-      {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p><div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void run(() => endBreak(), "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void run(() => startBreak(), "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => void run(() => clockOut({ data: { note: note.trim() || null } }), "Clocked out")}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void run(async () => { const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; qrToken?: string } = { shiftId: shiftId || null, note: note.trim() || null }; if (settings?.geofence_enabled) { if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; } if (settings?.qr_verification_enabled) { if (!qrToken.trim()) throw new Error("Enter the station QR token before clocking in."); payload.qrToken = qrToken.trim(); } await clockIn({ data: payload }); }, "Clocked in");}}>
+      {!online ? <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">You are offline. Clock-in/out and breaks will be saved on this phone and sent when the connection returns. QR clock-in needs a connection.</p> : null}
+      {queue.length ? <div className="space-y-1 rounded-md border p-2 text-sm"><p className="font-semibold">Waiting to sync</p>{!persistent ? <p className="text-xs text-destructive">This browser cannot store offline punches safely — they will be lost if you close or reload the page.</p> : null}{queue.map((q) => <div key={q.id} className="flex flex-wrap items-center justify-between gap-2"><span>{q.kind.replace("_", " ")} · tapped {dateTime(q.requestedAt)}{q.error && q.state === "failed" ? ` · ${q.error}` : ""}</span><span className="flex items-center gap-2"><span className={"rounded-full px-2 py-0.5 text-xs " + (q.state === "failed" ? "bg-destructive/15 text-destructive" : q.state === "confirmed" ? "bg-primary/15 text-primary" : "bg-muted")}>{q.state === "pending" ? "Pending" : q.state === "syncing" ? "Syncing" : q.state === "confirmed" ? "Confirmed" : "Failed"}</span>{q.state === "failed" ? <Button size="sm" variant="outline" onClick={() => void (async () => { if (queueRef.current) { await retryFailed(queueRef.current, q.id); await syncQueue(); } })()}>Retry</Button> : null}</span></div>)}<p className="text-xs text-muted-foreground">Server time is recorded when the action syncs, not when you tapped.</p></div> : null}
+      {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p>{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => { const d = { note: note.trim() || null }; void punch("clock_out", () => clockOut({ data: d }), d, "Clocked out"); }}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
+          const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; qrToken?: string } = { shiftId: shiftId || null, note: note.trim() || null };
+          try {
+            if (settings?.geofence_enabled) { if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; }
+            if (settings?.qr_verification_enabled) { if (!qrToken.trim()) throw new Error("Enter the station QR token before clocking in."); payload.qrToken = qrToken.trim(); }
+          } catch (err) { toast.error(err instanceof Error ? err.message : "Clock-in failed"); return; }
+          await punch("clock_in", () => clockIn({ data: payload }), payload, "Clocked in");
+        })();}}>
         <div className="space-y-1"><Label htmlFor="attendance-shift">Today's shift</Label><select id="attendance-shift" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={shiftId} onChange={(e)=>setShiftId(e.target.value)}><option value="">Unscheduled / automatic selection</option>{shifts.filter((s) =>s.status==="scheduled").map((s) =><option key={s.id} value={s.id}>{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" overnight":""}{s.duty_role?" · "+s.duty_role:""}</option>)}</select></div>
         <div className="space-y-1"><Label htmlFor="punch-note">Note (optional)</Label><Input id="punch-note" maxLength={500} value={note} onChange={(e)=>setNote(e.target.value)}/></div>
         {settings?.geofence_enabled ? <p className="text-xs text-muted-foreground">GPS geofence is enabled. Allow precise location when prompted; location is checked against your assigned station on the server.</p> : null}{settings?.qr_verification_enabled ? <div className="space-y-2"><Label htmlFor="attendance-qr-token">Station QR token</Label><Input id="attendance-qr-token" autoComplete="off" maxLength={512} value={qrToken} onChange={(e) => setQrToken(e.target.value)} placeholder="Paste the token from your station QR"/><Button type="button" variant="outline" disabled={busy} onClick={()=>setQrScannerOpen(true)}><Camera className="mr-2 h-4 w-4"/>Scan station QR</Button><p className="text-xs text-muted-foreground">Camera scanning requires permission and a supported Android browser. Manual token entry remains available.</p></div> : null}<p className="text-xs text-muted-foreground">Clock-in uses server time and current Owner settings. Selfie verification is not available.</p><Button disabled={busy}><LogIn className="mr-2 h-4 w-4"/>Clock in</Button>
