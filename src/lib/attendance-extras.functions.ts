@@ -150,7 +150,8 @@ export const ownerRecoverStaleSession = createServerFn({ method: "POST" })
     const db = await ownerDb(context.userId);
     const { data: session } = await db.from("attendance_sessions").select("id, user_id, clock_out_at").eq("id", data.sessionId).maybeSingle();
     if (!session || session.clock_out_at) throw new Error("This session is not open.");
-    const { data: result, error } = await db.rpc("attendance_auto_close_stale_session", { _user_id: session.user_id });
+    const { data: settings } = await db.from("attendance_settings").select("max_session_hours").eq("id", true).maybeSingle();
+    const { data: result, error } = await db.rpc("attendance_auto_close_stale_session", { _user_id: session.user_id, _max_session_hours: Number(settings?.max_session_hours ?? 16) });
     if (error) { console.error("Stale recovery failed", error.message); throw new Error("Session could not be recovered; it may not have exceeded the maximum length yet."); }
     await auditOwner(db, context.userId, "stale_session_recovery_requested", { sessionId: data.sessionId, result: result ?? null }, session.user_id);
     return { recovered: Boolean(result) };
