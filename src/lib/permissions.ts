@@ -216,3 +216,13 @@ export function hasPermission(access: PermissionAccess, permission: StaffPermiss
 export function canManage(access: PermissionAccess, permission: StaffPermission): boolean {
   return permissionLevel(access, permission) === "manage";
 }
+
+/**
+ * Staff-only "My duty" entry. Owners/managers manage attendance from the
+ * owner area and cannot use the staff attendance workspace, so they never see it.
+ * The server still enforces this independently.
+ */
+export function canSeeStaffDuty(access: (NonNullable<PermissionAccess> & { isStaff?: boolean }) | null | undefined): boolean {
+  if (!access || !access.isStaff || access.isOwner || access.isManager) return false;
+  return hasPermission(access, "attendance");
+}

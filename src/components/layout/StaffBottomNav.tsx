@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDashboardAccess } from "@/hooks/use-dashboard-access";
 import { ownerListContactThreads } from "@/lib/contact-messages.functions";
 import { ownerGetDashboardSummary } from "@/lib/dashboard.functions";
-import { hasPermission } from "@/lib/permissions";
+import { canSeeStaffDuty, hasPermission } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -28,7 +28,7 @@ export function StaffBottomNav() {
   const getSummary = useServerFn(ownerGetDashboardSummary);
   const canMessage = signedIn && hasPermission(access.data, "customers");
   const canOrder = signedIn && (hasPermission(access.data, "online_orders") || hasPermission(access.data, "order_management"));
-  const canDuty = signedIn && hasPermission(access.data, "attendance");
+  const canDuty = signedIn && canSeeStaffDuty(access.data);
 
   const threads = useQuery({
     queryKey: ["contact-inbox", "owner"],
