@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDashboardAccess } from "@/hooks/use-dashboard-access";
 import { ownerListContactThreads } from "@/lib/contact-messages.functions";
 import { ownerGetDashboardSummary } from "@/lib/dashboard.functions";
-import { hasPermission } from "@/lib/permissions";
+import { canSeeStaffDuty, hasPermission } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
