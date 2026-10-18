@@ -69,7 +69,7 @@ export async function flush(storage: QueueStorage, send: (item: QueuedAction) =>
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sync failed";
       const attempts = item.attempts + 1;
-      const permanent = isPermanentError(message) || attempts >= MAX_ATTEMPTS;
+      const permanent = isPermanentError(message) || isAuthError(message) || attempts >= MAX_ATTEMPTS;
       await storage.put({ ...item, state: permanent ? "failed" : "pending", attempts, error: message });
       if (!permanent) return;
     }

@@ -60,6 +60,8 @@ function AttendanceReports() {
   const staff: { id: string; name: string }[] = (mgmt.data as { staff?: { id: string; name: string }[] } | undefined)?.staff ?? [];
   const stations: { id: string; name: string; isActive: boolean }[] = ((mgmt.data as { stations?: { id: string; name: string; isActive: boolean }[] } | undefined)?.stations ?? []).filter((s) => s.isActive);
   const [rec, setRec] = useState({ userId: "", stationId: "", from: today, to: today, weekdays: [6, 0, 1, 2, 3] as number[], start: "10:00", end: "18:00", breakMin: 30 });
+  const recKey = JSON.stringify(rec);
+  const [recPreview, setRecPreview] = useState<{ key: string; items: { date: string; startAt: string; endAt: string; overnight: boolean; conflict: boolean }[] } | null>(null);
   const [cl, setCl] = useState({ kind: "opening" as "opening" | "closing", userId: "", date: today });
   const [confirmText, setConfirmText] = useState("");
 
@@ -131,7 +133,7 @@ function AttendanceReports() {
 
       <Card><CardContent className="space-y-3 p-4">
         <h3 className="font-display font-bold">Repeat a weekly shift</h3>
-        <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin } }); toast.message(`${r.created} shifts created${r.skippedOverlaps ? `, ${r.skippedOverlaps} skipped (already booked)` : ""}`); }, "Schedule saved", [["att-mgmt-staff"]]); }}>
+        <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin, preview: true } }); setRecPreview({ key: recKey, items: r.items }); }, "Preview ready — check it, then confirm", []); }}>
           <div><Label htmlFor="rec-staff">Staff</Label><select id="rec-staff" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={rec.userId} onChange={(e) => setRec((o) => ({ ...o, userId: e.target.value }))}><option value="">Choose…</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div><Label htmlFor="rec-station">Station (optional)</Label><select id="rec-station" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={rec.stationId} onChange={(e) => setRec((o) => ({ ...o, stationId: e.target.value }))}><option value="">None</option>{stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div><Label htmlFor="rec-from">From</Label><Input id="rec-from" type="date" required value={rec.from} onChange={(e) => setRec((o) => ({ ...o, from: e.target.value }))} /></div>
@@ -140,8 +142,15 @@ function AttendanceReports() {
           <div><Label htmlFor="rec-end">End (earlier = next day)</Label><Input id="rec-end" type="time" required value={rec.end} onChange={(e) => setRec((o) => ({ ...o, end: e.target.value }))} /></div>
           <div><Label htmlFor="rec-break">Break minutes</Label><Input id="rec-break" type="number" min={0} max={240} value={rec.breakMin} onChange={(e) => setRec((o) => ({ ...o, breakMin: Number(e.target.value) }))} /></div>
           <div className="flex flex-wrap items-end gap-2 text-sm">{WEEKDAYS.map((d, i) => <label key={d} className="flex items-center gap-1"><input type="checkbox" checked={rec.weekdays.includes(i)} onChange={(e) => setRec((o) => ({ ...o, weekdays: e.target.checked ? [...o.weekdays, i] : o.weekdays.filter((x) => x !== i) }))} />{d}</label>)}</div>
-          <Button disabled={busy} className="sm:col-span-2">Create shifts</Button>
+          <Button disabled={busy} variant="outline" className="sm:col-span-2">Preview shifts</Button>
         </form>
+        {recPreview && recPreview.key === recKey ? (
+          <div className="space-y-2 rounded border p-2 text-sm">
+            <p className="font-semibold">{recPreview.items.filter((i) => !i.conflict).length} new · {recPreview.items.filter((i) => i.conflict).length} skipped (already booked)</p>
+            <ul className="max-h-48 space-y-1 overflow-y-auto">{recPreview.items.map((i) => <li key={i.date} className={i.conflict ? "text-muted-foreground line-through" : ""}>{i.date} · {dt(i.startAt)} → {dt(i.endAt)}{i.overnight ? " (overnight)" : ""}{i.conflict ? " · overlaps existing shift" : ""}</li>)}</ul>
+            <Button size="sm" disabled={busy || !recPreview.items.some((i) => !i.conflict)} onClick={() => void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin } }); setRecPreview(null); toast.message(`${r.created} shifts created${r.skippedOverlaps ? `, ${r.skippedOverlaps} skipped (already booked)` : ""}`); }, "Schedule saved", [["att-mgmt-staff"]])}>Confirm and create</Button>
+          </div>
+        ) : recPreview ? <p className="text-xs text-muted-foreground">Settings changed — preview again before creating.</p> : null}
       </CardContent></Card>
 
       <Card><CardContent className="space-y-3 p-4">
