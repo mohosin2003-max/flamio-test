@@ -65,11 +65,26 @@ function MyAttendance() {
   const [now, setNow] = useState(() => Date.now());
   const sendQueued = useCallback(async (item: QueuedAction) => {
     const p = (item.payload ?? {}) as Record<string, unknown>;
-    if (item.kind === "clock_in") await clockIn({ data: p as never });
-    else if (item.kind === "clock_out") await clockOut({ data: p as never });
-    else if (item.kind === "break_start") await startBreak();
-    else await endBreak();
-  }, [clockIn, clockOut, startBreak, endBreak]);
+    try {
+      if (item.kind === "clock_in") await clockIn({ data: p as never });
+      else if (item.kind === "clock_out") await clockOut({ data: p as never });
+      else if (item.kind === "break_start") await startBreak();
+      else await endBreak();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!isPermanentError(message) || item.attempts === 0) throw err;
+      // A previous attempt may have committed while its reply was lost: check the server's real state.
+      const ws = (await getWorkspace()) as AttendanceWorkspace;
+      const open = ws.sessions.find((s) => !s.clock_out_at);
+      const closed = ws.sessions.filter((s) => s.clock_out_at).sort((a, b) => String(b.clock_out_at).localeCompare(String(a.clock_out_at)))[0];
+      const verdict = reconcileConflict(item, {
+        activeSession: open ? { clockInAt: open.clock_in_at } : null,
+        activeBreak: ws.activeBreak ? { startedAt: ws.activeBreak.started_at } : null,
+        lastClosedSession: closed?.clock_out_at ? { clockOutAt: closed.clock_out_at } : null,
+      });
+      if (!verdict.confirmed) throw new Error(`${verdict.reason} (${message})`);
+    }
+  }, [clockIn, clockOut, startBreak, endBreak, getWorkspace]);
   const syncQueue = useCallback(async () => {
     const st = queueRef.current; if (!st) return;
     await clearConfirmed(st);
