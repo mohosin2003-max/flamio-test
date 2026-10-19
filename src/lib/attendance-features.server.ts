@@ -1,4 +1,4 @@
-import { readFeatureToggles, type FeatureToggles } from "@/lib/attendance-rules";
+import { assertAttendanceActionAllowed, readFeatureToggles, type AttendanceAction, type FeatureToggles } from "@/lib/attendance-rules";
 
 /** Reads toggles with select("*") so missing columns (migration not applied) fail safe to ON. */
 export async function loadFeatureToggles(db: { from: (t: string) => any }): Promise<FeatureToggles & { columnsPresent: boolean }> {
@@ -8,9 +8,9 @@ export async function loadFeatureToggles(db: { from: (t: string) => any }): Prom
   return { ...readFeatureToggles(row), columnsPresent: Boolean(row && "attendance_enabled" in row && "tasks_enabled" in row) };
 }
 
-export async function requireAttendanceFeature(db: { from: (t: string) => any }) {
+export async function requireAttendanceFeature(db: { from: (t: string) => any }, action: AttendanceAction) {
   const t = await loadFeatureToggles(db);
-  if (!t.attendanceEnabled) throw new Error("Attendance is disabled by the Owner.");
+  assertAttendanceActionAllowed(t.attendanceEnabled, action);
 }
 
 export async function requireTasksFeature(db: { from: (t: string) => any }) {
