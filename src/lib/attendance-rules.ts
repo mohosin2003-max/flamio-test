@@ -26,6 +26,19 @@ export function readFeatureToggles(row: Record<string, unknown> | null | undefin
   };
 }
 
+export type AttendanceAction = "clock_in" | "clock_out" | "break_start" | "break_end";
+
+/** When disabled, block starting new attendance activity but allow clean closure. */
+export function assertAttendanceActionAllowed(attendanceEnabled: boolean, action: AttendanceAction) {
+  if (!attendanceEnabled && (action === "clock_in" || action === "break_start")) {
+    throw new Error("Attendance is disabled by the Owner.");
+  }
+}
+
+export function assertTasksFeatureAllowed(tasksEnabled: boolean) {
+  if (!tasksEnabled) throw new Error("Tasks are disabled by the Owner.");
+}
+
 /* --------------------------- Recurring shifts --------------------------- */
 
 function parseDate(key: string): number {

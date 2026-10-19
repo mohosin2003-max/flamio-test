@@ -113,7 +113,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
-    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
+    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db, "clock_in"); }
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
       .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
@@ -254,7 +254,6 @@ export const staffClockOut = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
-    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const now = new Date();
     const { data: session, error: readError } = await db.from("attendance_sessions")
       .select("id, user_id, shift_id, clock_in_at, break_minutes, status")
@@ -291,7 +290,7 @@ export const staffStartBreak = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
-    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
+    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db, "break_start"); }
     const { data: session, error } = await db.from("attendance_sessions")
       .select("id").eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !session) throw new Error("Clock in before starting a break.");
@@ -312,7 +311,6 @@ export const staffEndBreak = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
-    { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: openBreak, error } = await db.from("attendance_breaks").select("id, session_id, started_at")
       .eq("user_id", context.userId).is("ended_at", null).order("started_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !openBreak) throw new Error("No active break was found.");
