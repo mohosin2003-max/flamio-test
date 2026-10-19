@@ -109,7 +109,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
 
 export const staffClockIn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema, latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), accuracyMeters: z.number().min(0).max(1000).optional(), qrToken: z.string().trim().min(32).max(512).optional() }).parse(input))
+  .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema, latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), accuracyMeters: z.number().min(0).max(1000).optional(), qrToken: z.string().trim().min(32).max(512).optional(), selfiePath: z.string().max(200).optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
@@ -118,8 +118,23 @@ export const staffClockIn = createServerFn({ method: "POST" })
       .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
+    let selfiePath: string | null = null;
     if (settings.selfie_verification_enabled) {
-      throw new Error("Selfie verification is enabled but the capture flow is not available yet. Ask the Owner to disable it before clocking in.");
+      // Fail closed: never accept a client-supplied path without checking owner, freshness and the stored object.
+      const { selfieGate, checkSelfiePath, SELFIE_BUCKET } = await import("@/lib/attendance-selfie");
+      const probe = await db.from("attendance_sessions").select("clock_in_selfie_path").limit(1);
+      const gate = selfieGate({ selfieEnabled: true, columnsPresent: !probe.error });
+      if (gate.required && !gate.available) throw new Error(gate.reason ?? "Selfie verification is unavailable.");
+      const check = checkSelfiePath(data.selfiePath, context.userId, Date.now());
+      if (!check.ok) throw new Error(check.reason);
+      const path = data.selfiePath as string;
+      const folder = path.slice(0, path.lastIndexOf("/"));
+      const file = path.slice(path.lastIndexOf("/") + 1);
+      const { data: objects, error: listError } = await db.storage.from(SELFIE_BUCKET).list(folder, { search: file, limit: 2 });
+      if (listError || !objects?.some((o: { name: string }) => o.name === file)) throw new Error("Selfie upload was not found. Retake and retry.");
+      const { data: reused } = await db.from("attendance_sessions").select("id").eq("clock_in_selfie_path", path).limit(1);
+      if (reused?.length) throw new Error("This selfie was already used. Take a new one.");
+      selfiePath = path;
     }
     const now = new Date();
     const nowIso = now.toISOString();
@@ -235,6 +250,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
       user_id: context.userId, shift_id: shift?.id ?? null, duty_date: dutyDate,
       clock_in_at: nowIso, clock_in_source: "app", clock_in_note: data.note ?? null,
       late_minutes: lateMinutes, status: "open", verification_status: "unverified",
+      ...(selfiePath ? { clock_in_selfie_path: selfiePath } : {}),
     }).select("id, user_id, shift_id, duty_date, clock_in_at, status, late_minutes").single();
     if (insertError || !session) {
       console.error("Attendance clock-in failed", insertError?.message);

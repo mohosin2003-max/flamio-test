@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/states";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ownerGetAttendanceOverview } from "@/lib/attendance.functions";
 import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functions";
+import { ownerGetAttendanceSelfieUrl } from "@/lib/attendance-selfie.functions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -133,7 +134,7 @@ function OwnerAttendance() {
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.allowUnscheduledClockIn} onChange={(e) => setSettingsForm((old) => ({ ...old, allowUnscheduledClockIn: e.target.checked }))} /> Allow clock-in without a scheduled shift</label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.geofenceEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, geofenceEnabled: e.target.checked }))} /> Require GPS geofence at clock-in (stations need coordinates)</label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.qrVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, qrVerificationEnabled: e.target.checked }))} /> Require a single-use station QR token at clock-in (issuance UI still under development)</label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.selfieVerificationEnabled} disabled={!settingsForm.selfieVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, selfieVerificationEnabled: e.target.checked }))} /> Selfie verification (not implemented; if currently enabled, uncheck to allow staff clock-in)</label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.selfieVerificationEnabled} disabled={!settingsForm.selfieVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, selfieVerificationEnabled: e.target.checked }))} /> Selfie photo evidence (stays off until the evidence storage is approved and set up; face matching NOT IMPLEMENTED)</label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.attendanceAlertsEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, attendanceAlertsEnabled: e.target.checked }))} /> Attendance notification switch (delivery wiring still incomplete)</label>
             <Button type="submit" disabled={settingsBusy} className="sm:col-span-2">{settingsBusy ? "Saving…" : "Save attendance settings"}</Button>
           </form>
@@ -158,6 +159,7 @@ function OwnerAttendance() {
                     <p>Worked: {duration(session.workedMinutes)}</p>
                     <p>Verification: {session.verificationStatus}</p>
                   </div>
+                  <SelfieEvidenceButton sessionId={session.id} />
                 </div>
               ))}
             </div>
@@ -182,6 +184,24 @@ function OwnerAttendance() {
       </Card>
     </div>
   );
+}
+
+function SelfieEvidenceButton({ sessionId }: { sessionId: string }) {
+  const getUrl = useServerFn(ownerGetAttendanceSelfieUrl);
+  const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const load = async () => {
+    setBusy(true);
+    try { const r = await getUrl({ data: { sessionId } }); setUrl(r.url); setNote(r.reason); }
+    catch (e) { setNote(e instanceof Error ? e.message : "Could not load selfie"); }
+    finally { setBusy(false); }
+  };
+  return <div className="mt-2 space-y-2">
+    {!url ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void load()}>{busy ? "Loading…" : "View clock-in selfie"}</Button> : <img src={url} alt="Clock-in selfie evidence" className="h-32 w-32 rounded-md object-cover" />}
+    {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
+    {url ? <p className="text-xs text-muted-foreground">Photo evidence only. Face matching: NOT IMPLEMENTED. Link expires in 10 minutes.</p> : null}
+  </div>;
 }
 
 function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
