@@ -93,3 +93,22 @@ describe("toggles and retention", () => {
     expect(() => rollingCutoff(new Date(), 7)).toThrow();
   });
 });
+
+describe("scheduled vs unscheduled break alerts", () => {
+  const s = "2026-10-18T06:00:00.000Z";
+  const at = (m) => Date.parse(s) + m * 60000;
+  test("scheduled 15 min break over at 20 min is scheduled_exceeded", () => {
+    const [b] = overlongBreaks([{ id: "a", userId: "u", startedAt: s, scheduledAllowanceMinutes: 15 }], at(20));
+    expect(b.kind).toBe("scheduled_exceeded"); expect(b.limitMinutes).toBe(15); expect(b.overBy).toBe(5);
+  });
+  test("scheduled 45 min break is not flagged at 35 min", () => {
+    expect(overlongBreaks([{ id: "a", userId: "u", startedAt: s, scheduledAllowanceMinutes: 45 }], at(35))).toHaveLength(0);
+  });
+  test("no schedule uses 30 min estimate label", () => {
+    const [b] = overlongBreaks([{ id: "a", userId: "u", startedAt: s, scheduledAllowanceMinutes: null }], at(31));
+    expect(b.kind).toBe("unscheduled_estimate"); expect(b.limitMinutes).toBe(30);
+  });
+  test("planned break 0 counts as unscheduled", () => {
+    expect(overlongBreaks([{ id: "a", userId: "u", startedAt: s, scheduledAllowanceMinutes: 0 }], at(31))[0].kind).toBe("unscheduled_estimate");
+  });
+});

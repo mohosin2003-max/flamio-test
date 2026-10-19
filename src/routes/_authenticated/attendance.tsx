@@ -17,7 +17,7 @@ import {
   staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
-import { browserQueueStorage, clearConfirmed, enqueue, flush, isTransientNetworkError, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
+import { browserQueueStorage, clearConfirmed, enqueue, flush, isPermanentError, isTransientNetworkError, reconcileConflict, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
 import { breakStatus } from "@/lib/attendance-rules";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
@@ -72,7 +72,7 @@ function MyAttendance() {
       else await endBreak();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (!isPermanentError(message) || item.attempts === 0) throw err;
+      if (!isPermanentError(message)) throw err;
       // A previous attempt may have committed while its reply was lost: check the server's real state.
       const ws = (await getWorkspace()) as AttendanceWorkspace;
       const open = ws.sessions.find((s) => !s.clock_out_at);

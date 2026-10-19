@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { enqueue, flush, isAuthError, isPermanentError, isTransientNetworkError, memoryStorage, retryFailed, clearConfirmed } from "./attendance-offline.ts";
+import { enqueue, flush, isAuthError, isPermanentError, isTransientNetworkError, memoryStorage, retryFailed, clearConfirmed, reconcileConflict } from "./attendance-offline.ts";
 
 const at = (s) => new Date(`2026-10-18T06:00:${s}Z`);
 
@@ -65,5 +65,25 @@ describe("error classification", () => {
 describe("QR exclusion", () => {
   test("QR clock-in cannot be queued", async () => {
     await expect(enqueue(memoryStorage(), "clock_in", "q", at("01"), { qrToken: "t" })).rejects.toThrow(/QR/);
+  });
+});
+
+describe("lost-response reconciliation", () => {
+  const tap = "2026-10-18T06:00:00.000Z";
+  const none = { activeSession: null, activeBreak: null, lastClosedSession: null };
+  test("clock-in confirmed only when the open session began after the tap", () => {
+    expect(reconcileConflict({ kind: "clock_in", requestedAt: tap }, { ...none, activeSession: { clockInAt: "2026-10-18T06:00:20.000Z" } }).confirmed).toBe(true);
+    expect(reconcileConflict({ kind: "clock_in", requestedAt: tap }, { ...none, activeSession: { clockInAt: "2026-10-18T02:00:00.000Z" } }).confirmed).toBe(false);
+  });
+  test("break start from an earlier unrelated break is not claimed", () => {
+    expect(reconcileConflict({ kind: "break_start", requestedAt: tap }, { ...none, activeBreak: { startedAt: "2026-10-18T05:00:00.000Z" } }).confirmed).toBe(false);
+    expect(reconcileConflict({ kind: "break_start", requestedAt: tap }, { ...none, activeBreak: { startedAt: "2026-10-18T06:01:00.000Z" } }).confirmed).toBe(true);
+  });
+  test("clock-out confirmed only with no open session and a later clock-out", () => {
+    expect(reconcileConflict({ kind: "clock_out", requestedAt: tap }, { ...none, lastClosedSession: { clockOutAt: "2026-10-18T06:00:30.000Z" } }).confirmed).toBe(true);
+    expect(reconcileConflict({ kind: "clock_out", requestedAt: tap }, { ...none, lastClosedSession: { clockOutAt: "2026-10-17T20:00:00.000Z" } }).confirmed).toBe(false);
+  });
+  test("break end is never auto-confirmed", () => {
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap }, none).confirmed).toBe(false);
   });
 });
