@@ -118,15 +118,20 @@ export const ownerCheckAttendanceIssues = createServerFn({ method: "POST" })
     const db = await ownerDb(context.userId);
     const now = Date.now();
     const [breaksRes, sessionsRes, settingsRes] = await Promise.all([
-      db.from("attendance_breaks").select("id, user_id, started_at").is("ended_at", null).limit(500),
+      db.from("attendance_breaks").select("id, user_id, session_id, started_at").is("ended_at", null).limit(500),
       db.from("attendance_sessions").select("id, user_id, clock_in_at, shift_id").is("clock_out_at", null).limit(500),
       db.from("attendance_settings").select("max_session_hours, attendance_alerts_enabled").eq("id", true).maybeSingle(),
     ]);
     if (breaksRes.error || sessionsRes.error) throw new Error("Attendance issues could not be checked.");
     const shiftIds = (sessionsRes.data ?? []).map((s: { shift_id: string | null }) => s.shift_id).filter(Boolean);
-    const { data: shifts } = shiftIds.length ? await db.from("attendance_shifts").select("id, ends_at").in("id", shiftIds) : { data: [] };
+    const { data: shifts } = shiftIds.length ? await db.from("attendance_shifts").select("id, ends_at, planned_break_minutes").in("id", shiftIds) : { data: [] };
     const ends = new Map((shifts ?? []).map((s: { id: string; ends_at: string }) => [s.id, s.ends_at]));
-    const longBreaks = overlongBreaks((breaksRes.data ?? []).map((b: { id: string; user_id: string; started_at: string }) => ({ id: b.id, userId: b.user_id, startedAt: b.started_at })), now);
+    const plannedByShift = new Map((shifts ?? []).map((s: { id: string; planned_break_minutes: number | null }) => [s.id, s.planned_break_minutes]));
+    const shiftBySession = new Map((sessionsRes.data ?? []).map((s: { id: string; shift_id: string | null }) => [s.id, s.shift_id]));
+    const longBreaks = overlongBreaks((breaksRes.data ?? []).map((b: { id: string; user_id: string; session_id: string; started_at: string }) => {
+      const shiftId = shiftBySession.get(b.session_id) ?? null;
+      return { id: b.id, userId: b.user_id, startedAt: b.started_at, scheduledAllowanceMinutes: shiftId ? Number(plannedByShift.get(shiftId) ?? 0) : null };
+    }), now);
     const missed = missedClockOuts((sessionsRes.data ?? []).map((s: { id: string; user_id: string; clock_in_at: string; shift_id: string | null }) => ({
       id: s.id, userId: s.user_id, clockInAt: s.clock_in_at, shiftEndsAt: s.shift_id ? ends.get(s.shift_id) ?? null : null,
     })), now, 30, Number(settingsRes.data?.max_session_hours ?? 16));
@@ -141,7 +146,7 @@ export const ownerCheckAttendanceIssues = createServerFn({ method: "POST" })
       for (const m of missed) if (await sendAttendanceIssueAlert({ kind: "missed_clock_out", recordId: m.id, userId: m.userId, minutes: 0 })) alertsQueued++;
     }
     return {
-      overlongBreaks: longBreaks.map((b) => ({ id: b.id, staffName: names.get(b.userId) ?? "Staff member", minutes: b.minutes, startedAt: b.startedAt })),
+      overlongBreaks: longBreaks.map((b) => ({ id: b.id, staffName: names.get(b.userId) ?? "Staff member", minutes: b.minutes, startedAt: b.startedAt, kind: b.kind, limitMinutes: b.limitMinutes, overBy: b.overBy })),
       missedClockOuts: missed.map((m) => ({ id: m.id, staffName: names.get(m.userId) ?? "Staff member", clockInAt: m.clockInAt, shiftEndsAt: m.shiftEndsAt })),
       alertsRequested: data.sendAlerts, alertsEnabled: Boolean(settingsRes.data?.attendance_alerts_enabled), alertsQueued,
     };

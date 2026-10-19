@@ -81,14 +81,29 @@ export function overlaps(a: { startAt: string; endAt: string }, b: { startAt: st
 
 /* ---------------------------- Issue detection --------------------------- */
 
-export interface OpenBreak { id: string; userId: string; startedAt: string }
+export interface OpenBreak { id: string; userId: string; startedAt: string; scheduledAllowanceMinutes?: number | null }
 export interface OpenSession { id: string; userId: string; clockInAt: string; shiftEndsAt: string | null }
 
-/** Breaks still open longer than the allowance (default 30 min). */
-export function overlongBreaks(breaks: OpenBreak[], now: number, allowanceMinutes = 30) {
+/** Fallback used only when no scheduled break value exists. */
+export const UNSCHEDULED_BREAK_ESTIMATE_MINUTES = 30;
+
+export type BreakAlertKind = "scheduled_exceeded" | "unscheduled_estimate";
+
+/**
+ * Breaks still open past their limit. A break whose shift has a planned
+ * break > 0 uses that real limit ("scheduled_exceeded"); otherwise the
+ * 30-minute estimate applies and is labelled as an estimate.
+ */
+export function overlongBreaks(breaks: OpenBreak[], now: number, fallbackMinutes = UNSCHEDULED_BREAK_ESTIMATE_MINUTES) {
   return breaks
-    .map((b) => ({ ...b, minutes: Math.floor((now - Date.parse(b.startedAt)) / 60000) }))
-    .filter((b) => b.minutes > allowanceMinutes);
+    .map((b) => {
+      const minutes = Math.floor((now - Date.parse(b.startedAt)) / 60000);
+      const scheduled = b.scheduledAllowanceMinutes != null && b.scheduledAllowanceMinutes > 0;
+      const limitMinutes = scheduled ? Number(b.scheduledAllowanceMinutes) : fallbackMinutes;
+      const kind: BreakAlertKind = scheduled ? "scheduled_exceeded" : "unscheduled_estimate";
+      return { ...b, minutes, limitMinutes, overBy: Math.max(0, minutes - limitMinutes), kind };
+    })
+    .filter((b) => b.minutes > b.limitMinutes);
 }
 
 /**

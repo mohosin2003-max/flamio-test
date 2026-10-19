@@ -17,7 +17,7 @@ import {
   staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
-import { browserQueueStorage, clearConfirmed, enqueue, flush, isTransientNetworkError, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
+import { browserQueueStorage, clearConfirmed, enqueue, flush, isPermanentError, isTransientNetworkError, reconcileConflict, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
 import { breakStatus } from "@/lib/attendance-rules";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
@@ -65,11 +65,26 @@ function MyAttendance() {
   const [now, setNow] = useState(() => Date.now());
   const sendQueued = useCallback(async (item: QueuedAction) => {
     const p = (item.payload ?? {}) as Record<string, unknown>;
-    if (item.kind === "clock_in") await clockIn({ data: p as never });
-    else if (item.kind === "clock_out") await clockOut({ data: p as never });
-    else if (item.kind === "break_start") await startBreak();
-    else await endBreak();
-  }, [clockIn, clockOut, startBreak, endBreak]);
+    try {
+      if (item.kind === "clock_in") await clockIn({ data: p as never });
+      else if (item.kind === "clock_out") await clockOut({ data: p as never });
+      else if (item.kind === "break_start") await startBreak();
+      else await endBreak();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!isPermanentError(message)) throw err;
+      // A previous attempt may have committed while its reply was lost: check the server's real state.
+      const ws = (await getWorkspace()) as AttendanceWorkspace;
+      const open = ws.sessions.find((s) => !s.clock_out_at);
+      const closed = ws.sessions.filter((s) => s.clock_out_at).sort((a, b) => String(b.clock_out_at).localeCompare(String(a.clock_out_at)))[0];
+      const verdict = reconcileConflict(item, {
+        activeSession: open ? { clockInAt: open.clock_in_at } : null,
+        activeBreak: ws.activeBreak ? { startedAt: ws.activeBreak.started_at } : null,
+        lastClosedSession: closed?.clock_out_at ? { clockOutAt: closed.clock_out_at } : null,
+      });
+      if (!verdict.confirmed) throw new Error(`${verdict.reason} (${message})`);
+    }
+  }, [clockIn, clockOut, startBreak, endBreak, getWorkspace]);
   const syncQueue = useCallback(async () => {
     const st = queueRef.current; if (!st) return;
     await clearConfirmed(st);
@@ -121,7 +136,7 @@ function MyAttendance() {
       <h3 className="font-display font-bold">Duty punch</h3>
       {!online ? <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">You are offline. Clock-in/out and breaks will be saved on this phone and sent when the connection returns. QR clock-in needs a connection.</p> : null}
       {queue.length ? <div className="space-y-1 rounded-md border p-2 text-sm"><p className="font-semibold">Waiting to sync</p>{!persistent ? <p className="text-xs text-destructive">This browser cannot store offline punches safely — they will be lost if you close or reload the page.</p> : null}{queue.map((q) => <div key={q.id} className="flex flex-wrap items-center justify-between gap-2"><span>{q.kind.replace("_", " ")} · tapped {dateTime(q.requestedAt)}{q.error && q.state === "failed" ? ` · ${q.error}` : ""}</span><span className="flex items-center gap-2"><span className={"rounded-full px-2 py-0.5 text-xs " + (q.state === "failed" ? "bg-destructive/15 text-destructive" : q.state === "confirmed" ? "bg-primary/15 text-primary" : "bg-muted")}>{q.state === "pending" ? "Pending" : q.state === "syncing" ? "Syncing" : q.state === "confirmed" ? "Confirmed" : "Failed"}</span>{q.state === "failed" ? <Button size="sm" variant="outline" onClick={() => void (async () => { if (queueRef.current) { await retryFailed(queueRef.current, q.id); await syncQueue(); } })()}>Retry</Button> : null}</span></div>)}<p className="text-xs text-muted-foreground">Server time is recorded when the action syncs, not when you tapped.</p></div> : null}
-      {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p>{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => { const d = { note: note.trim() || null }; void punch("clock_out", () => clockOut({ data: d }), d, "Clocked out"); }}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
+      {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p>{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => { const d = { note: note.trim() || null }; void punch("clock_out", () => clockOut({ data: d }), d, "Clocked out"); }}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
           const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; qrToken?: string } = { shiftId: shiftId || null, note: note.trim() || null };
           try {
             if (settings?.geofence_enabled) { if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; }
