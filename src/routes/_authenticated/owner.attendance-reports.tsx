@@ -53,7 +53,7 @@ function AttendanceReports() {
   const checklists = useQuery({ queryKey: ["att-checklists"], queryFn: () => listChecklists() });
   const retention = useQuery({ queryKey: ["att-retention"], queryFn: () => previewRetention() });
 
-  type Issues = { overlongBreaks: { id: string; staffName: string; minutes: number; startedAt: string }[]; missedClockOuts: { id: string; staffName: string; clockInAt: string; shiftEndsAt: string | null }[]; alertsEnabled: boolean };
+  type Issues = { overlongBreaks: { id: string; staffName: string; minutes: number; startedAt: string; kind: "scheduled_exceeded" | "unscheduled_estimate"; limitMinutes: number; overBy: number }[]; missedClockOuts: { id: string; staffName: string; clockInAt: string; shiftEndsAt: string | null }[]; alertsEnabled: boolean };
   type Checklist = { id: string; title: string; status: string; staffName: string; items: { label: string; isDone: boolean; doneAt: string | null; doneBy: string | null }[] };
   const issuesData = issues.data as Issues | undefined;
   const checklistData = checklists.data as Checklist[] | undefined;
@@ -103,8 +103,15 @@ function AttendanceReports() {
           <Button size="sm" disabled={busy} onClick={() => void act(async () => { const r = await checkIssues({ data: { sendAlerts: true } }); if (!r.alertsEnabled) throw new Error("Attendance alerts are switched off in Attendance settings."); }, "Alerts sent (repeat alerts are skipped)", [["att-issues"]])}>Alert managers</Button></div></div>
         {issues.isLoading ? <p className="text-sm text-muted-foreground">Checking…</p> : issues.error ? <p className="text-sm text-destructive">{errMsg(issues.error)}</p> : (
           <>
-            <p className="text-sm font-semibold">Long breaks (over 30 min)</p>
-            {issuesData?.overlongBreaks.length ? issuesData!.overlongBreaks.map((b) => <p key={b.id} className="text-sm">{b.staffName} · on break {formatMinutes(b.minutes)} since {dt(b.startedAt)}</p>) : <p className="text-sm text-muted-foreground">None.</p>}
+            <p className="text-sm font-semibold">Long breaks</p>
+            {issuesData?.overlongBreaks.length ? issuesData!.overlongBreaks.map((b) => (
+              <div key={b.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className={"rounded-full px-2 py-0.5 text-xs " + (b.kind === "scheduled_exceeded" ? "bg-destructive/15 text-destructive" : "bg-muted")}>
+                  {b.kind === "scheduled_exceeded" ? "Scheduled limit exceeded" : "Possible long break (unscheduled estimate)"}
+                </span>
+                <span>{b.staffName} · on break {formatMinutes(b.minutes)} since {dt(b.startedAt)} · {b.kind === "scheduled_exceeded" ? `scheduled ${b.limitMinutes} min, over by ${b.overBy} min` : `no scheduled break; ${b.limitMinutes}-min estimate`}</span>
+              </div>
+            )) : <p className="text-sm text-muted-foreground">None.</p>}
             <p className="text-sm font-semibold">Possible missed clock-outs</p>
             {issuesData?.missedClockOuts.length ? issuesData!.missedClockOuts.map((m) => (
               <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">

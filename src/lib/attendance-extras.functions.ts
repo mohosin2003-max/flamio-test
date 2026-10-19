@@ -146,7 +146,7 @@ export const ownerCheckAttendanceIssues = createServerFn({ method: "POST" })
       for (const m of missed) if (await sendAttendanceIssueAlert({ kind: "missed_clock_out", recordId: m.id, userId: m.userId, minutes: 0 })) alertsQueued++;
     }
     return {
-      overlongBreaks: longBreaks.map((b) => ({ id: b.id, staffName: names.get(b.userId) ?? "Staff member", minutes: b.minutes, startedAt: b.startedAt })),
+      overlongBreaks: longBreaks.map((b) => ({ id: b.id, staffName: names.get(b.userId) ?? "Staff member", minutes: b.minutes, startedAt: b.startedAt, kind: b.kind, limitMinutes: b.limitMinutes, overBy: b.overBy })),
       missedClockOuts: missed.map((m) => ({ id: m.id, staffName: names.get(m.userId) ?? "Staff member", clockInAt: m.clockInAt, shiftEndsAt: m.shiftEndsAt })),
       alertsRequested: data.sendAlerts, alertsEnabled: Boolean(settingsRes.data?.attendance_alerts_enabled), alertsQueued,
     };
