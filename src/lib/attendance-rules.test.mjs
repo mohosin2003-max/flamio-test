@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   breakStatus, buildReport, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks, periodKey,
-  assertAttendanceActionAllowed, readFeatureToggles, reportToCsv, rollingCutoff, shiftWindow, validatePlannedBreak,
+  assertAttendanceActionAllowed, assertTasksFeatureAllowed, readFeatureToggles, reportToCsv, rollingCutoff, shiftWindow, validatePlannedBreak,
 } from "./attendance-rules.ts";
 
 describe("Dhaka shift windows", () => {
@@ -100,6 +100,10 @@ describe("toggles and retention", () => {
     for (const action of ["clock_in", "clock_out", "break_start", "break_end"]) {
       expect(() => assertAttendanceActionAllowed(true, action)).not.toThrow();
     }
+  });
+  test("disabled Tasks blocks task actions and enabled Tasks permits them", () => {
+    expect(() => assertTasksFeatureAllowed(false)).toThrow("Tasks are disabled by the Owner.");
+    expect(() => assertTasksFeatureAllowed(true)).not.toThrow();
   });
   test("rolling 30 days, never less", () => {
     expect(rollingCutoff(new Date("2026-10-18T00:00:00Z")).toISOString()).toBe("2026-09-18T00:00:00.000Z");
