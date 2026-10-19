@@ -139,3 +139,48 @@ export async function browserQueueStorage(): Promise<{ storage: QueueStorage; pe
   try { await storage.all(); return { storage, persistent: true }; }
   catch { return { storage: memoryStorage(), persistent: false }; }
 }
+
+/* ------------------------- Lost-response recovery ----------------------- */
+
+/**
+ * Authoritative server state read AFTER a conflict error. `lastClosedSession`
+ * is the most recent session with a clock-out.
+ */
+export interface ServerPunchState {
+  activeSession: { clockInAt: string } | null;
+  activeBreak: { startedAt: string } | null;
+  lastClosedSession: { clockOutAt: string } | null;
+}
+
+/** Earlier sync attempts can only have committed after the tap, never before. */
+const CLOCK_SKEW_MS = 2 * 60_000;
+
+/**
+ * Decides whether a conflict on retry means "our earlier attempt already
+ * committed" (confirmed) or a genuine, unrelated conflict (failed).
+ * RPCs accept no client idempotency key, so this matches on the single
+ * open-session / open-break invariant plus server timestamps at or after the
+ * tap time. A record that started before the tap belongs to an earlier action
+ * and is never claimed. break_end cannot be proven (ended breaks are not
+ * returned) and is always left for the staff member to check.
+ */
+export function reconcileConflict(item: Pick<QueuedAction, "kind" | "requestedAt">, state: ServerPunchState): { confirmed: boolean; reason: string } {
+  const tapped = Date.parse(item.requestedAt) - CLOCK_SKEW_MS;
+  const after = (iso: string | undefined | null) => iso != null && Date.parse(iso) >= tapped;
+  switch (item.kind) {
+    case "clock_in":
+      return after(state.activeSession?.clockInAt)
+        ? { confirmed: true, reason: "Server shows a clock-in recorded after your tap." }
+        : { confirmed: false, reason: "You were already clocked in before this tap — this punch was not recorded." };
+    case "break_start":
+      return after(state.activeBreak?.startedAt)
+        ? { confirmed: true, reason: "Server shows a break started after your tap." }
+        : { confirmed: false, reason: "A break was already running before this tap — this punch was not recorded." };
+    case "clock_out":
+      return !state.activeSession && after(state.lastClosedSession?.clockOutAt)
+        ? { confirmed: true, reason: "Server shows a clock-out recorded after your tap." }
+        : { confirmed: false, reason: "Clock-out could not be matched on the server — check your history." };
+    default:
+      return { confirmed: false, reason: "Break end could not be verified automatically — check your status and history." };
+  }
+}
