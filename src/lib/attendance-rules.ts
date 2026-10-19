@@ -35,6 +35,10 @@ export function assertAttendanceActionAllowed(attendanceEnabled: boolean, action
   }
 }
 
+export function assertTasksFeatureAllowed(tasksEnabled: boolean) {
+  if (!tasksEnabled) throw new Error("Tasks are disabled by the Owner.");
+}
+
 /* --------------------------- Recurring shifts --------------------------- */
 
 function parseDate(key: string): number {
