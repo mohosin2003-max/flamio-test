@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   breakStatus, buildReport, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks, periodKey,
-  readFeatureToggles, reportToCsv, rollingCutoff, shiftWindow, validatePlannedBreak,
+  assertAttendanceActionAllowed, readFeatureToggles, reportToCsv, rollingCutoff, shiftWindow, validatePlannedBreak,
 } from "./attendance-rules.ts";
 
 describe("Dhaka shift windows", () => {
@@ -88,6 +88,19 @@ describe("reports and CSV", () => {
 
 describe("toggles and retention", () => {
   test("missing columns keep features ON", () => { expect(readFeatureToggles({})).toEqual({ attendanceEnabled: true, tasksEnabled: true }); });
+  test("disabled attendance blocks new clock-ins and break starts", () => {
+    expect(() => assertAttendanceActionAllowed(false, "clock_in")).toThrow("Attendance is disabled by the Owner.");
+    expect(() => assertAttendanceActionAllowed(false, "break_start")).toThrow("Attendance is disabled by the Owner.");
+  });
+  test("disabled attendance still allows clock-out and break-end", () => {
+    expect(() => assertAttendanceActionAllowed(false, "clock_out")).not.toThrow();
+    expect(() => assertAttendanceActionAllowed(false, "break_end")).not.toThrow();
+  });
+  test("enabled attendance allows every attendance action", () => {
+    for (const action of ["clock_in", "clock_out", "break_start", "break_end"]) {
+      expect(() => assertAttendanceActionAllowed(true, action)).not.toThrow();
+    }
+  });
   test("rolling 30 days, never less", () => {
     expect(rollingCutoff(new Date("2026-10-18T00:00:00Z")).toISOString()).toBe("2026-09-18T00:00:00.000Z");
     expect(() => rollingCutoff(new Date(), 7)).toThrow();
