@@ -333,7 +333,7 @@ export const ownerDryRunMonthlyRetention = createServerFn({ method: "GET" })
     const rows = (res.data ?? []).map((r: { id: string; clock_out_at: string | null; status: string; verification_status: string; clock_in_selfie_path?: string | null }) => ({
       id: r.id, clockOutAt: r.clock_out_at, status: r.status, verificationStatus: r.verification_status, selfiePath: r.clock_in_selfie_path ?? null,
     }));
-    const ids = rows.map((r) => r.id);
+    const ids = rows.map((r: { id: string }) => r.id);
     const { data: pending, error: pErr } = ids.length
       ? await db.from("attendance_requests").select("session_id").eq("status", "pending").in("session_id", ids)
       : { data: [], error: null };
