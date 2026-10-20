@@ -204,12 +204,12 @@ function AttendanceReports() {
               </span>
             </div>
             {edit?.id === t.id ? (
-              <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { await updateTask({ data: { taskId: edit.id, title: edit.title, description: edit.description.trim() || null, dueDate: edit.dueDate, priority: edit.priority, addItems: lines(edit.addItems) } }); setEdit(null); }, "Task saved", [["att-open-tasks"], ["att-checklists"]]); }}>
-                <Input aria-label="Title" required value={edit.title} onChange={(e) => setEdit((o) => o && ({ ...o, title: e.target.value }))} />
-                <Input aria-label="Due date" type="date" required value={edit.dueDate} onChange={(e) => setEdit((o) => o && ({ ...o, dueDate: e.target.value }))} />
-                <Input aria-label="Description" placeholder="Description" value={edit.description} onChange={(e) => setEdit((o) => o && ({ ...o, description: e.target.value }))} />
-                <select aria-label="Priority" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={edit.priority} onChange={(e) => setEdit((o) => o && ({ ...o, priority: e.target.value as "low" }))}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="urgent">urgent</option></select>
-                <textarea aria-label="Add checklist items" placeholder="Add checklist items (one per line). Existing items are kept." rows={3} className="rounded-md border border-input bg-background p-2 text-sm sm:col-span-2" value={edit.addItems} onChange={(e) => setEdit((o) => o && ({ ...o, addItems: e.target.value }))} />
+              <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (!edit) return; void act(async () => { await updateTask({ data: { taskId: edit.id, title: edit.title, description: edit.description.trim() || null, dueDate: edit.dueDate, priority: edit.priority, addItems: lines(edit.addItems) } }); setEdit(null); }, "Task saved", [["att-open-tasks"], ["att-checklists"]]); }}>
+                <Input aria-label="Title" required value={edit?.title ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, title: e.target.value }))} />
+                <Input aria-label="Due date" type="date" required value={edit?.dueDate ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, dueDate: e.target.value }))} />
+                <Input aria-label="Description" placeholder="Description" value={edit?.description ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, description: e.target.value }))} />
+                <select aria-label="Priority" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={edit?.priority ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, priority: e.target.value as "low" }))}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="urgent">urgent</option></select>
+                <textarea aria-label="Add checklist items" placeholder="Add checklist items (one per line). Existing items are kept." rows={3} className="rounded-md border border-input bg-background p-2 text-sm sm:col-span-2" value={edit?.addItems ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, addItems: e.target.value }))} />
                 <div className="flex gap-2 sm:col-span-2"><Button size="sm" disabled={busy}>Save</Button><Button size="sm" type="button" variant="ghost" onClick={() => setEdit(null)}>Cancel</Button></div>
               </form>
             ) : null}
