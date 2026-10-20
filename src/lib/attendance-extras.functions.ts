@@ -287,7 +287,7 @@ export const ownerRunAttendanceRetention = createServerFn({ method: "POST" })
     if (!r.eligible.length) return { deletedSessions: 0, removedSelfieFiles: 0, storageFailedSessions: 0, databaseFailedSessions: 0, partial: false };
     const { purgeRetention } = await import("@/lib/attendance-retention");
     const { SELFIE_BUCKET } = await import("@/lib/attendance-selfie");
-    const result = await purgeRetention(r.eligible.map((e) => ({ id: e.id, selfiePath: e.selfiePath })), {
+    const result = await purgeRetention(r.eligible.map((e) => ({ id: e.id, selfiePath: (e as { selfiePath?: string | null }).selfiePath ?? null })), {
       async removeFiles(paths) {
         const { error } = await db.storage.from(SELFIE_BUCKET).remove(paths);
         return { error: error ? String(error.message ?? error) : null };
