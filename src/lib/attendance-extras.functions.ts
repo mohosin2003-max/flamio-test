@@ -246,11 +246,16 @@ export const ownerSetAttendanceFeatures = createServerFn({ method: "POST" })
 
 async function retentionCandidates(db: Awaited<ReturnType<typeof ownerDb>>, days: number) {
   const cutoff = rollingCutoff(new Date(), days);
-  const { data, error } = await db.from("attendance_sessions")
-    .select("id, clock_out_at, status, verification_status").lt("clock_out_at", cutoff.toISOString()).limit(1000);
+  const base = "id, clock_out_at, status, verification_status";
+  // The selfie column may not exist yet in TEST; fall back without it (then no selfie files can exist).
+  let res = await db.from("attendance_sessions").select(`${base}, clock_in_selfie_path`).lt("clock_out_at", cutoff.toISOString()).limit(1000);
+  if (res.error && /clock_in_selfie_path/.test(res.error.message)) {
+    res = await db.from("attendance_sessions").select(base).lt("clock_out_at", cutoff.toISOString()).limit(1000);
+  }
+  const { data, error } = res;
   if (error) throw new Error("Retention preview could not be loaded.");
-  const rows = (data ?? []).map((r: { id: string; clock_out_at: string | null; status: string; verification_status: string }) => ({
-    id: r.id, clockOutAt: r.clock_out_at, status: r.status, verificationStatus: r.verification_status,
+  const rows = (data ?? []).map((r: { id: string; clock_out_at: string | null; status: string; verification_status: string; clock_in_selfie_path?: string | null }) => ({
+    id: r.id, clockOutAt: r.clock_out_at, status: r.status, verificationStatus: r.verification_status, selfiePath: r.clock_in_selfie_path ?? null,
   }));
   const ids = rows.map((r: { id: string }) => r.id);
   // Sessions referenced by a pending request stay until the request is reviewed.
@@ -279,12 +284,29 @@ export const ownerRunAttendanceRetention = createServerFn({ method: "POST" })
     const days = Math.max(30, Number(settings?.retention_days ?? 30));
     const r = await retentionCandidates(db, days);
     if (r.eligible.length !== data.expectedCount) throw new Error("The records changed since your preview. Refresh the preview and try again.");
-    if (!r.eligible.length) return { deletedSessions: 0 };
-    const ids = r.eligible.map((e) => e.id);
-    const { error: bErr } = await db.from("attendance_breaks").delete().in("session_id", ids);
-    if (bErr) throw new Error("Cleanup stopped before removing sessions; nothing else was deleted.");
-    const { error: sErr } = await db.from("attendance_sessions").delete().in("id", ids).not("clock_out_at", "is", null);
-    if (sErr) throw new Error("Session cleanup failed; breaks for these sessions may already be removed.");
-    await auditOwner(db, context.userId, "retention_purge", { days, cutoff: r.cutoff.toISOString(), deletedSessions: ids.length });
-    return { deletedSessions: ids.length };
+    if (!r.eligible.length) return { deletedSessions: 0, removedSelfieFiles: 0, storageFailedSessions: 0, databaseFailedSessions: 0, partial: false };
+    const { purgeRetention } = await import("@/lib/attendance-retention");
+    const { SELFIE_BUCKET } = await import("@/lib/attendance-selfie");
+    const result = await purgeRetention(r.eligible.map((e) => ({ id: e.id, selfiePath: (e as { selfiePath?: string | null }).selfiePath ?? null })), {
+      async removeFiles(paths) {
+        const { error } = await db.storage.from(SELFIE_BUCKET).remove(paths);
+        return { error: error ? String(error.message ?? error) : null };
+      },
+      async deleteBreaks(ids) {
+        const { error } = await db.from("attendance_breaks").delete().in("session_id", ids);
+        return { error: error ? error.message : null };
+      },
+      async deleteSessions(ids) {
+        const { data: gone, error } = await db.from("attendance_sessions").delete().in("id", ids).not("clock_out_at", "is", null).select("id");
+        return { deletedIds: (gone ?? []).map((g: { id: string }) => g.id), error: error ? error.message : null };
+      },
+    });
+    await auditOwner(db, context.userId, "retention_purge", {
+      days, cutoff: r.cutoff.toISOString(), deletedSessions: result.deletedSessions, removedSelfieFiles: result.removedSelfieFiles,
+      storageFailedSessions: result.storageFailedSessions.length, databaseFailedSessions: result.databaseFailedSessions.length,
+    });
+    return {
+      deletedSessions: result.deletedSessions, removedSelfieFiles: result.removedSelfieFiles,
+      storageFailedSessions: result.storageFailedSessions.length, databaseFailedSessions: result.databaseFailedSessions.length, partial: result.partial,
+    };
   });
