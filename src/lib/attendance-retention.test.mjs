@@ -100,3 +100,73 @@ describe("selfie retention purge", () => {
     expect(retentionEligibleSessions(rows, cutoff).map((r) => r.id)).toEqual(["ok"]);
   });
 });
+
+import { previousDhakaMonth, classifyMonthlyRetention } from "./attendance-retention.ts";
+
+describe("calendar-month boundaries (Asia/Dhaka)", () => {
+  test("run on 1 Nov 00:00 Dhaka selects all of October Dhaka", () => {
+    const w = previousDhakaMonth(new Date("2026-10-31T18:00:00Z"));
+    expect(w).toEqual({ label: "2026-10", startUtc: "2026-09-30T18:00:00.000Z", endUtc: "2026-10-31T18:00:00.000Z" });
+  });
+  test("31 Oct 23:59 Dhaka still targets September", () => {
+    expect(previousDhakaMonth(new Date("2026-10-31T17:59:00Z")).label).toBe("2026-09");
+  });
+  test("January run targets December of the previous year", () => {
+    expect(previousDhakaMonth(new Date("2027-01-01T00:00:00Z")).label).toBe("2026-12");
+  });
+  test("leap February ends on 29th", () => {
+    expect(previousDhakaMonth(new Date("2028-03-05T00:00:00Z")).endUtc).toBe("2028-02-29T18:00:00.000Z");
+  });
+});
+
+describe("monthly dry-run classification", () => {
+  const w = previousDhakaMonth(new Date("2026-11-01T00:00:00Z"));
+  const row = (id, o = {}) => ({ id, clockOutAt: "2026-10-10T08:00:00Z", status: "closed", verificationStatus: "verified", selfiePath: null, ...o });
+  test("separates eligible, protected, skipped and failed", () => {
+    const p = classifyMonthlyRetention([
+      row("ok", { selfiePath: "u/x.jpg" }),
+      row("first", { clockOutAt: "2026-09-30T18:00:00Z" }),
+      row("lastMs", { clockOutAt: "2026-10-31T17:59:59.999Z" }),
+      row("nextMonth", { clockOutAt: "2026-10-31T18:00:00Z" }),
+      row("before", { clockOutAt: "2026-09-30T17:59:59Z" }),
+      row("open", { clockOutAt: null, status: "open" }),
+      row("auto", { status: "auto_closed" }),
+      row("disp", { verificationStatus: "disputed" }),
+      row("pend"),
+      row("bad", { clockOutAt: "not-a-date" }),
+    ], ["pend"], w);
+    expect(p.eligible.map((e) => e.id)).toEqual(["ok", "first", "lastMs"]);
+    expect(p.eligible[0].hasSelfie).toBe(true);
+    expect(p.protected).toEqual([{ id: "open", reason: "open" }, { id: "auto", reason: "auto_closed" }, { id: "disp", reason: "disputed" }, { id: "pend", reason: "pending_request" }]);
+    expect(p.skipped.map((s) => s.id)).toEqual(["nextMonth", "before"]);
+    expect(p.failed).toEqual([{ id: "bad", reason: "invalid_clock_out" }]);
+  });
+  test("protection beats an in-window date", () => {
+    const p = classifyMonthlyRetention([row("d", { verificationStatus: "disputed" })], ["d"], w);
+    expect(p.eligible.length).toBe(0);
+  });
+});
+
+describe("failure recovery: file removed but database delete failed", () => {
+  test("retry re-removes the already-missing file without error and finishes DB cleanup", async () => {
+    const files = new Set(["u/a.jpg"]);
+    const sessions = new Set(["s1"]);
+    let dbDown = true;
+    const ports = {
+      async removeFiles(paths) { paths.forEach((p) => files.delete(p)); return { error: null }; },
+      async deleteBreaks() { return { error: null }; },
+      async deleteSessions(ids) {
+        if (dbDown) return { deletedIds: [], error: "db down" };
+        ids.forEach((id) => sessions.delete(id)); return { deletedIds: ids, error: null };
+      },
+    };
+    const first = await purgeRetention([{ id: "s1", selfiePath: "u/a.jpg" }], ports);
+    expect(first).toMatchObject({ deletedSessions: 0, removedSelfieFiles: 1, databaseFailedSessions: ["s1"], partial: true });
+    expect(files.has("u/a.jpg")).toBe(false);
+    expect(sessions.has("s1")).toBe(true); // reference kept, so the retry can find it
+    dbDown = false;
+    const retry = await purgeRetention([{ id: "s1", selfiePath: "u/a.jpg" }], ports);
+    expect(retry).toMatchObject({ deletedSessions: 1, partial: false });
+    expect(sessions.size).toBe(0);
+  });
+});

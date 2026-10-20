@@ -310,3 +310,34 @@ export const ownerRunAttendanceRetention = createServerFn({ method: "POST" })
       storageFailedSessions: result.storageFailedSessions.length, databaseFailedSessions: result.databaseFailedSessions.length, partial: result.partial,
     };
   });
+
+/**
+ * Monthly retention DRY RUN (Asia/Dhaka previous full calendar month).
+ * Read-only: never deletes sessions, breaks, requests, audit rows or files.
+ */
+export const ownerDryRunMonthlyRetention = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const db = await ownerDb(context.userId);
+    const { previousDhakaMonth, classifyMonthlyRetention } = await import("@/lib/attendance-retention");
+    const window = previousDhakaMonth(new Date());
+    const base = "id, clock_out_at, status, verification_status";
+    // Include open sessions (clock_out_at null) that started before the month end so they are shown as protected.
+    let res = await db.from("attendance_sessions").select(`${base}, clock_in_selfie_path`)
+      .or(`and(clock_out_at.gte.${window.startUtc},clock_out_at.lt.${window.endUtc}),clock_out_at.is.null`).limit(2000);
+    if (res.error && /clock_in_selfie_path/.test(res.error.message)) {
+      res = await db.from("attendance_sessions").select(base)
+        .or(`and(clock_out_at.gte.${window.startUtc},clock_out_at.lt.${window.endUtc}),clock_out_at.is.null`).limit(2000);
+    }
+    if (res.error) throw new Error("Dry-run preview could not be loaded.");
+    const rows = (res.data ?? []).map((r: { id: string; clock_out_at: string | null; status: string; verification_status: string; clock_in_selfie_path?: string | null }) => ({
+      id: r.id, clockOutAt: r.clock_out_at, status: r.status, verificationStatus: r.verification_status, selfiePath: r.clock_in_selfie_path ?? null,
+    }));
+    const ids = rows.map((r: { id: string }) => r.id);
+    const { data: pending, error: pErr } = ids.length
+      ? await db.from("attendance_requests").select("session_id").eq("status", "pending").in("session_id", ids)
+      : { data: [], error: null };
+    if (pErr) throw new Error("Pending requests could not be checked; dry-run stopped.");
+    const preview = classifyMonthlyRetention(rows, (pending ?? []).map((p: { session_id: string }) => p.session_id), window);
+    return { ...preview, dryRun: true as const };
+  });

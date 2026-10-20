@@ -59,3 +59,60 @@ export async function purgeRetention(candidates: PurgeCandidate[], ports: PurgeP
   result.partial = result.storageFailedSessions.length > 0 || result.databaseFailedSessions.length > 0;
   return result;
 }
+
+/* ---------------- Calendar-month boundaries (Asia/Dhaka, UTC+6, no DST) ---------------- */
+
+const DHAKA_OFFSET_MS = 6 * 60 * 60 * 1000;
+
+export interface MonthWindow { label: string; startUtc: string; endUtc: string }
+
+/** The previous full Asia/Dhaka calendar month relative to `now`: [start, end). */
+export function previousDhakaMonth(now: Date): MonthWindow {
+  const local = new Date(now.getTime() + DHAKA_OFFSET_MS);
+  const y = local.getUTCFullYear();
+  const m = local.getUTCMonth(); // current Dhaka month (0-based)
+  const start = Date.UTC(y, m - 1, 1) - DHAKA_OFFSET_MS;
+  const end = Date.UTC(y, m, 1) - DHAKA_OFFSET_MS;
+  const s = new Date(start + DHAKA_OFFSET_MS);
+  return {
+    label: `${s.getUTCFullYear()}-${String(s.getUTCMonth() + 1).padStart(2, "0")}`,
+    startUtc: new Date(start).toISOString(),
+    endUtc: new Date(end).toISOString(),
+  };
+}
+
+export interface MonthlyRow { id: string; clockOutAt: string | null; status: string; verificationStatus: string; selfiePath: string | null }
+
+export type ProtectReason = "open" | "auto_closed" | "disputed" | "pending_request";
+export type SkipReason = "outside_month";
+
+export interface DryRunPreview {
+  window: MonthWindow;
+  eligible: { id: string; hasSelfie: boolean }[];
+  protected: { id: string; reason: ProtectReason }[];
+  skipped: { id: string; reason: SkipReason }[];
+  failed: { id: string; reason: string }[];
+}
+
+/**
+ * Pure dry-run classification. Never deletes anything. Protection wins over
+ * everything: open/running, auto-closed, disputed and pending-request sessions
+ * are never eligible. Rows with unreadable data are reported as failed.
+ */
+export function classifyMonthlyRetention(rows: MonthlyRow[], pendingSessionIds: Iterable<string>, window: MonthWindow): DryRunPreview {
+  const pending = new Set(pendingSessionIds);
+  const start = Date.parse(window.startUtc);
+  const end = Date.parse(window.endUtc);
+  const out: DryRunPreview = { window, eligible: [], protected: [], skipped: [], failed: [] };
+  for (const r of rows) {
+    if (r.clockOutAt === null || r.status === "open") { out.protected.push({ id: r.id, reason: "open" }); continue; }
+    if (r.status === "auto_closed") { out.protected.push({ id: r.id, reason: "auto_closed" }); continue; }
+    if (r.verificationStatus === "disputed") { out.protected.push({ id: r.id, reason: "disputed" }); continue; }
+    if (pending.has(r.id)) { out.protected.push({ id: r.id, reason: "pending_request" }); continue; }
+    const t = Date.parse(r.clockOutAt);
+    if (Number.isNaN(t)) { out.failed.push({ id: r.id, reason: "invalid_clock_out" }); continue; }
+    if (t < start || t >= end) { out.skipped.push({ id: r.id, reason: "outside_month" }); continue; }
+    out.eligible.push({ id: r.id, hasSelfie: !!r.selfiePath });
+  }
+  return out;
+}
