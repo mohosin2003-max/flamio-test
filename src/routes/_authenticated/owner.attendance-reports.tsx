@@ -192,7 +192,7 @@ function AttendanceReports() {
       <Card><CardContent className="space-y-3 p-4">
         <h3 className="font-display font-bold">Open tasks — edit or disable</h3>
         <p className="text-xs text-muted-foreground">Finished tasks can't be changed. Disabling keeps the task and ticked items in history. Automatic incomplete-task notifications are <b>not active yet</b> — the badges below are on-screen only.</p>
-        {openTasks.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : openTasks.error ? <p className="text-sm text-destructive">{errMsg(openTasks.error)}</p> : openTasks.data?.tasks.length ? openTasks.data.tasks.map((t) => (
+        {openTasks.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : openTasks.error ? <p className="text-sm text-destructive">{errMsg(openTasks.error)}</p> : openTasks.data?.tasks.length ? openTasks.data.tasks.map((t: { id: string; title: string; description: string | null; dueDate: string; priority: string; status: string; staffName: string; totalItems: number; doneItems: number; alert: string | null }) => (
           <div key={t.id} className="space-y-2 rounded border p-2 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span><b>{t.title}</b> · {t.staffName} · due {t.dueDate} · {t.priority}{t.totalItems ? ` · ${t.doneItems}/${t.totalItems} items` : ""}</span>
