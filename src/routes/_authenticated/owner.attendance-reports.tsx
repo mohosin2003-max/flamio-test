@@ -13,9 +13,10 @@ import {
   ownerAssignStoreChecklist, ownerCheckAttendanceIssues, ownerCreateRecurringShifts, ownerGetAttendanceFeatures,
   ownerGetAttendanceReport, ownerListStoreChecklists, ownerPreviewAttendanceRetention, ownerRecoverStaleSession,
   ownerRunAttendanceRetention, ownerSetAttendanceFeatures, ownerDryRunMonthlyRetention,
+  ownerListEditableTasks, ownerUpdateAttendanceTask, ownerDisableAttendanceTask,
 } from "@/lib/attendance-extras.functions";
 import { ownerListAttendanceManagement } from "@/lib/attendance-management.functions";
-import { reportToCsv, type ReportPeriod, type ReportRow } from "@/lib/attendance-rules";
+import { STORE_CHECKLISTS, reportToCsv, type ReportPeriod, type ReportRow } from "@/lib/attendance-rules";
 import { formatMinutes } from "@/lib/attendance-logic";
 import { dhakaDateKey } from "@/lib/dates";
 
@@ -44,6 +45,9 @@ function AttendanceReports() {
   const previewRetention = useServerFn(ownerPreviewAttendanceRetention);
   const runRetention = useServerFn(ownerRunAttendanceRetention);
   const dryRunMonthly = useServerFn(ownerDryRunMonthlyRetention);
+  const listTasks = useServerFn(ownerListEditableTasks);
+  const updateTask = useServerFn(ownerUpdateAttendanceTask);
+  const disableTask = useServerFn(ownerDisableAttendanceTask);
 
   const [range, setRange] = useState({ from: monthAgo, to: today, period: "daily" as ReportPeriod });
   const [busy, setBusy] = useState(false);
@@ -54,6 +58,8 @@ function AttendanceReports() {
   const checklists = useQuery({ queryKey: ["att-checklists"], queryFn: () => listChecklists() });
   const retention = useQuery({ queryKey: ["att-retention"], queryFn: () => previewRetention() });
   const monthly = useQuery({ queryKey: ["att-retention-monthly"], queryFn: () => dryRunMonthly() });
+  const openTasks = useQuery({ queryKey: ["att-open-tasks"], queryFn: () => listTasks() });
+  const [edit, setEdit] = useState<{ id: string; title: string; description: string; dueDate: string; priority: "low" | "medium" | "high" | "urgent"; addItems: string } | null>(null);
 
   type Issues = { overlongBreaks: { id: string; staffName: string; minutes: number; startedAt: string; kind: "scheduled_exceeded" | "unscheduled_estimate"; limitMinutes: number; overBy: number }[]; missedClockOuts: { id: string; staffName: string; clockInAt: string; shiftEndsAt: string | null }[]; alertsEnabled: boolean };
   type Checklist = { id: string; title: string; status: string; staffName: string; items: { label: string; isDone: boolean; doneAt: string | null; doneBy: string | null }[] };
@@ -64,7 +70,8 @@ function AttendanceReports() {
   const [rec, setRec] = useState({ userId: "", stationId: "", from: today, to: today, weekdays: [6, 0, 1, 2, 3] as number[], start: "10:00", end: "18:00", breakMin: 30 });
   const recKey = JSON.stringify(rec);
   const [recPreview, setRecPreview] = useState<{ key: string; items: { date: string; startAt: string; endAt: string; overnight: boolean; conflict: boolean }[] } | null>(null);
-  const [cl, setCl] = useState({ kind: "opening" as "opening" | "closing", userId: "", date: today });
+  const [cl, setCl] = useState({ kind: "opening" as "opening" | "closing", userId: "", date: today, items: STORE_CHECKLISTS.opening.items.join("\n") });
+  const lines = (v: string) => v.split("\n").map((x) => x.trim()).filter(Boolean);
   const [confirmText, setConfirmText] = useState("");
 
   const act = async (fn: () => Promise<unknown>, ok: string, keys: string[][]) => {
@@ -134,8 +141,8 @@ function AttendanceReports() {
           <div className="flex items-end"><Button variant="outline" className="w-full" disabled={!report.data?.rows.length} onClick={() => report.data && downloadCsv(report.data.rows)}><Download className="mr-2 h-4 w-4" />CSV</Button></div>
         </div>
         {report.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : report.error ? <p className="text-sm text-destructive">{errMsg(report.error)}</p> : report.data?.rows.length ? (
-          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-1">Period</th><th className="p-1">Staff</th><th className="p-1">Worked</th><th className="p-1">Breaks</th><th className="p-1">Late</th><th className="p-1">Scheduled</th><th className="p-1">Overtime</th></tr></thead>
-            <tbody>{report.data.rows.map((r) => <tr key={`${r.period}-${r.userId}`} className="border-t"><td className="p-1">{r.period}</td><td className="p-1">{r.staffName}{r.openSessions ? ` (${r.openSessions} open)` : ""}</td><td className="p-1">{formatMinutes(r.workedMinutes)}</td><td className="p-1">{formatMinutes(r.breakMinutes)}</td><td className="p-1">{r.lateCount}× / {formatMinutes(r.lateMinutes)}</td><td className="p-1">{formatMinutes(r.scheduledMinutes)}</td><td className="p-1">{formatMinutes(r.overtimeMinutes)}</td></tr>)}</tbody></table>
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-1">Period</th><th className="p-1">Staff</th><th className="p-1">Worked</th><th className="p-1">Breaks</th><th className="p-1">Late</th><th className="p-1">Scheduled</th><th className="p-1">Overtime</th><th className="p-1">Selfie</th></tr></thead>
+            <tbody>{report.data.rows.map((r) => <tr key={`${r.period}-${r.userId}`} className="border-t"><td className="p-1">{r.period}</td><td className="p-1">{r.staffName}{r.openSessions ? ` (${r.openSessions} open)` : ""}</td><td className="p-1">{formatMinutes(r.workedMinutes)}</td><td className="p-1">{formatMinutes(r.breakMinutes)}</td><td className="p-1">{r.lateCount}× / {formatMinutes(r.lateMinutes)}</td><td className="p-1">{formatMinutes(r.scheduledMinutes)}</td><td className="p-1">{formatMinutes(r.overtimeMinutes)}</td><td className="p-1">{r.selfieCaptured > 0 ? <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">Captured {r.selfieCaptured}/{r.sessions}</span> : <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">None</span>}</td></tr>)}</tbody></table>
             <p className="mt-2 text-xs text-muted-foreground">Open sessions are excluded from worked time. Overtime is counted only for sessions linked to a scheduled shift.{report.data.truncated ? " Showing the first 5,000 sessions — narrow the dates." : ""}</p></div>
         ) : <p className="text-sm text-muted-foreground">No sessions in this range.</p>}
       </CardContent></Card>
@@ -164,11 +171,14 @@ function AttendanceReports() {
 
       <Card><CardContent className="space-y-3 p-4">
         <h3 className="font-display font-bold">Store opening & closing</h3>
-        <form className="grid gap-2 sm:grid-cols-4" onSubmit={(e) => { e.preventDefault(); void act(() => assignChecklist({ data: { kind: cl.kind, assignedTo: cl.userId, dueDate: cl.date } }), "Checklist assigned", [["att-checklists"]]); }}>
-          <select aria-label="Checklist type" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={cl.kind} onChange={(e) => setCl((o) => ({ ...o, kind: e.target.value as "opening" | "closing" }))}><option value="opening">Opening</option><option value="closing">Closing</option></select>
+        <form className="grid gap-2 sm:grid-cols-4" onSubmit={(e) => { e.preventDefault(); void act(() => assignChecklist({ data: { kind: cl.kind, assignedTo: cl.userId, dueDate: cl.date, items: lines(cl.items) } }), "Checklist assigned", [["att-checklists"]]); }}>
+          <select aria-label="Checklist type" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={cl.kind} onChange={(e) => { const kind = e.target.value as "opening" | "closing"; setCl((o) => ({ ...o, kind, items: STORE_CHECKLISTS[kind].items.join("\n") })); }}><option value="opening">Opening</option><option value="closing">Closing</option></select>
           <select aria-label="Responsible staff" required className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={cl.userId} onChange={(e) => setCl((o) => ({ ...o, userId: e.target.value }))}><option value="">Responsible staff…</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
           <Input aria-label="Date" type="date" required value={cl.date} onChange={(e) => setCl((o) => ({ ...o, date: e.target.value }))} />
           <Button disabled={busy}>Assign</Button>
+          <div className="sm:col-span-4"><Label htmlFor="cl-items">Checklist items (one per line, max 30)</Label>
+            <textarea id="cl-items" rows={6} className="w-full rounded-md border border-input bg-background p-2 text-sm" value={cl.items} onChange={(e) => setCl((o) => ({ ...o, items: e.target.value }))} />
+            <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setCl((o) => ({ ...o, items: STORE_CHECKLISTS[o.kind].items.join("\n") }))}>Reset to default items</button></div>
         </form>
         <p className="text-xs text-muted-foreground">Staff tick items in My duty. Approve or return completed checklists in Tasks & Requests.</p>
         {checklistData?.length ? checklistData.map((c) => (
@@ -177,6 +187,43 @@ function AttendanceReports() {
             <ul className="mt-1 space-y-0.5 text-xs">{c.items.map((i) => <li key={i.label} className={i.isDone ? "" : "text-muted-foreground"}>{i.isDone ? "✓" : "○"} {i.label}{i.isDone && i.doneAt ? ` — ${i.doneBy ?? ""} ${dt(i.doneAt)}` : ""}</li>)}</ul>
           </div>
         )) : <p className="text-sm text-muted-foreground">No checklists yet.</p>}
+      </CardContent></Card>
+
+      <Card><CardContent className="space-y-3 p-4">
+        <h3 className="font-display font-bold">Open tasks — edit or disable</h3>
+        <p className="text-xs text-muted-foreground">Finished tasks can't be changed. Disabling keeps the task and ticked items in history. Automatic incomplete-task notifications are <b>not active yet</b> — the badges below are on-screen only.</p>
+        {openTasks.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : openTasks.error ? <p className="text-sm text-destructive">{errMsg(openTasks.error)}</p> : openTasks.data?.tasks.length ? openTasks.data.tasks.map((t) => (
+          <div key={t.id} className="space-y-2 rounded border p-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span><b>{t.title}</b> · {t.staffName} · due {t.dueDate} · {t.priority}{t.totalItems ? ` · ${t.doneItems}/${t.totalItems} items` : ""}</span>
+              <span className="flex items-center gap-2">
+                {t.alert === "overdue" ? <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-xs text-destructive">Overdue</span> : t.alert === "due_today" ? <span className="rounded-full bg-accent px-2 py-0.5 text-xs">Due today</span> : null}
+                <span className="text-xs text-muted-foreground">{t.status}</span>
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => setEdit({ id: t.id, title: t.title, description: t.description ?? "", dueDate: t.dueDate, priority: t.priority as "low", addItems: "" })}>Edit</Button>
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm("Disable this task? It stays in history.")) void act(() => disableTask({ data: { taskId: t.id } }), "Task disabled", [["att-open-tasks"], ["att-checklists"]]); }}>Disable</Button>
+              </span>
+            </div>
+            {edit?.id === t.id ? (
+              <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (!edit) return; void act(async () => { await updateTask({ data: { taskId: edit.id, title: edit.title, description: edit.description.trim() || null, dueDate: edit.dueDate, priority: edit.priority, addItems: lines(edit.addItems) } }); setEdit(null); }, "Task saved", [["att-open-tasks"], ["att-checklists"]]); }}>
+                <Input aria-label="Title" required value={edit?.title ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, title: e.target.value }))} />
+                <Input aria-label="Due date" type="date" required value={edit?.dueDate ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, dueDate: e.target.value }))} />
+                <Input aria-label="Description" placeholder="Description" value={edit?.description ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, description: e.target.value }))} />
+                <select aria-label="Priority" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={edit?.priority ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, priority: e.target.value as "low" }))}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="urgent">urgent</option></select>
+                <textarea aria-label="Add checklist items" placeholder="Add checklist items (one per line). Existing items are kept." rows={3} className="rounded-md border border-input bg-background p-2 text-sm sm:col-span-2" value={edit?.addItems ?? ""} onChange={(e) => setEdit((o) => o && ({ ...o, addItems: e.target.value }))} />
+                <div className="flex gap-2 sm:col-span-2"><Button size="sm" disabled={busy}>Save</Button><Button size="sm" type="button" variant="ghost" onClick={() => setEdit(null)}>Cancel</Button></div>
+              </form>
+            ) : null}
+          </div>
+        )) : <p className="text-sm text-muted-foreground">No open tasks.</p>}
+      </CardContent></Card>
+
+      <Card><CardContent className="space-y-2 p-4">
+        <h3 className="font-display font-bold">Not supported (manual review only)</h3>
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          <li><b>Face matching: Not supported.</b> Clock-in selfies are photo evidence only; an Owner or Manager must review them by eye. No automatic identity check is done.</li>
+          <li><b>Background GPS: Not supported.</b> Location is checked only at the moment staff tap clock in/out with the app open. Staff are not tracked during the shift.</li>
+          <li><b>Incomplete-task notifications: Not active.</b> Overdue badges show here only; nothing is sent automatically.</li>
+        </ul>
       </CardContent></Card>
 
       <Card><CardContent className="space-y-3 p-4">
