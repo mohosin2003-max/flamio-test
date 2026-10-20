@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import {
   ownerAssignStoreChecklist, ownerCheckAttendanceIssues, ownerCreateRecurringShifts, ownerGetAttendanceFeatures,
   ownerGetAttendanceReport, ownerListStoreChecklists, ownerPreviewAttendanceRetention, ownerRecoverStaleSession,
-  ownerRunAttendanceRetention, ownerSetAttendanceFeatures,
+  ownerRunAttendanceRetention, ownerSetAttendanceFeatures, ownerDryRunMonthlyRetention,
 } from "@/lib/attendance-extras.functions";
 import { ownerListAttendanceManagement } from "@/lib/attendance-management.functions";
 import { reportToCsv, type ReportPeriod, type ReportRow } from "@/lib/attendance-rules";
@@ -43,6 +43,7 @@ function AttendanceReports() {
   const listChecklists = useServerFn(ownerListStoreChecklists);
   const previewRetention = useServerFn(ownerPreviewAttendanceRetention);
   const runRetention = useServerFn(ownerRunAttendanceRetention);
+  const dryRunMonthly = useServerFn(ownerDryRunMonthlyRetention);
 
   const [range, setRange] = useState({ from: monthAgo, to: today, period: "daily" as ReportPeriod });
   const [busy, setBusy] = useState(false);
@@ -52,6 +53,7 @@ function AttendanceReports() {
   const mgmt = useQuery({ queryKey: ["att-mgmt-staff"], queryFn: () => listMgmt() });
   const checklists = useQuery({ queryKey: ["att-checklists"], queryFn: () => listChecklists() });
   const retention = useQuery({ queryKey: ["att-retention"], queryFn: () => previewRetention() });
+  const monthly = useQuery({ queryKey: ["att-retention-monthly"], queryFn: () => dryRunMonthly() });
 
   type Issues = { overlongBreaks: { id: string; staffName: string; minutes: number; startedAt: string; kind: "scheduled_exceeded" | "unscheduled_estimate"; limitMinutes: number; overBy: number }[]; missedClockOuts: { id: string; staffName: string; clockInAt: string; shiftEndsAt: string | null }[]; alertsEnabled: boolean };
   type Checklist = { id: string; title: string; status: string; staffName: string; items: { label: string; isDone: boolean; doneAt: string | null; doneBy: string | null }[] };
@@ -175,6 +177,22 @@ function AttendanceReports() {
             <ul className="mt-1 space-y-0.5 text-xs">{c.items.map((i) => <li key={i.label} className={i.isDone ? "" : "text-muted-foreground"}>{i.isDone ? "✓" : "○"} {i.label}{i.isDone && i.doneAt ? ` — ${i.doneBy ?? ""} ${dt(i.doneAt)}` : ""}</li>)}</ul>
           </div>
         )) : <p className="text-sm text-muted-foreground">No checklists yet.</p>}
+      </CardContent></Card>
+
+      <Card><CardContent className="space-y-3 p-4">
+        <h3 className="font-display font-bold">Monthly cleanup preview (dry run)</h3>
+        <p className="text-xs text-muted-foreground">Preview only — nothing is deleted. Previous full month, Dhaka time.</p>
+        {monthly.isLoading ? <p className="text-sm text-muted-foreground">Checking…</p> : monthly.error ? <p className="text-sm text-destructive">{errMsg(monthly.error)}</p> : monthly.data ? (
+          <div className="space-y-2 text-sm">
+            <p>Month <b>{monthly.data.window.label}</b> ({dt(monthly.data.window.startUtc)} → {dt(monthly.data.window.endUtc)})</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Eligible</p><p className="text-lg font-bold">{monthly.data.eligible.length}</p><p className="text-xs text-muted-foreground">{monthly.data.eligible.filter((e) => e.hasSelfie).length} with selfie</p></div>
+              <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Protected</p><p className="text-lg font-bold">{monthly.data.protected.length}</p><p className="text-xs text-muted-foreground">{(["open", "auto_closed", "disputed", "pending_request"] as const).map((k) => `${k.replace("_", " ")}: ${monthly.data!.protected.filter((x) => x.reason === k).length}`).join(" · ")}</p></div>
+              <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Skipped</p><p className="text-lg font-bold">{monthly.data.skipped.length}</p><p className="text-xs text-muted-foreground">outside month</p></div>
+              <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Failed</p><p className="text-lg font-bold">{monthly.data.failed.length}</p><p className="text-xs text-muted-foreground">unreadable data</p></div>
+            </div>
+          </div>
+        ) : null}
       </CardContent></Card>
 
       <Card><CardContent className="space-y-3 p-4">
