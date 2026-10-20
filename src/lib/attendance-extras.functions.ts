@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
-  STORE_CHECKLISTS, buildReport, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks,
+  STORE_CHECKLISTS, buildReport, canEditTask, incompleteTasks, normalizeChecklistItems, selfieCountsByRow, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks,
   retentionEligibleSessions, rollingCutoff, shiftWindow, validatePlannedBreak, type ReportPeriod,
 } from "@/lib/attendance-rules";
 
@@ -86,7 +86,7 @@ export const ownerGetAttendanceReport = createServerFn({ method: "GET" })
     const db = await ownerDb(context.userId);
     if (data.toDate < data.fromDate) throw new Error("End date must be on or after the start date.");
     const { data: sessions, error } = await db.from("attendance_sessions")
-      .select("user_id, shift_id, duty_date, worked_minutes, break_minutes, late_minutes, overtime_minutes, clock_out_at")
+      .select("user_id, shift_id, duty_date, worked_minutes, break_minutes, late_minutes, overtime_minutes, clock_out_at, clock_in_selfie_path")
       .gte("duty_date", data.fromDate).lte("duty_date", data.toDate).limit(5000);
     if (error) throw new Error("Attendance report could not be loaded.");
     const rows = sessions ?? [];
@@ -106,7 +106,9 @@ export const ownerGetAttendanceReport = createServerFn({ method: "GET" })
       overtimeMinutes: Number(r.overtime_minutes ?? 0), scheduledMinutes: r.shift_id ? scheduled.get(String(r.shift_id)) ?? null : null,
       closed: Boolean(r.clock_out_at),
     })), data.period as ReportPeriod);
-    return { rows: report, truncated: rows.length >= 5000 };
+    const selfies = selfieCountsByRow(rows.map((r: Record<string, unknown>) => ({ userId: String(r.user_id), dutyDate: String(r.duty_date), hasSelfie: Boolean(r.clock_in_selfie_path) })), data.period as ReportPeriod);
+    // Only counts are returned; image paths and signed URLs never leave this function.
+    return { rows: report.map((r) => ({ ...r, selfieCaptured: selfies[`${r.period}|${r.userId}`] ?? 0 })), truncated: rows.length >= 5000 };
   });
 
 /* ---------------------------- Issue detection --------------------------- */
@@ -171,7 +173,7 @@ export const ownerRecoverStaleSession = createServerFn({ method: "POST" })
 
 export const ownerAssignStoreChecklist = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ kind: z.enum(["opening", "closing"]), assignedTo: z.string().uuid(), dueDate: dateKey }).parse(input))
+  .inputValidator((input: unknown) => z.object({ kind: z.enum(["opening", "closing"]), assignedTo: z.string().uuid(), dueDate: dateKey, items: z.array(z.string().max(400)).max(60).optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const db = await ownerDb(context.userId);
     const { requireTasksFeature } = await import("@/lib/attendance-features.server");
@@ -179,6 +181,8 @@ export const ownerAssignStoreChecklist = createServerFn({ method: "POST" })
     const { data: role } = await db.from("user_roles").select("user_id").eq("user_id", data.assignedTo).eq("role", "staff").maybeSingle();
     if (!role) throw new Error("Choose an existing staff account.");
     const template = STORE_CHECKLISTS[data.kind];
+    const labels = normalizeChecklistItems(data.items ?? [...template.items]);
+    const customized = Boolean(data.items);
     const title = `${template.title} — ${data.dueDate}`;
     const { data: dup } = await db.from("attendance_tasks").select("id").eq("title", title).neq("status", "cancelled").limit(1);
     if (dup?.length) throw new Error("This checklist is already assigned for that date.");
@@ -187,9 +191,9 @@ export const ownerAssignStoreChecklist = createServerFn({ method: "POST" })
       due_date: data.dueDate, priority: "urgent", requires_verification: true, status: "pending",
     }).select("id").single();
     if (error || !task) throw new Error("Could not assign the checklist.");
-    const { error: itemsError } = await db.from("attendance_task_items").insert(template.items.map((label, sort_order) => ({ task_id: task.id, label, sort_order })));
+    const { error: itemsError } = await db.from("attendance_task_items").insert(labels.map((label, sort_order) => ({ task_id: task.id, label, sort_order })));
     if (itemsError) throw new Error("Checklist created but items failed to save; cancel it and try again.");
-    await auditOwner(db, context.userId, `store_${data.kind}_checklist_assigned`, { taskId: task.id, dueDate: data.dueDate }, data.assignedTo);
+    await auditOwner(db, context.userId, `store_${data.kind}_checklist_assigned`, { taskId: task.id, dueDate: data.dueDate, customized, itemCount: labels.length }, data.assignedTo);
     return { taskId: task.id };
   });
 
@@ -216,6 +220,85 @@ export const ownerListStoreChecklists = createServerFn({ method: "GET" })
         label: i.label, isDone: i.is_done, doneAt: i.done_at, doneBy: i.done_by ? names.get(i.done_by) ?? "Staff member" : null,
       })),
     }));
+  });
+
+/* ------------------------- Task edit / disable ------------------------- */
+
+export const ownerListEditableTasks = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const db = await ownerDb(context.userId);
+    const { data: tasks, error } = await db.from("attendance_tasks")
+      .select("id, assigned_to, title, description, due_date, due_at, priority, status")
+      .in("status", ["pending", "in_progress", "rejected"]).order("due_date", { ascending: true }).limit(100);
+    if (error) throw new Error("Tasks could not be loaded.");
+    const ids = (tasks ?? []).map((t: { id: string }) => t.id);
+    const staffIds = [...new Set((tasks ?? []).map((t: { assigned_to: string }) => t.assigned_to))];
+    const [items, profiles] = await Promise.all([
+      ids.length ? db.from("attendance_task_items").select("task_id, is_done").in("task_id", ids) : Promise.resolve({ data: [] }),
+      staffIds.length ? db.from("profiles").select("id, full_name").in("id", staffIds) : Promise.resolve({ data: [] }),
+    ]);
+    const names = new Map((profiles.data ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name?.trim() || "Unnamed staff"]));
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
+    const rows = (tasks ?? []).map((t: Record<string, unknown>) => {
+      const its = (items.data ?? []).filter((i: { task_id: string }) => i.task_id === t.id) as { is_done: boolean }[];
+      return {
+        id: String(t.id), title: String(t.title), description: t.description ? String(t.description) : null,
+        dueDate: String(t.due_date), dueAt: t.due_at ? String(t.due_at) : null, priority: String(t.priority), status: String(t.status),
+        staffName: names.get(String(t.assigned_to)) ?? "Staff member", totalItems: its.length, doneItems: its.filter((i) => i.is_done).length,
+      };
+    });
+    const flags = new Map(incompleteTasks(rows, Date.now(), today).map((f) => [f.id, f.reason]));
+    return {
+      tasks: rows.map((r: (typeof rows)[number]) => ({ ...r, alert: flags.get(r.id) ?? null })),
+      // No scheduled push exists for incomplete tasks yet; this is an on-screen status only.
+      scheduledAlertsActive: false as const,
+    };
+  });
+
+export const ownerUpdateAttendanceTask = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({
+    taskId: z.string().uuid(), title: z.string().trim().min(2).max(160), description: z.string().trim().max(2000).nullable(),
+    dueDate: dateKey, priority: z.enum(["low", "medium", "high", "urgent"]), addItems: z.array(z.string().max(400)).max(30).default([]),
+  }).parse(input))
+  .handler(async ({ data, context }) => {
+    const db = await ownerDb(context.userId);
+    const { data: task } = await db.from("attendance_tasks").select("id, assigned_to, title, description, due_date, priority, status").eq("id", data.taskId).maybeSingle();
+    if (!task) throw new Error("Task not found.");
+    if (!canEditTask(task.status)) throw new Error("Finished or disabled tasks cannot be edited; their history is kept as-is.");
+    const add = data.addItems.some((x) => x.trim()) ? normalizeChecklistItems(data.addItems) : [];
+    const { data: existing } = await db.from("attendance_task_items").select("label, sort_order").eq("task_id", task.id);
+    const known = new Set((existing ?? []).map((i: { label: string }) => i.label.toLowerCase()));
+    const fresh = add.filter((l) => !known.has(l.toLowerCase()));
+    if ((existing?.length ?? 0) + fresh.length > 30) throw new Error("A checklist can have at most 30 items.");
+    const { error } = await db.from("attendance_tasks").update({
+      title: data.title, description: data.description, due_date: data.dueDate, priority: data.priority,
+    }).eq("id", task.id).in("status", ["pending", "in_progress", "rejected"]);
+    if (error) throw new Error("Could not save the task.");
+    if (fresh.length) {
+      const start = Math.max(-1, ...(existing ?? []).map((i: { sort_order: number }) => Number(i.sort_order))) + 1;
+      const { error: itemsError } = await db.from("attendance_task_items").insert(fresh.map((label, i) => ({ task_id: task.id, label, sort_order: start + i })));
+      if (itemsError) throw new Error("Task saved, but new checklist items could not be added.");
+    }
+    await auditOwner(db, context.userId, "task_edited", { taskId: task.id, before: { title: task.title, description: task.description, dueDate: task.due_date, priority: task.priority }, after: { title: data.title, description: data.description, dueDate: data.dueDate, priority: data.priority }, addedItems: fresh }, task.assigned_to);
+    return { ok: true, addedItems: fresh.length };
+  });
+
+/** Disable = mark cancelled. Rows and ticked items stay for history; nothing is deleted. */
+export const ownerDisableAttendanceTask = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ taskId: z.string().uuid(), reason: z.string().trim().max(500).nullable().optional() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const db = await ownerDb(context.userId);
+    const { data: task } = await db.from("attendance_tasks").select("id, assigned_to, status").eq("id", data.taskId).maybeSingle();
+    if (!task) throw new Error("Task not found.");
+    if (!canEditTask(task.status)) throw new Error("Only open tasks can be disabled.");
+    const { error } = await db.from("attendance_tasks").update({ status: "cancelled", review_note: data.reason ?? "Disabled by Owner" })
+      .eq("id", task.id).in("status", ["pending", "in_progress", "rejected"]);
+    if (error) throw new Error("Could not disable the task.");
+    await auditOwner(db, context.userId, "task_disabled", { taskId: task.id, previousStatus: task.status, reason: data.reason ?? null }, task.assigned_to);
+    return { ok: true };
   });
 
 /* ---------------------------- Feature toggles --------------------------- */
