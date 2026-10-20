@@ -253,3 +253,62 @@ export function breakStatus(startedAt: string, now: number, allowanceMinutes: nu
   const overBy = Math.max(0, minutes - allowanceMinutes);
   return { minutes, allowanceMinutes, overBy, exceeded: overBy > 0 };
 }
+
+/* --------------------- Checklist customization & tasks ------------------ */
+
+export const CHECKLIST_ITEM_MAX = 30;
+export const CHECKLIST_LABEL_MAX = 160;
+
+/** Trim, drop blanks, de-duplicate (case-insensitive) and enforce limits. */
+export function normalizeChecklistItems(items: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of items) {
+    const label = raw.trim().replace(/\s+/g, " ");
+    if (!label) continue;
+    if (label.length > CHECKLIST_LABEL_MAX) throw new Error(`Checklist items must be ${CHECKLIST_LABEL_MAX} characters or fewer.`);
+    const k = label.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(label);
+  }
+  if (!out.length) throw new Error("Add at least one checklist item.");
+  if (out.length > CHECKLIST_ITEM_MAX) throw new Error(`A checklist can have at most ${CHECKLIST_ITEM_MAX} items.`);
+  return out;
+}
+
+/** Statuses whose task details may still be edited or disabled. Closed tasks keep their history untouched. */
+export const EDITABLE_TASK_STATUSES = ["pending", "in_progress", "rejected"] as const;
+export function canEditTask(status: string): boolean {
+  return (EDITABLE_TASK_STATUSES as readonly string[]).includes(status);
+}
+
+const OPEN_TASK_STATUSES = ["pending", "in_progress", "rejected"];
+
+export type IncompleteTaskInput = { id: string; status: string; dueDate: string; dueAt: string | null; totalItems: number; doneItems: number };
+export type IncompleteTaskFlag = IncompleteTaskInput & { reason: "overdue" | "due_today" };
+
+/**
+ * Open tasks that are overdue (due time passed, or due date before today in
+ * Dhaka) or due today. Completed/verified/cancelled tasks are never flagged.
+ */
+export function incompleteTasks(tasks: readonly IncompleteTaskInput[], now: number, todayKey: string): IncompleteTaskFlag[] {
+  const out: IncompleteTaskFlag[] = [];
+  for (const t of tasks) {
+    if (!OPEN_TASK_STATUSES.includes(t.status)) continue;
+    const overdue = t.dueAt ? Date.parse(t.dueAt) < now : t.dueDate < todayKey;
+    if (overdue) out.push({ ...t, reason: "overdue" });
+    else if (t.dueDate === todayKey) out.push({ ...t, reason: "due_today" });
+  }
+  return out;
+}
+
+/** Count captured selfies per report row key (`period|userId`). */
+export function selfieCountsByRow(rows: readonly { userId: string; dutyDate: string; hasSelfie: boolean }[], period: ReportPeriod): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const k = `${periodKey(r.dutyDate, period)}|${r.userId}`;
+    out[k] = (out[k] ?? 0) + (r.hasSelfie ? 1 : 0);
+  }
+  return out;
+}
