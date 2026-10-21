@@ -11,8 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   ownerAssignStoreChecklist, ownerCheckAttendanceIssues, ownerCreateRecurringShifts, ownerGetAttendanceFeatures,
-  ownerGetAttendanceReport, ownerListStoreChecklists, ownerPreviewAttendanceRetention, ownerRecoverStaleSession,
-  ownerRunAttendanceRetention, ownerSetAttendanceFeatures, ownerDryRunMonthlyRetention,
+  ownerGetAttendanceReport, ownerListStoreChecklists, ownerRecoverStaleSession,
+  ownerSetAttendanceFeatures, ownerDryRunMonthlyRetention,
   ownerListEditableTasks, ownerUpdateAttendanceTask, ownerDisableAttendanceTask,
 } from "@/lib/attendance-extras.functions";
 import { ownerListAttendanceManagement } from "@/lib/attendance-management.functions";
@@ -42,8 +42,6 @@ function AttendanceReports() {
   const listMgmt = useServerFn(ownerListAttendanceManagement);
   const assignChecklist = useServerFn(ownerAssignStoreChecklist);
   const listChecklists = useServerFn(ownerListStoreChecklists);
-  const previewRetention = useServerFn(ownerPreviewAttendanceRetention);
-  const runRetention = useServerFn(ownerRunAttendanceRetention);
   const dryRunMonthly = useServerFn(ownerDryRunMonthlyRetention);
   const listTasks = useServerFn(ownerListEditableTasks);
   const updateTask = useServerFn(ownerUpdateAttendanceTask);
@@ -56,7 +54,6 @@ function AttendanceReports() {
   const features = useQuery({ queryKey: ["att-features"], queryFn: () => getFeatures() });
   const mgmt = useQuery({ queryKey: ["att-mgmt-staff"], queryFn: () => listMgmt() });
   const checklists = useQuery({ queryKey: ["att-checklists"], queryFn: () => listChecklists() });
-  const retention = useQuery({ queryKey: ["att-retention"], queryFn: () => previewRetention() });
   const monthly = useQuery({ queryKey: ["att-retention-monthly"], queryFn: () => dryRunMonthly() });
   const openTasks = useQuery({ queryKey: ["att-open-tasks"], queryFn: () => listTasks() });
   const [edit, setEdit] = useState<{ id: string; title: string; description: string; dueDate: string; priority: "low" | "medium" | "high" | "urgent"; addItems: string } | null>(null);
@@ -72,7 +69,6 @@ function AttendanceReports() {
   const [recPreview, setRecPreview] = useState<{ key: string; items: { date: string; startAt: string; endAt: string; overnight: boolean; conflict: boolean }[] } | null>(null);
   const [cl, setCl] = useState({ kind: "opening" as "opening" | "closing", userId: "", date: today, items: STORE_CHECKLISTS.opening.items.join("\n") });
   const lines = (v: string) => v.split("\n").map((x) => x.trim()).filter(Boolean);
-  const [confirmText, setConfirmText] = useState("");
 
   const act = async (fn: () => Promise<unknown>, ok: string, keys: string[][]) => {
     setBusy(true);
@@ -239,18 +235,6 @@ function AttendanceReports() {
               <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Failed</p><p className="text-lg font-bold">{monthly.data.failed.length}</p><p className="text-xs text-muted-foreground">unreadable data</p></div>
             </div>
           </div>
-        ) : null}
-      </CardContent></Card>
-
-      <Card><CardContent className="space-y-3 p-4">
-        <h3 className="font-display font-bold">Old attendance cleanup</h3>
-        {retention.isLoading ? <p className="text-sm text-muted-foreground">Checking…</p> : retention.error ? <p className="text-sm text-destructive">{errMsg(retention.error)}</p> : retention.data ? (
-          <>
-            <p className="text-sm">Keeps the last {retention.data.days} days (rolling). Finished sessions before {dt(retention.data.cutoff)}: <b>{retention.data.eligibleSessions}</b> can be removed, {retention.data.protectedSessions} kept (open, auto-closed, disputed or waiting on a request).</p>
-            <p className="text-xs text-muted-foreground">Accounts, shifts, tasks, requests and the audit log are never removed. Nothing runs automatically.</p>
-            <div className="flex flex-wrap gap-2"><Input className="max-w-40" placeholder="Type DELETE" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
-              <Button variant="destructive" disabled={busy || confirmText !== "DELETE" || !retention.data.eligibleSessions} onClick={() => void act(async () => { await runRetention({ data: { confirm: "DELETE", expectedCount: retention.data!.eligibleSessions } }); setConfirmText(""); }, "Old sessions removed", [["att-retention"], ["att-report"]])}>Remove {retention.data.eligibleSessions}</Button></div>
-          </>
         ) : null}
       </CardContent></Card>
     </div>

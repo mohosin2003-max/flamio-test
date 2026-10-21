@@ -221,7 +221,8 @@ export function retentionEligibleSessions<T extends RetentionSession>(rows: T[],
     Date.parse(r.clockOutAt) < cutoff.getTime() &&
     r.status !== "open" &&
     r.status !== "auto_closed" &&
-    r.verificationStatus !== "disputed",
+    r.verificationStatus !== "disputed" &&
+    r.verificationStatus !== "unverified",
   );
 }
 
