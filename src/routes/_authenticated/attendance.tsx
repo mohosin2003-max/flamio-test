@@ -19,7 +19,7 @@ import {
   staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
 } from "@/lib/attendance-workflow.functions";
-import { browserQueueStorage, clearConfirmed, enqueue, flush, isPermanentError, isTransientNetworkError, reconcileConflict, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
+import { browserQueueStorage, clearConfirmed, enqueue, flush, recoverInterruptedSync, isPermanentError, isTransientNetworkError, reconcileConflict, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
 import { breakStatus } from "@/lib/attendance-rules";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
@@ -31,7 +31,7 @@ type AttendanceShift = { id: string; start_time: string; end_time: string; is_ov
 type AttendanceSession = { id: string; shift_id: string | null; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
 type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean };
 type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null };
-type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled?: boolean } | null; shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; started_at: string } | null };
+type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled?: boolean } | null; shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; session_id?: string; started_at: string } | null; lastClosedBreak?: { id: string; session_id: string; started_at: string; ended_at: string } | null };
 
 function MyAttendance() {
   const qc = useQueryClient();
@@ -86,19 +86,28 @@ function MyAttendance() {
         activeSession: open ? { clockInAt: open.clock_in_at } : null,
         activeBreak: ws.activeBreak ? { startedAt: ws.activeBreak.started_at } : null,
         lastClosedSession: closed?.clock_out_at ? { clockOutAt: closed.clock_out_at } : null,
+        lastClosedBreak: ws.lastClosedBreak ? { id: ws.lastClosedBreak.id, sessionId: ws.lastClosedBreak.session_id, startedAt: ws.lastClosedBreak.started_at, endedAt: ws.lastClosedBreak.ended_at } : null,
       });
       if (!verdict.confirmed) throw new Error(`${verdict.reason} (${message})`);
     }
   }, [clockIn, clockOut, startBreak, endBreak, getWorkspace]);
+  const flushingRef = useRef(false);
+  const recoveredRef = useRef(false);
   const syncQueue = useCallback(async () => {
     const st = queueRef.current; if (!st) return;
+    if (flushingRef.current) return; // never run two flushes at once
+    flushingRef.current = true;
+    try {
     await clearConfirmed(st);
+    // Once per page load: a "syncing" item left by a previous page was interrupted; retry it.
+    if (!recoveredRef.current) { recoveredRef.current = true; await recoverInterruptedSync(st); }
     if (navigator.onLine && (await st.all()).some((i) => i.state === "pending")) {
       setQueue(await st.all());
       await flush(st, async (item) => { setQueue((q) => q.map((x) => x.id === item.id ? { ...x, state: "syncing" } : x)); await sendQueued(item); });
       await qc.invalidateQueries({ queryKey: ["my-attendance-workspace"] });
     }
     setQueue(await st.all());
+    } finally { flushingRef.current = false; }
   }, [qc, sendQueued]);
   useEffect(() => {
     let alive = true;
@@ -141,7 +150,7 @@ function MyAttendance() {
       <h3 className="font-display font-bold">Duty punch</h3>
       {!online ? <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">You are offline. Clock-in/out and breaks will be saved on this phone and sent when the connection returns. QR clock-in needs a connection.</p> : null}
       {queue.length ? <div className="space-y-1 rounded-md border p-2 text-sm"><p className="font-semibold">Waiting to sync</p>{!persistent ? <p className="text-xs text-destructive">This browser cannot store offline punches safely — they will be lost if you close or reload the page.</p> : null}{queue.map((q) => <div key={q.id} className="flex flex-wrap items-center justify-between gap-2"><span>{q.kind.replace("_", " ")} · tapped {dateTime(q.requestedAt)}{q.error && q.state === "failed" ? ` · ${q.error}` : ""}</span><span className="flex items-center gap-2"><span className={"rounded-full px-2 py-0.5 text-xs " + (q.state === "failed" ? "bg-destructive/15 text-destructive" : q.state === "confirmed" ? "bg-primary/15 text-primary" : "bg-muted")}>{q.state === "pending" ? "Pending" : q.state === "syncing" ? "Syncing" : q.state === "confirmed" ? "Confirmed" : "Failed"}</span>{q.state === "failed" ? <Button size="sm" variant="outline" onClick={() => void (async () => { if (queueRef.current) { await retryFailed(queueRef.current, q.id); await syncQueue(); } })()}>Retry</Button> : null}</span></div>)}<p className="text-xs text-muted-foreground">Server time is recorded when the action syncs, not when you tapped.</p></div> : null}
-      {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p>{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => { const d = { note: note.trim() || null }; void punch("clock_out", () => clockOut({ data: d }), d, "Clocked out"); }}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
+      {activeSession ? <div className="rounded-lg border p-3"><p className="font-semibold">On duty since {dateTime(activeSession.clock_in_at)}</p><p className="text-sm text-muted-foreground">Status: {activeBreak ? "On break" : "On duty"} · Late {activeSession.late_minutes ?? 0} min</p>{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), activeBreak.session_id ? { breakId: activeBreak.id, sessionId: activeBreak.session_id } : undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} onClick={() => { const d = { note: note.trim() || null }; void punch("clock_out", () => clockOut({ data: d }), d, "Clocked out"); }}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div></div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
           const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; qrToken?: string; selfiePath?: string } = { shiftId: shiftId || null, note: note.trim() || null };
           try {
             if (settings?.geofence_enabled) { if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; }

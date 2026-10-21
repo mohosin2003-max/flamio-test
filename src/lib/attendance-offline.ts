@@ -59,6 +59,23 @@ export async function enqueue(storage: QueueStorage, kind: QueueKind, id: string
  * Sends pending actions in order. Stops at the first transient failure so a
  * later action (e.g. clock-out) never overtakes an earlier one (clock-in).
  */
+/**
+ * After a reload, an item left in "syncing" means its sync was interrupted and
+ * its outcome is unknown. Return it to "pending" (same id, payload, tap time
+ * and attempts) so it is retried in its original FIFO position; lost-response
+ * reconciliation then decides whether the earlier attempt already committed.
+ * Call only when no flush is running in this page.
+ */
+export async function recoverInterruptedSync(storage: QueueStorage) {
+  let recovered = 0;
+  for (const item of await storage.all()) {
+    if (item.state !== "syncing") continue;
+    await storage.put({ ...item, state: "pending" });
+    recovered++;
+  }
+  return recovered;
+}
+
 export async function flush(storage: QueueStorage, send: (item: QueuedAction) => Promise<void>) {
   for (const item of await storage.all()) {
     if (item.state === "confirmed" || item.state === "failed") continue;
@@ -150,6 +167,8 @@ export interface ServerPunchState {
   activeSession: { clockInAt: string } | null;
   activeBreak: { startedAt: string } | null;
   lastClosedSession: { clockOutAt: string } | null;
+  /** Most recent ended break of the signed-in staff member only. */
+  lastClosedBreak?: { id: string; sessionId: string; startedAt: string; endedAt: string } | null;
 }
 
 /** Earlier sync attempts can only have committed after the tap, never before. */
@@ -161,10 +180,11 @@ const CLOCK_SKEW_MS = 2 * 60_000;
  * RPCs accept no client idempotency key, so this matches on the single
  * open-session / open-break invariant plus server timestamps at or after the
  * tap time. A record that started before the tap belongs to an earlier action
- * and is never claimed. break_end cannot be proven (ended breaks are not
- * returned) and is always left for the staff member to check.
+ * and is never claimed. break_end is confirmed only when the queued action
+ * recorded which break it targeted (breakId + sessionId captured at tap) and
+ * that exact break is now closed at or after the tap with no break running.
  */
-export function reconcileConflict(item: Pick<QueuedAction, "kind" | "requestedAt">, state: ServerPunchState): { confirmed: boolean; reason: string } {
+export function reconcileConflict(item: Pick<QueuedAction, "kind" | "requestedAt"> & { payload?: Record<string, unknown> | undefined }, state: ServerPunchState): { confirmed: boolean; reason: string } {
   const tapped = Date.parse(item.requestedAt) - CLOCK_SKEW_MS;
   const after = (iso: string | undefined | null) => iso != null && Date.parse(iso) >= tapped;
   switch (item.kind) {
@@ -180,7 +200,15 @@ export function reconcileConflict(item: Pick<QueuedAction, "kind" | "requestedAt
       return !state.activeSession && after(state.lastClosedSession?.clockOutAt)
         ? { confirmed: true, reason: "Server shows a clock-out recorded after your tap." }
         : { confirmed: false, reason: "Clock-out could not be matched on the server — check your history." };
-    default:
-      return { confirmed: false, reason: "Break end could not be verified automatically — check your status and history." };
+    default: {
+      const unverified = { confirmed: false, reason: "Break end could not be verified automatically — check your status and history." };
+      const breakId = item.payload?.breakId;
+      const sessionId = item.payload?.sessionId;
+      const closed = state.lastClosedBreak;
+      if (typeof breakId !== "string" || typeof sessionId !== "string" || !closed || state.activeBreak) return unverified;
+      if (closed.id !== breakId || closed.sessionId !== sessionId) return unverified;
+      if (!after(closed.endedAt) || Date.parse(closed.startedAt) > Date.parse(item.requestedAt) + CLOCK_SKEW_MS) return unverified;
+      return { confirmed: true, reason: "Server shows this break was ended after your tap." };
+    }
   }
 }
