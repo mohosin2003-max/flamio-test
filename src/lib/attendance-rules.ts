@@ -313,3 +313,54 @@ export function selfieCountsByRow(rows: readonly { userId: string; dutyDate: str
   }
   return out;
 }
+
+/* ---------------------- Shift visibility & clock-in --------------------- */
+
+/** Asia/Dhaka calendar date (YYYY-MM-DD) for a UTC instant. */
+export function dhakaDateKey(ms: number): string {
+  return new Date(ms + DHAKA_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** Calendar day arithmetic on a YYYY-MM-DD key (no wall-clock subtraction). */
+export function addCalendarDays(key: string, days: number): string {
+  const t = parseDate(key);
+  const d = new Date(t);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export type StaffShiftLike = { shift_date: string; ends_at: string; is_overnight: boolean; status?: string };
+
+/**
+ * A shift is shown to its staff member when it is dated today (Dhaka), or it
+ * is yesterday's overnight shift whose ends_at is still in the future.
+ */
+export function isShiftVisibleToStaff(shift: StaffShiftLike, nowMs: number): boolean {
+  const today = dhakaDateKey(nowMs);
+  if (shift.shift_date === today) return true;
+  return shift.shift_date === addCalendarDays(today, -1) && shift.is_overnight === true && Date.parse(shift.ends_at) > nowMs;
+}
+
+export type ClockInShift = { user_id: string; shift_date: string; starts_at: string; ends_at: string; status: string; is_overnight: boolean };
+
+/**
+ * Server-side clock-in eligibility for a specific shift. Keeps the UTC window
+ * (starts_at - early grace .. ends_at) authoritative and adds a calendar-date
+ * guard: shift_date must be yesterday (overnight only), today, or tomorrow
+ * (early arrival across midnight). Never a naive shift_date === today check.
+ */
+export function shiftClockInEligibility(shift: ClockInShift, userId: string, nowMs: number, earlyMinutes: number): { ok: true } | { ok: false; reason: string } {
+  if (shift.user_id !== userId) return { ok: false, reason: "The selected shift was not found." };
+  if (shift.status !== "scheduled") return { ok: false, reason: "This shift is not available for clock-in." };
+  const start = Date.parse(shift.starts_at);
+  const end = Date.parse(shift.ends_at);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return { ok: false, reason: "This shift is not available for clock-in." };
+  if (nowMs < start - Math.max(0, earlyMinutes) * 60000) return { ok: false, reason: "It is too early to clock in for this shift." };
+  if (nowMs > end) return { ok: false, reason: "This shift has already ended." };
+  const today = dhakaDateKey(nowMs);
+  const allowed = shift.shift_date === today
+    || shift.shift_date === addCalendarDays(today, 1)
+    || (shift.shift_date === addCalendarDays(today, -1) && shift.is_overnight === true);
+  if (!allowed) return { ok: false, reason: "This shift is not for today." };
+  return { ok: true };
+}
