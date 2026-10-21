@@ -88,10 +88,12 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       current.push(item);
       itemsByTask.set(item.task_id, current);
     }
-    const today = localDateDhaka();
+    const { addCalendarDays, dhakaDateKey, isShiftVisibleToStaff } = await import("@/lib/attendance-rules");
+    const nowMs = Date.now();
+    const today = dhakaDateKey(nowMs);
     const todayShiftResult = await db.from("attendance_shifts")
       .select("id, shift_date, start_time, end_time, starts_at, ends_at, is_overnight, planned_break_minutes, station_id, duty_role, status")
-      .eq("user_id", context.userId).eq("shift_date", today).neq("status", "cancelled").order("starts_at");
+      .eq("user_id", context.userId).in("shift_date", [addCalendarDays(today, -1), today]).neq("status", "cancelled").order("starts_at");
     if (todayShiftResult.error) throw new Error("Today's shift could not be loaded.");
     const { loadFeatureToggles } = await import("@/lib/attendance-features.server");
     const features = await loadFeatureToggles(db);
@@ -99,7 +101,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       features,
       settings: settingsResult.data,
       today,
-      shifts: todayShiftResult.data ?? [],
+      shifts: (todayShiftResult.data ?? []).filter((s: { shift_date: string; ends_at: string; is_overnight: boolean }) => isShiftVisibleToStaff(s, nowMs)),
       activeBreak: breaksResult.data?.[0] ?? null,
       sessions: sessionsResult.data ?? [],
       tasks: (tasksResult.data ?? []).map((task: Record<string, unknown>) => ({ ...task, checklist: itemsByTask.get(String(task.id)) ?? [] })),
@@ -172,31 +174,29 @@ export const staffClockIn = createServerFn({ method: "POST" })
         throw new Error("Please wait before punching again.");
       }
     }
+    const { addCalendarDays, dhakaDateKey, isShiftVisibleToStaff, shiftClockInEligibility } = await import("@/lib/attendance-rules");
     let shift: { id: string; shift_date: string; starts_at: string; ends_at: string; status: string; station_id?: string | null } | null = null;
     if (data.shiftId) {
       const { data: shiftRow, error } = await db.from("attendance_shifts")
-        .select("id, shift_date, starts_at, ends_at, status, station_id").eq("id", data.shiftId)
+        .select("id, user_id, shift_date, starts_at, ends_at, status, station_id, is_overnight").eq("id", data.shiftId)
         .eq("user_id", context.userId).maybeSingle();
       if (error || !shiftRow) throw new Error("The selected shift was not found.");
-      if (shiftRow.status !== "scheduled") throw new Error("This shift is not available for clock-in.");
-      if (Date.parse(nowIso) < Date.parse(shiftRow.starts_at) - Number(settings.early_clock_in_minutes) * 60000) {
-        throw new Error("It is too early to clock in for this shift.");
-      }
-      if (Date.parse(nowIso) > Date.parse(shiftRow.ends_at)) throw new Error("This shift has already ended.");
+      const verdict = shiftClockInEligibility(shiftRow, context.userId, now.getTime(), Number(settings.early_clock_in_minutes));
+      if (!verdict.ok) throw new Error(verdict.reason);
       shift = shiftRow;
     } else if (!settings.allow_unscheduled_clock_in) {
       throw new Error("You must select a scheduled shift to clock in.");
     } else {
-      const today = localDateDhaka(now);
-      const { data: todaysShift, error } = await db.from("attendance_shifts")
-        .select("id, shift_date, starts_at, ends_at, status, station_id").eq("user_id", context.userId)
-        .eq("shift_date", today).eq("status", "scheduled").order("starts_at").limit(1);
+      const today = dhakaDateKey(now.getTime());
+      const { data: candidates, error } = await db.from("attendance_shifts")
+        .select("id, user_id, shift_date, starts_at, ends_at, status, station_id, is_overnight").eq("user_id", context.userId)
+        .in("shift_date", [addCalendarDays(today, -1), today]).eq("status", "scheduled").order("starts_at").limit(10);
       if (error) throw new Error("Could not check your schedule.");
-      if (todaysShift?.[0] && Date.parse(nowIso) <= Date.parse(todaysShift[0].ends_at)) {
-        if (Date.parse(nowIso) < Date.parse(todaysShift[0].starts_at) - Number(settings.early_clock_in_minutes) * 60000) {
-          throw new Error("It is too early to clock in for today's shift.");
-        }
-        shift = todaysShift[0];
+      const current = (candidates ?? []).find((s: { shift_date: string; ends_at: string; is_overnight: boolean }) => isShiftVisibleToStaff(s, now.getTime()) && now.getTime() <= Date.parse(s.ends_at));
+      if (current) {
+        const verdict = shiftClockInEligibility(current, context.userId, now.getTime(), Number(settings.early_clock_in_minutes));
+        if (!verdict.ok) throw new Error(verdict.reason === "It is too early to clock in for this shift." ? "It is too early to clock in for today's shift." : verdict.reason);
+        shift = current;
       }
     }
     if (settings.geofence_enabled) {
