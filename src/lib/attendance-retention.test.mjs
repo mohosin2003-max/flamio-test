@@ -99,6 +99,29 @@ describe("selfie retention purge", () => {
     ];
     expect(retentionEligibleSessions(rows, cutoff).map((r) => r.id)).toEqual(["ok"]);
   });
+
+  test("unverified closed sessions are never rolling-retention candidates", () => {
+    const cutoff = new Date("2026-09-01T00:00:00Z");
+    const old = "2026-08-01T00:00:00Z";
+    const rows = [
+      { id: "ok", clockOutAt: old, status: "closed", verificationStatus: "verified" },
+      { id: "unv", clockOutAt: old, status: "closed", verificationStatus: "unverified" },
+    ];
+    expect(retentionEligibleSessions(rows, cutoff).map((r) => r.id)).toEqual(["ok"]);
+  });
+
+  test("all protections hold together with unverified", () => {
+    const cutoff = new Date("2026-09-01T00:00:00Z");
+    const old = "2026-08-01T00:00:00Z";
+    const rows = [
+      { id: "open", clockOutAt: null, status: "open", verificationStatus: "unverified" },
+      { id: "auto", clockOutAt: old, status: "auto_closed", verificationStatus: "unverified" },
+      { id: "disp", clockOutAt: old, status: "closed", verificationStatus: "disputed" },
+      { id: "unv", clockOutAt: old, status: "closed", verificationStatus: "unverified" },
+      { id: "new", clockOutAt: "2026-09-15T00:00:00Z", status: "closed", verificationStatus: "verified" },
+    ];
+    expect(retentionEligibleSessions(rows, cutoff)).toEqual([]);
+  });
 });
 
 import { previousDhakaMonth, classifyMonthlyRetention } from "./attendance-retention.ts";
