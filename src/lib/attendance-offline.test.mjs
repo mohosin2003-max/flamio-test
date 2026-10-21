@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { enqueue, flush, isAuthError, isPermanentError, isTransientNetworkError, memoryStorage, retryFailed, clearConfirmed, reconcileConflict } from "./attendance-offline.ts";
+import { enqueue, flush, isAuthError, isPermanentError, isTransientNetworkError, memoryStorage, retryFailed, clearConfirmed, reconcileConflict, recoverInterruptedSync } from "./attendance-offline.ts";
 
 const at = (s) => new Date(`2026-10-18T06:00:${s}Z`);
 
@@ -83,7 +83,56 @@ describe("lost-response reconciliation", () => {
     expect(reconcileConflict({ kind: "clock_out", requestedAt: tap }, { ...none, lastClosedSession: { clockOutAt: "2026-10-18T06:00:30.000Z" } }).confirmed).toBe(true);
     expect(reconcileConflict({ kind: "clock_out", requestedAt: tap }, { ...none, lastClosedSession: { clockOutAt: "2026-10-17T20:00:00.000Z" } }).confirmed).toBe(false);
   });
-  test("break end is never auto-confirmed", () => {
+  const target = { breakId: "brk-1", sessionId: "ses-1" };
+  const closedAt = (id, sessionId, startedAt, endedAt) => ({ ...none, lastClosedBreak: { id, sessionId, startedAt, endedAt } });
+  test("break end after a lost reply is confirmed for the same break closed after the tap", () => {
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, closedAt("brk-1", "ses-1", "2026-10-18T05:40:00.000Z", "2026-10-18T06:00:15.000Z")).confirmed).toBe(true);
+  });
+  test("an earlier unrelated closed break is not accepted", () => {
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, closedAt("brk-1", "ses-1", "2026-10-18T04:00:00.000Z", "2026-10-18T04:30:00.000Z")).confirmed).toBe(false);
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, closedAt("brk-0", "ses-1", "2026-10-18T05:40:00.000Z", "2026-10-18T06:00:15.000Z")).confirmed).toBe(false);
+  });
+  test("a closed break from another session or staff member is not accepted", () => {
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, closedAt("brk-1", "ses-other", "2026-10-18T05:40:00.000Z", "2026-10-18T06:00:15.000Z")).confirmed).toBe(false);
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, closedAt("brk-other-staff", "ses-other-staff", "2026-10-18T05:40:00.000Z", "2026-10-18T06:00:15.000Z")).confirmed).toBe(false);
+  });
+  test("missing or ambiguous evidence never confirms break end", () => {
     expect(reconcileConflict({ kind: "break_end", requestedAt: tap }, none).confirmed).toBe(false);
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, none).confirmed).toBe(false);
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap }, closedAt("brk-1", "ses-1", "2026-10-18T05:40:00.000Z", "2026-10-18T06:00:15.000Z")).confirmed).toBe(false);
+    const stillRunning = { ...closedAt("brk-1", "ses-1", "2026-10-18T05:40:00.000Z", "2026-10-18T06:00:15.000Z"), activeBreak: { startedAt: "2026-10-18T06:00:30.000Z" } };
+    expect(reconcileConflict({ kind: "break_end", requestedAt: tap, payload: target }, stillRunning).confirmed).toBe(false);
+  });
+});
+
+describe("interrupted sync recovery", () => {
+  test("a sole persisted syncing item is recovered and retried after reload", async () => {
+    const st = memoryStorage();
+    await st.put({ id: "q1", kind: "break_end", requestedAt: "2026-10-18T06:00:00.000Z", state: "syncing", attempts: 1, payload: { breakId: "b", sessionId: "s" } });
+    expect(await recoverInterruptedSync(st)).toBe(1);
+    const [item] = await st.all();
+    expect(item).toEqual({ id: "q1", kind: "break_end", requestedAt: "2026-10-18T06:00:00.000Z", state: "pending", attempts: 1, payload: { breakId: "b", sessionId: "s" } });
+    const sent = [];
+    await flush(st, async (i) => { sent.push(i.id); });
+    expect(sent).toEqual(["q1"]);
+    expect((await st.all())[0].state).toBe("confirmed");
+  });
+  test("recovered item keeps FIFO position and retry limit", async () => {
+    const st = memoryStorage();
+    await st.put({ id: "late", kind: "clock_out", requestedAt: "2026-10-18T07:00:00.000Z", state: "pending", attempts: 0 });
+    await st.put({ id: "early", kind: "clock_in", requestedAt: "2026-10-18T06:00:00.000Z", state: "syncing", attempts: 2 });
+    await recoverInterruptedSync(st);
+    const sent = [];
+    await flush(st, async (i) => { sent.push(i.id); throw new Error("Failed to fetch"); });
+    expect(sent).toEqual(["early"]);
+    const all = await st.all();
+    expect(all.find((i) => i.id === "early").state).toBe("failed");
+    expect(all.find((i) => i.id === "late").state).toBe("pending");
+  });
+  test("confirmed and failed items are not touched", async () => {
+    const st = memoryStorage();
+    await st.put({ id: "c", kind: "clock_in", requestedAt: "2026-10-18T06:00:00.000Z", state: "confirmed", attempts: 1 });
+    await st.put({ id: "f", kind: "clock_out", requestedAt: "2026-10-18T06:01:00.000Z", state: "failed", attempts: 3 });
+    expect(await recoverInterruptedSync(st)).toBe(0);
   });
 });
