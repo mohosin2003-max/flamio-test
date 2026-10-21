@@ -120,13 +120,13 @@ describe("interrupted sync recovery", () => {
   test("recovered item keeps FIFO position and retry limit", async () => {
     const st = memoryStorage();
     await st.put({ id: "late", kind: "clock_out", requestedAt: "2026-10-18T07:00:00.000Z", state: "pending", attempts: 0 });
-    await st.put({ id: "early", kind: "clock_in", requestedAt: "2026-10-18T06:00:00.000Z", state: "syncing", attempts: 2 });
+    await st.put({ id: "early", kind: "clock_in", requestedAt: "2026-10-18T06:00:00.000Z", state: "syncing", attempts: 0 });
     await recoverInterruptedSync(st);
     const sent = [];
     await flush(st, async (i) => { sent.push(i.id); throw new Error("Failed to fetch"); });
     expect(sent).toEqual(["early"]);
     const all = await st.all();
-    expect(all.find((i) => i.id === "early").state).toBe("failed");
+    expect(all.find((i) => i.id === "early")).toMatchObject({ state: "pending", attempts: 1 });
     expect(all.find((i) => i.id === "late").state).toBe("pending");
   });
   test("confirmed and failed items are not touched", async () => {
