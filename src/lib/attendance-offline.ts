@@ -78,9 +78,7 @@ export async function recoverInterruptedSync(storage: QueueStorage) {
 
 export async function flush(storage: QueueStorage, send: (item: QueuedAction) => Promise<void>) {
   for (const item of await storage.all()) {
-    if (item.state === "confirmed") continue;
-    // A failed item ahead blocks nothing (it needs a manual retry), matching prior behaviour.
-    if (item.state === "failed") continue;
+    if (item.state === "confirmed" || item.state === "failed") continue;
     await storage.put({ ...item, state: "syncing" });
     try {
       await send(item);

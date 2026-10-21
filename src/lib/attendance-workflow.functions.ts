@@ -56,7 +56,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
-    const [settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult] = await Promise.all([
+    const [settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult, closedBreakResult] = await Promise.all([
       db.from("attendance_settings")
         .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled")
         .eq("id", true).maybeSingle(),
@@ -72,8 +72,12 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       db.from("attendance_requests")
         .select("id, request_type, leave_type, leave_start_date, leave_end_date, target_date, reason, status, review_note, created_at")
         .eq("user_id", context.userId).order("created_at", { ascending: false }).limit(50),
+      // Read-only: latest ended break of this staff member, used only to reconcile a lost break-end reply.
+      db.from("attendance_breaks")
+        .select("id, session_id, started_at, ended_at")
+        .eq("user_id", context.userId).not("ended_at", "is", null).order("ended_at", { ascending: false }).limit(1),
     ]);
-    if ([settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult].some((r) => r.error)) {
+    if ([settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult, closedBreakResult].some((r) => r.error)) {
       console.error("Attendance workspace read failed", [settingsResult.error, sessionsResult.error, breaksResult.error, tasksResult.error, requestsResult.error].filter(Boolean).map((e) => e?.message));
       throw new Error("Attendance workspace could not be loaded.");
     }
@@ -103,6 +107,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       today,
       shifts: (todayShiftResult.data ?? []).filter((s: { shift_date: string; ends_at: string; is_overnight: boolean }) => isShiftVisibleToStaff(s, nowMs)),
       activeBreak: breaksResult.data?.[0] ?? null,
+      lastClosedBreak: closedBreakResult.data?.[0] ?? null,
       sessions: sessionsResult.data ?? [],
       tasks: (tasksResult.data ?? []).map((task: Record<string, unknown>) => ({ ...task, checklist: itemsByTask.get(String(task.id)) ?? [] })),
       requests: requestsResult.data ?? [],
