@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { QrScannerDialog } from "@/components/attendance/QrScannerDialog";
 import { SelfieCaptureDialog } from "@/components/attendance/SelfieCaptureDialog";
 import { staffUploadAttendanceSelfie } from "@/lib/attendance-selfie.functions";
+import { staffUploadAttendanceTaskPhoto } from "@/lib/attendance-task-photo.functions";
 import {
   staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
   staffGetAttendanceWorkspace, staffStartBreak, staffCompleteAttendanceTask,
@@ -29,7 +30,7 @@ export const Route = createFileRoute("/_authenticated/attendance")({
 
 type AttendanceShift = { id: string; start_time: string; end_time: string; is_overnight: boolean; duty_role: string | null; planned_break_minutes: number; status: string };
 type AttendanceSession = { id: string; shift_id: string | null; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
-type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean };
+type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean; requires_photo: boolean; photo_path: string | null };
 type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null };
 type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled?: boolean } | null; shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; session_id?: string; started_at: string } | null; lastClosedBreak?: { id: string; session_id: string; started_at: string; ended_at: string } | null };
 
@@ -45,6 +46,9 @@ function MyAttendance() {
   const createRequest = useServerFn(staffCreateAttendanceRequest);
   const cancelRequest = useServerFn(staffCancelAttendanceRequest);
   const uploadSelfie = useServerFn(staffUploadAttendanceSelfie);
+  const uploadTaskPhoto = useServerFn(staffUploadAttendanceTaskPhoto);
+  const [taskPhotoPaths, setTaskPhotoPaths] = useState<Record<string, string>>({});
+  const [taskPhotoPreviews, setTaskPhotoPreviews] = useState<Record<string, string>>({});
   const [selfieOpen, setSelfieOpen] = useState(false);
   const [selfie, setSelfie] = useState<{ base64: string; preview: string } | null>(null);
   const [shiftId, setShiftId] = useState("");
@@ -138,6 +142,26 @@ function MyAttendance() {
     catch (error) { toast.error(error instanceof Error ? error.message : "Action failed"); }
     finally { setBusy(false); }
   };
+  const chooseTaskPhoto = (taskId: string, file?: File) => {
+    if (!file) return;
+    if (file.size > 1_500_000) { toast.error("Photo must be 1.5 MB or smaller."); return; }
+    setBusy(true);
+    const reader = new FileReader();
+    reader.onerror = () => { setBusy(false); toast.error("Could not read photo. Try again."); };
+    reader.onload = async () => {
+      const dataUrl = String(reader.result ?? "");
+      const base64 = dataUrl.split(",")[1];
+      if (!base64) { setBusy(false); toast.error("Could not read photo. Try again."); return; }
+      try {
+        const uploaded = await uploadTaskPhoto({ data: { taskId, imageBase64: base64 } });
+        setTaskPhotoPaths((old) => ({ ...old, [taskId]: uploaded.path }));
+        setTaskPhotoPreviews((old) => ({ ...old, [taskId]: dataUrl }));
+        toast.success("Task photo uploaded. Complete the task before the 15-minute expiry.");
+      } catch (error) { toast.error(error instanceof Error ? error.message : "Photo upload failed."); }
+      finally { setBusy(false); }
+    };
+    reader.readAsDataURL(file);
+  };
   if (query.isLoading) return <div className="space-y-3"><Skeleton className="h-32 w-full"/><Skeleton className="h-48 w-full"/></div>;
   if (query.error || !query.data) return <EmptyState title="Attendance unavailable" description="Your attendance workspace could not be loaded." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
   const { shifts, sessions, tasks, requests, activeBreak, settings } = query.data as AttendanceWorkspace;
@@ -172,7 +196,7 @@ function MyAttendance() {
       </form>}
     </CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Today's schedule</h3>{shifts.length?shifts.map((s) =><div key={s.id} className="rounded-lg border p-3"><p className="font-semibold">{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" · overnight":""}</p><p className="text-sm text-muted-foreground">{s.duty_role||"Scheduled duty"} · break {s.planned_break_minutes} min · {s.status}</p></div>):<p className="text-sm text-muted-foreground">No shift assigned for today.</p>}</CardContent></Card>
-    <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">My tasks</h3>{pendingTasks.length?pendingTasks.map((task) =><div key={task.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><p className="font-semibold">{task.title}</p><span className="rounded-full bg-muted px-2 py-1 text-xs">{task.status} · {task.priority}</span></div>{task.description?<p className="text-sm text-muted-foreground">{task.description}</p>:null}<p className="text-xs text-muted-foreground">Due {task.due_date}{task.due_at?" · "+dateTime(task.due_at):""}</p>{task.checklist?.length?<div className="space-y-2 rounded-md bg-muted/40 p-2">{task.checklist.map((item) =><label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(item.is_done)} disabled={busy} onChange={(e)=>void run(()=>toggleTaskItem({data:{itemId:item.id,isDone:e.target.checked}}),e.target.checked?"Checklist item completed":"Checklist item reopened")}/><span className={item.is_done?"line-through text-muted-foreground":""}>{item.label}</span></label>)}</div>:null}<Textarea rows={2} maxLength={1000} placeholder="Completion note (optional)" value={completionNotes[task.id]||""} onChange={(e)=>setCompletionNotes((old)=>({...old,[task.id]:e.target.value}))}/><Button size="sm" disabled={busy} onClick={()=>void run(()=>completeTask({data:{taskId:task.id,completionNote:completionNotes[task.id]?.trim()||null}}), task.requires_verification?"Submitted for Owner verification":"Task completed")}><CheckCircle2 className="mr-2 h-4 w-4"/>Mark complete</Button></div>):<p className="text-sm text-muted-foreground">No open tasks assigned to you.</p>}</CardContent></Card>
+    <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">My tasks</h3>{pendingTasks.length?pendingTasks.map((task) =><div key={task.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><p className="font-semibold">{task.title}</p><span className="rounded-full bg-muted px-2 py-1 text-xs">{task.status} · {task.priority}</span></div>{task.description?<p className="text-sm text-muted-foreground">{task.description}</p>:null}{task.requires_photo?<div className="space-y-2 rounded-md border p-3"><p className="text-sm font-medium"><Camera className="mr-1 inline h-4 w-4"/>Photo proof required</p><input type="file" accept="image/jpeg,image/*" capture="environment" disabled={busy} onChange={(e)=>{chooseTaskPhoto(task.id,e.target.files?.[0]);e.currentTarget.value="";}} className="block w-full text-sm"/>{taskPhotoPreviews[task.id]?<div className="space-y-1"><img src={taskPhotoPreviews[task.id]} alt="Task proof preview" className="max-h-48 rounded-md object-contain"/><p className="text-xs text-muted-foreground">Uploaded and ready to attach</p></div>:task.photo_path?<p className="text-xs text-muted-foreground">A photo is already attached to this task.</p>:<p className="text-xs text-muted-foreground">Take a JPEG photo. Maximum 1.5 MB.</p>}</div>:null}<p className="text-xs text-muted-foreground">Due {task.due_date}{task.due_at?" · "+dateTime(task.due_at):""}</p>{task.checklist?.length?<div className="space-y-2 rounded-md bg-muted/40 p-2">{task.checklist.map((item) =><label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(item.is_done)} disabled={busy} onChange={(e)=>void run(()=>toggleTaskItem({data:{itemId:item.id,isDone:e.target.checked}}),e.target.checked?"Checklist item completed":"Checklist item reopened")}/><span className={item.is_done?"line-through text-muted-foreground":""}>{item.label}</span></label>)}</div>:null}<Textarea rows={2} maxLength={1000} placeholder="Completion note (optional)" value={completionNotes[task.id]||""} onChange={(e)=>setCompletionNotes((old)=>({...old,[task.id]:e.target.value}))}/><Button size="sm" disabled={busy||(task.checklist??[]).some((item)=>!item.is_done)||(task.requires_photo&&!taskPhotoPaths[task.id]&&!task.photo_path)} onClick={()=>void run(()=>completeTask({data:{taskId:task.id,completionNote:completionNotes[task.id]?.trim()||null,photoPath:taskPhotoPaths[task.id]??task.photo_path??null}}), task.requires_verification?"Submitted for Owner verification":"Task completed")}><CheckCircle2 className="mr-2 h-4 w-4"/>Mark complete</Button></div>):<p className="text-sm text-muted-foreground">No open tasks assigned to you.</p>}</CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Attendance history</h3>{sessions.length?sessions.map((s) =><div key={s.id} className="flex flex-wrap justify-between gap-2 rounded-lg border p-3"><div><p className="font-semibold">{s.duty_date}</p><p className="text-xs text-muted-foreground">In {dateTime(s.clock_in_at)} · Out {s.clock_out_at?dateTime(s.clock_out_at):"—"}</p></div><div className="text-right text-sm"><p>{s.worked_minutes} worked min</p><p className={(s.late_minutes ?? 0)>0?"text-destructive":"text-muted-foreground"}>{(s.late_minutes ?? 0)>0?"Late "+s.late_minutes+" min":s.status}</p></div></div>):<p className="text-sm text-muted-foreground">No attendance history yet.</p>}</CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Submit a request</h3><form className="grid gap-3 sm:grid-cols-2" onSubmit={(e)=>{e.preventDefault();void run(async()=>{await createRequest({data:{requestType,leaveType:requestType==="leave"?leaveType:null,leaveStartDate:requestType==="leave"?leaveStart:null,leaveEndDate:requestType==="leave"?leaveEnd:null,targetDate:requestType!=="leave"?targetDate:null,sessionId:requestType==="correction"||requestType==="overtime"?requestSessionId||null:null,requestedClockIn:(requestType==="correction"||requestType==="missed_punch")&&requestedIn?new Date(requestedIn).toISOString():null,requestedClockOut:(requestType==="correction"||requestType==="missed_punch")&&requestedOut?new Date(requestedOut).toISOString():null,requestedOvertimeMinutes:requestType==="overtime"?Number(overtime):null,reason}});setReason("");}, "Request submitted");}}>
       <div className="space-y-1 sm:col-span-2"><Label htmlFor="request-type">Request type</Label><select id="request-type" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={requestType} onChange={(e)=>setRequestType(e.target.value as typeof requestType)}><option value="leave">Leave</option><option value="correction">Attendance correction</option><option value="missed_punch">Missed punch (both times)</option><option value="overtime">Overtime</option></select></div>
