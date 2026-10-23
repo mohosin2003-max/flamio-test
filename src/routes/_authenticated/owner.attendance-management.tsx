@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { RecurringShiftsCard } from "@/components/owner/AttendanceOwnerTools";
 import {
   ownerCancelAttendanceShift,
   ownerCreateAttendanceShift,
@@ -102,6 +103,7 @@ function AttendanceManagement() {
         <Button type="submit" disabled={busy || staff.length === 0} className="sm:col-span-2"><CalendarClock className="mr-2 h-4 w-4" />Create shift</Button>
       </form>
     </CardContent></Card>
+    <RecurringShiftsCard />
     <Card><CardContent className="space-y-3 p-4">
       <h3 className="font-display font-bold">Upcoming / recent shifts</h3>
       {shifts.length === 0 ? <p className="text-sm text-muted-foreground">No shifts found in the current window.</p> : <div className="space-y-2">{shifts.map((shift) => <div key={shift.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"><div><p className="font-semibold">{shift.staffName}{shift.dutyRole ? " · " + shift.dutyRole : ""}</p><p className="text-sm text-muted-foreground">{shift.shiftDate} · {shift.startTime.slice(0,5)}–{shift.endTime.slice(0,5)}{shift.isOvernight ? " (overnight)" : ""}</p><p className="text-xs text-muted-foreground">{stations.find((s) => s.id === shift.stationId)?.name ?? "No station"} · break {shift.plannedBreakMinutes} min · {shift.status}</p>{shift.notes ? <p className="mt-1 text-sm">{shift.notes}</p> : null}</div>{shift.status === "scheduled" ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (confirm("Cancel this scheduled shift?")) void run(() => cancelShift({ data: { id: shift.id } }), "Shift cancelled"); }}><XCircle className="mr-1 h-4 w-4" />Cancel</Button> : null}</div>)}</div>}
