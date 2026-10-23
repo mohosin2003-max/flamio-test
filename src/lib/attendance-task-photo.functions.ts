@@ -6,7 +6,7 @@ import { getAccessProfile } from "@/lib/owner.server";
 import { decodeBase64 } from "@/lib/attendance-selfie";
 import {
   TASK_PHOTO_BUCKET, TASK_PHOTO_MAX_BYTES, TASK_PHOTO_MIN_BYTES,
-  TASK_PHOTO_SIGNED_URL_SECONDS, buildTaskPhotoPath, checkTaskPhotoPath, validateTaskPhotoBytes,
+  TASK_PHOTO_SIGNED_URL_SECONDS, buildTaskPhotoPath, validateTaskPhotoBytes,
 } from "@/lib/attendance-task-photo";
 
 const imageInput = z.object({
