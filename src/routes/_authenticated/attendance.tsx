@@ -21,6 +21,19 @@ import {
 } from "@/lib/attendance-workflow.functions";
 import { browserQueueStorage, clearConfirmed, enqueue, flush, recoverInterruptedSync, isPermanentError, isTransientNetworkError, reconcileConflict, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
 import { breakStatus } from "@/lib/attendance-rules";
+import { EXCEPTION_REASON_MAX, EXCEPTION_REASON_MIN, parseExceptionRequired } from "@/lib/attendance-clockout";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+const EXCEPTION_PENDING = Symbol("exception-pending");
+
+async function readClockOutLocation(): Promise<{ latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number }> {
+  // Single on-demand reading; failures are sent as "no location" so the server asks for a reason instead of trapping staff.
+  if (typeof navigator === "undefined" || !navigator.geolocation) return {};
+  try {
+    const p = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+    return { latitude: p.coords.latitude, longitude: p.coords.longitude, accuracyMeters: p.coords.accuracy, capturedAt: Math.round(p.timestamp) };
+  } catch { return {}; }
+}
 
 export const Route = createFileRoute("/_authenticated/attendance")({
   head: () => ({ meta: [{ title: "My Attendance — Flamio" }, { name: "robots", content: "noindex" }] }),
@@ -47,6 +60,8 @@ function MyAttendance() {
   const uploadSelfie = useServerFn(staffUploadAttendanceSelfie);
   const [selfieOpen, setSelfieOpen] = useState(false);
   const [selfie, setSelfie] = useState<{ base64: string; preview: string } | null>(null);
+  const [exceptionPrompt, setExceptionPrompt] = useState<string | null>(null);
+  const [exceptionReason, setExceptionReason] = useState("");
   const [shiftId, setShiftId] = useState("");
   const [note, setNote] = useState("");
   const [qrToken, setQrToken] = useState("");
@@ -121,7 +136,7 @@ function MyAttendance() {
   }, [syncQueue]);
   const punch = async (kind: QueueKind, send: () => Promise<unknown>, payload: Record<string, unknown> | undefined, success: string) => {
     setBusy(true);
-    try { await send(); await refresh(); toast.success(success); }
+    try { const r = await send(); if (r === EXCEPTION_PENDING) return; await refresh(); toast.success(success); }
     catch (error) {
       const st = queueRef.current;
       const canQueue = st && !(payload && ("qrToken" in payload || "selfiePath" in payload)) && isTransientNetworkError(error, navigator.onLine);
