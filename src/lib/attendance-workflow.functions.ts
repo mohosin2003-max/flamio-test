@@ -114,7 +114,10 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       for (const s of st ?? []) stationNames.set(s.id, s.name);
     }
     const upcomingShifts = filterUpcomingShifts(upcomingResult.data ?? [], context.userId, nowMs)
-      .map(({ user_id: _u, ...s }: Record<string, unknown> & { user_id: string; station_id: string | null }) => ({ ...s, station_name: s.station_id ? stationNames.get(s.station_id) ?? null : null }));
+      .map((s: { user_id: string; station_id: string | null; [k: string]: unknown }) => {
+        const { user_id: _omit, ...rest } = s;
+        return { ...rest, station_name: s.station_id ? stationNames.get(s.station_id) ?? null : null } as Record<string, unknown>;
+      });
     const { loadFeatureToggles } = await import("@/lib/attendance-features.server");
     const features = await loadFeatureToggles(db);
     return {
