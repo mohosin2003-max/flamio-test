@@ -113,11 +113,9 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       const { data: st } = await db.from("attendance_stations").select("id, name").in("id", stationIds);
       for (const s of st ?? []) stationNames.set(s.id, s.name);
     }
-    const upcomingShifts = filterUpcomingShifts(upcomingResult.data ?? [], context.userId, nowMs)
-      .map((s: { user_id: string; station_id: string | null; [k: string]: unknown }) => {
-        const { user_id: _omit, ...rest } = s;
-        return { ...rest, station_name: s.station_id ? stationNames.get(s.station_id) ?? null : null } as Record<string, unknown>;
-      });
+    type UpRow = { id: string; user_id: string; shift_date: string; start_time: string; end_time: string; starts_at: string; ends_at: string; is_overnight: boolean; planned_break_minutes: number; station_id: string | null; duty_role: string | null; status: string };
+    const upcomingShifts = filterUpcomingShifts((upcomingResult.data ?? []) as UpRow[], context.userId, nowMs)
+      .map(({ user_id: _omit, ...rest }) => ({ ...rest, station_name: rest.station_id ? stationNames.get(rest.station_id) ?? null : null }));
     const { loadFeatureToggles } = await import("@/lib/attendance-features.server");
     const features = await loadFeatureToggles(db);
     return {
