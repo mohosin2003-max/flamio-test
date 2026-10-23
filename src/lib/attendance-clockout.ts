@@ -16,11 +16,11 @@ export type ClockOutDiscrepancy =
   | "outside_geofence" | "station_unverifiable";
 
 export type ClockOutStation = { latitude: number | null; longitude: number | null; radius: number; isActive: boolean } | null;
-export type ClockOutPoint = { latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number };
+export type ClockOutPoint = { latitude?: number | undefined; longitude?: number | undefined; accuracyMeters?: number | undefined; capturedAt?: number | undefined };
 
 export type ClockOutDecision =
-  | { ok: true; mode: "normal" | "verified_location"; distance?: number }
-  | { ok: true; mode: "exception"; discrepancy: ClockOutDiscrepancy; reason: string; distance?: number }
+  | { ok: true; mode: "normal" | "verified_location"; distance?: number | undefined }
+  | { ok: true; mode: "exception"; discrepancy: ClockOutDiscrepancy; reason: string; distance?: number | undefined }
   | { ok: false; needsReason: boolean; discrepancy?: ClockOutDiscrepancy; error: string };
 
 const MESSAGES: Record<ClockOutDiscrepancy, string> = {
