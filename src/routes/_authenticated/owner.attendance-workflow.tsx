@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { OpenTasksEditCard, StoreChecklistsCard } from "@/components/owner/AttendanceOwnerTools";
 import { ownerListAttendanceManagement } from "@/lib/attendance-management.functions";
 import {
   ownerCreateAttendanceTask, ownerListAttendanceRequests, ownerReviewAttendanceRequest, ownerReviewAttendanceTask,
@@ -27,7 +28,6 @@ type ManagementData = {
   staff: Array<{ id: string; name: string }>;
   stations: Array<{ id: string; name: string; isActive: boolean }>;
   tasks: Array<{ id: string; title: string; staffName: string; dueDate: string; dueAt: string | null; priority: string; status: string; description: string | null; completionNote: string | null; reviewNote: string | null }>;
-  shifts: Array<{ id: string; staffName: string; shiftDate: string; startTime: string; endTime: string; status: string }>;
 };
 type OwnerAttendanceRequest = { id: string; status: string; staff_name: string; request_type: string; leave_start_date: string | null; leave_end_date: string | null; target_date: string | null; reason: string; review_note: string | null };
 
@@ -58,8 +58,7 @@ function AttendanceWorkflow() {
   const submitReviewNote=async()=>{if(!reviewDialog)return;const note=reviewNote.trim();if(reviewDialog.kind==="task"&&note.length<3){toast.error("Please explain what the staff member needs to correct.");return;}const ok=await run(()=>reviewDialog.kind==="task"?reviewTaskFn({data:{taskId:reviewDialog.id,decision:"rejected",reviewNote:note||"Please review and resubmit."}}):reviewRequest({data:{requestId:reviewDialog.id,decision:"rejected",reviewNote:note||null}}),reviewDialog.kind==="task"?"Task returned to staff":"Request rejected");if(ok)setReviewDialog(null);};
   if(management.isLoading||requests.isLoading)return <div className="space-y-3"><Skeleton className="h-40 w-full"/><Skeleton className="h-48 w-full"/></div>;
   if(management.error||requests.error||!management.data||!requests.data)return <EmptyState title="Attendance workflow unavailable" description="Could not load tasks or requests." action={<Button onClick={()=>{void management.refetch();void requests.refetch();}}>Retry</Button>}/>;
-  const {staff,stations,tasks,shifts}=management.data as ManagementData;
-  const allTasks = shifts;
+  const {staff,stations,tasks}=management.data as ManagementData;
   const ownerRequests = requests.data as OwnerAttendanceRequest[];
   const pendingRequests = ownerRequests.filter((r) => r.status === "pending");
   return <div className="space-y-5">
@@ -78,7 +77,8 @@ function AttendanceWorkflow() {
     </form></CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Task review queue</h3>{tasks.length?tasks.map((task)=><div key={task.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><div><p className="font-semibold">{task.title} · {task.staffName}</p><p className="text-xs text-muted-foreground">Due {task.dueDate}{task.dueAt?" · "+new Date(task.dueAt).toLocaleString("en-GB",{timeZone:"Asia/Dhaka"}):""} · {task.priority}</p></div><span className="text-xs">{task.status}</span></div>{task.description?<p className="text-sm">{task.description}</p>:null}{task.completionNote?<p className="text-sm text-muted-foreground">Completion note: {task.completionNote}</p>:null}{task.reviewNote?<p className="text-sm text-muted-foreground">Review note: {task.reviewNote}</p>:null}{["completed"].includes(task.status)?<div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={()=>void run(()=>reviewTaskFn({data:{taskId:task.id,decision:"verified"}}),"Task verified")}><CheckCircle2 className="mr-1 h-4 w-4"/>Verify</Button><Button size="sm" variant="outline" disabled={busy} onClick={()=>openReviewDialog("task",task.id)}><XCircle className="mr-1 h-4 w-4"/>Return</Button></div>:null}</div>):<p className="text-sm text-muted-foreground">No tasks created yet.</p>}</CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Pending staff requests ({pendingRequests.length})</h3>{ownerRequests.length?ownerRequests.map((r)=><div key={r.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><div><p className="font-semibold">{r.staff_name} · {String(r.request_type).replaceAll("_"," ")}</p><p className="text-xs text-muted-foreground">{r.leave_start_date? r.leave_start_date+" – "+r.leave_end_date : r.target_date||"No target date"} · {r.status}</p></div></div><p className="text-sm">{r.reason}</p>{r.review_note?<p className="text-sm text-muted-foreground">Previous note: {r.review_note}</p>:null}{r.status==="pending"?<div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={()=>void run(()=>reviewRequest({data:{requestId:r.id,decision:"approved"}}),"Request approved")}><CheckCircle2 className="mr-1 h-4 w-4"/>Approve</Button><Button size="sm" variant="outline" disabled={busy} onClick={()=>openReviewDialog("request",r.id)}><XCircle className="mr-1 h-4 w-4"/>Reject</Button></div>:null}</div>):<p className="text-sm text-muted-foreground">No attendance requests yet.</p>}</CardContent></Card>
-    <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Shift schedule snapshot</h3>{allTasks.length?allTasks.map((s)=><div key={s.id} className="rounded-lg border p-3"><p className="font-semibold">{s.staffName} · {s.shiftDate}</p><p className="text-sm text-muted-foreground">{s.startTime}–{s.endTime} · {s.status}</p></div>):<p className="text-sm text-muted-foreground">No shifts in the recent window.</p>}</CardContent></Card>
+    <StoreChecklistsCard />
+    <OpenTasksEditCard />
     <Dialog open={Boolean(reviewDialog)} onOpenChange={(open)=>{if(!open&&!busy)setReviewDialog(null);}}>
       <DialogContent>
         <DialogHeader>

@@ -15,6 +15,7 @@ import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functio
 import { ownerGetAttendanceSelfieUrl } from "@/lib/attendance-selfie.functions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AttendanceFeatureTogglesCard, AttendanceNeedsAttentionCard } from "@/components/owner/AttendanceOwnerTools";
 
 export const Route = createFileRoute("/_authenticated/owner/attendance")({
   head: () => ({
@@ -107,7 +108,14 @@ function OwnerAttendance() {
           <p className="font-semibold">Tasks & requests</p>
           <p className="mt-1 text-sm text-muted-foreground">Assign checklist tasks, review completions, and process staff requests.</p>
         </Link>
+        <Link to="/owner/attendance-reports" className="rounded-xl border p-4 transition-colors hover:bg-muted/50 sm:col-span-2">
+          <p className="font-semibold">Attendance reports</p>
+          <p className="mt-1 text-sm text-muted-foreground">Read-only hours, attendance logs, CSV export and monthly cleanup preview.</p>
+        </Link>
       </div>
+
+      <AttendanceNeedsAttentionCard />
+      <AttendanceFeatureTogglesCard />
 
       <Card>
         <CardContent className="space-y-3 p-4">

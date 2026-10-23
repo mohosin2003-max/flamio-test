@@ -62,7 +62,7 @@ function AttendanceReports() {
         <ul className="list-disc space-y-1 pl-5 text-sm">
           <li><b>Face matching: Not supported.</b> Clock-in selfies are photo evidence only; an Owner or Manager must review them by eye. No automatic identity check is done.</li>
           <li><b>Background GPS: Not supported.</b> Location is checked only at the moment staff tap clock in/out with the app open. Staff are not tracked during the shift.</li>
-          <li><b>Incomplete-task notifications: Not active.</b> Overdue badges show here only; nothing is sent automatically.</li>
+          <li><b>Incomplete-task notifications: Not active.</b> Overdue badges show on the Tasks & Requests page only; nothing is sent automatically.</li>
         </ul>
       </CardContent></Card>
 
