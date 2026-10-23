@@ -26,5 +26,7 @@ describe("task completion gate", () => {
  test("rejects unchecked item",()=>expect(canCompleteTask(open,[{is_done:false}],null,user,now).ok).toBe(false));
  test("rejects closed task",()=>expect(canCompleteTask({...open,status:"verified"},[],null,user,now).ok).toBe(false));
  test("requires photo when configured",()=>expect(canCompleteTask({...open,requires_photo:true},[],null,user,now).ok).toBe(false));
+ test("allows fresh matching photo when required",()=>expect(canCompleteTask({...open,requires_photo:true},[],path(),user,now).ok).toBe(true));
+ test("rejects another task photo when required",()=>expect(canCompleteTask({...open,requires_photo:true},[],buildTaskPhotoPath(user,"44444444-4444-4444-8444-444444444444",new Date(now),photoId),user,now).ok).toBe(false));
  test("does not require photo when disabled",()=>expect(canCompleteTask(open,[],null,user,now).ok).toBe(true));
 });
