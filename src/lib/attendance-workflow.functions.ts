@@ -67,7 +67,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
         .select("id, session_id, started_at, ended_at")
         .eq("user_id", context.userId).is("ended_at", null).order("started_at", { ascending: false }).limit(1),
       db.from("attendance_tasks")
-        .select("id, title, description, due_date, due_at, priority, status, requires_verification, started_at, completed_at, completion_note, review_note")
+        .select("id, title, description, due_date, due_at, priority, status, requires_verification, requires_photo, photo_path, started_at, completed_at, completion_note, review_note")
         .eq("assigned_to", context.userId).order("due_date", { ascending: false }).limit(100),
       db.from("attendance_requests")
         .select("id, request_type, leave_type, leave_start_date, leave_end_date, target_date, reason, status, review_note, created_at")
@@ -417,23 +417,28 @@ export const staffEndBreak = createServerFn({ method: "POST" })
 
 export const staffCompleteAttendanceTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ taskId: z.string().uuid(), completionNote: z.string().trim().max(1000).nullable().optional() }).parse(input))
+  .inputValidator((input: unknown) => z.object({
+    taskId: z.string().uuid(),
+    completionNote: z.string().trim().max(1000).nullable().optional(),
+    photoPath: z.string().max(220).nullable().optional(),
+  }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     { const { requireTasksFeature } = await import("@/lib/attendance-features.server"); await requireTasksFeature(db); }
-    const { data: task, error } = await db.from("attendance_tasks")
-      .select("id, assigned_to, status, requires_verification").eq("id", data.taskId).eq("assigned_to", context.userId).maybeSingle();
-    if (error || !task) throw new Error("Task not found.");
-    if (["completed", "verified", "cancelled"].includes(task.status)) throw new Error("This task is already closed.");
-    const now = new Date().toISOString();
-    const nextStatus = "completed";
-    const { error: updateError } = await db.from("attendance_tasks").update({
-      status: nextStatus, completed_at: now, completion_note: data.completionNote ?? null,
-    }).eq("id", task.id).eq("assigned_to", context.userId);
-    if (updateError) throw new Error("Could not submit task completion.");
-    await audit(db, { tableName: "attendance_tasks", rowId: task.id, action: "staff_completed", actorId: context.userId, subjectUserId: context.userId, oldData: task, newData: { status: nextStatus, completedAt: now } });
-    return { ok: true, status: nextStatus };
+    const { data: task, error } = await db.rpc("attendance_complete_task_as_service", {
+      _actor_id: context.userId, _task_id: data.taskId,
+      _completion_note: data.completionNote ?? null, _photo_path: data.photoPath ?? null,
+    });
+    if (error || !task) {
+      const message = error?.message ?? "Could not submit task completion.";
+      if (/checklist item/i.test(message)) throw new Error("All checklist items must be ticked before marking this task complete.");
+      if (/photo proof/i.test(message)) throw new Error(message);
+      if (/already closed/i.test(message)) throw new Error("This task has already been completed or closed.");
+      console.error("Atomic task completion failed", message);
+      throw new Error("Could not submit task completion. Refresh and try again.");
+    }
+    return { ok: true, status: task.status };
   });
 
 export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
@@ -573,7 +578,7 @@ export const ownerCreateAttendanceTask = createServerFn({ method: "POST" })
     assignedTo: z.string().uuid(), shiftId: z.string().uuid().nullable().optional(), stationId: z.string().uuid().nullable().optional(),
     title: z.string().trim().min(2).max(160), description: z.string().trim().max(2000).nullable().optional(),
     dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), dueAt: z.string().datetime().nullable().optional(),
-    priority: z.enum(["low", "medium", "high", "urgent"]), requiresVerification: z.boolean().default(true),
+    priority: z.enum(["low", "medium", "high", "urgent"]), requiresVerification: z.boolean().default(true), requiresPhoto: z.boolean().default(false),
     items: z.array(z.string().trim().min(1).max(160)).max(30).default([]),
   }).parse(input))
   .handler(async ({ data, context }) => {
@@ -590,7 +595,7 @@ export const ownerCreateAttendanceTask = createServerFn({ method: "POST" })
       assigned_to: data.assignedTo, assigned_by: context.userId, shift_id: data.shiftId ?? null,
       station_id: data.stationId ?? null, title: data.title, description: data.description ?? null,
       due_date: data.dueDate, due_at: data.dueAt ?? null, priority: data.priority,
-      requires_verification: data.requiresVerification, status: "pending",
+      requires_verification: data.requiresVerification, requires_photo: data.requiresPhoto, status: "pending",
     }).select("id, assigned_to, title, due_date, status").single();
     if (error || !task) throw new Error("Could not create attendance task.");
     if (data.items.length) {
@@ -631,18 +636,12 @@ export const staffToggleAttendanceTaskItem = createServerFn({ method: "POST" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     { const { requireTasksFeature } = await import("@/lib/attendance-features.server"); await requireTasksFeature(db); }
-    const { data: item, error: readError } = await db.from("attendance_task_items")
-      .select("id, task_id, label, is_done").eq("id", data.itemId).maybeSingle();
-    if (readError || !item) throw new Error("Checklist item not found.");
-    const { data: task, error: taskError } = await db.from("attendance_tasks")
-      .select("id, assigned_to, status").eq("id", item.task_id).eq("assigned_to", context.userId).maybeSingle();
-    if (taskError || !task) throw new Error("This checklist does not belong to you.");
-    if (["completed", "verified", "cancelled"].includes(task.status)) throw new Error("This task is already closed.");
-    const now = new Date().toISOString();
-    const { error } = await db.from("attendance_task_items").update({
-      is_done: data.isDone, done_at: data.isDone ? now : null, done_by: data.isDone ? context.userId : null,
-    }).eq("id", item.id);
-    if (error) throw new Error("Could not update checklist item.");
-    await audit(db, { tableName: "attendance_task_items", rowId: item.id, action: data.isDone ? "checklist_item_done" : "checklist_item_reopened", actorId: context.userId, subjectUserId: context.userId, oldData: item, newData: { is_done: data.isDone, done_at: data.isDone ? now : null } });
+    const { data: item, error } = await db.rpc("attendance_toggle_task_item_as_service", {
+      _actor_id: context.userId, _item_id: data.itemId, _done: data.isDone,
+    });
+    if (error || !item) {
+      console.error("Atomic checklist update failed", error?.message);
+      throw new Error(error?.message?.includes("closed") ? "This task is already closed." : "Could not update checklist item.");
+    }
     return { ok: true };
   });
