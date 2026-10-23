@@ -21,7 +21,7 @@ describe("task photo bytes", () => {
  test("rejects oversized", () => { const b=new Uint8Array(1500001); b.set([255,216,255]); expect(validateTaskPhotoBytes(b).ok).toBe(false); });
 });
 describe("task completion gate", () => {
- const open={status:"pending",requires_photo:false};
+ const open={id:taskId,status:"pending",requires_photo:false};
  test("allows no checklist items",()=>expect(canCompleteTask(open,[],null,user,now).ok).toBe(true));
  test("rejects unchecked item",()=>expect(canCompleteTask(open,[{is_done:false}],null,user,now).ok).toBe(false));
  test("rejects closed task",()=>expect(canCompleteTask({...open,status:"verified"},[],null,user,now).ok).toBe(false));
