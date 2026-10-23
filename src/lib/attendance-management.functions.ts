@@ -83,7 +83,7 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
         .order("shift_date", { ascending: false })
         .limit(200),
       db.from("user_roles").select("user_id").eq("role", "staff"),
-      db.from("attendance_tasks").select("id, assigned_to, title, description, due_date, due_at, priority, status, requires_verification, completed_at, completion_note, review_note").order("due_date", { ascending: false }).limit(200),
+      db.from("attendance_tasks").select("id, assigned_to, title, description, due_date, due_at, priority, status, requires_verification, requires_photo, photo_path, completed_at, completion_note, review_note").order("due_date", { ascending: false }).limit(200),
     ]);
     if (stationsResult.error || shiftsResult.error || profilesResult.error || tasksResult.error) {
       console.error("Attendance management read failed", {
@@ -115,6 +115,7 @@ export const ownerListAttendanceManagement = createServerFn({ method: "GET" })
         title: String(t.title), description: t.description ? String(t.description) : null,
         dueDate: String(t.due_date), dueAt: t.due_at ? String(t.due_at) : null,
         priority: String(t.priority), status: String(t.status), requiresVerification: Boolean(t.requires_verification),
+        requiresPhoto: Boolean(t.requires_photo), photoPath: t.photo_path ? String(t.photo_path) : null,
         completedAt: t.completed_at ? String(t.completed_at) : null,
         completionNote: t.completion_note ? String(t.completion_note) : null,
         reviewNote: t.review_note ? String(t.review_note) : null,
