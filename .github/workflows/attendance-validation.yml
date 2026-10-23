@@ -45,5 +45,14 @@ jobs:
           src/routes/_authenticated/owner.attendance-workflow.tsx
           src/routes/_authenticated/attendance.tsx
           src/components/layout/StaffBottomNav.tsx
+          src/lib/attendance-task-photo.ts
+          src/lib/attendance-task-photo.functions.ts
+          src/lib/attendance-task-photo.test.mjs
           src/routeTree.gen.ts
           --rule 'prettier/prettier: off'
+      - name: Setup Bun for pure rule tests
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Test task photo validation
+        run: bun test src/lib/attendance-task-photo.test.mjs
