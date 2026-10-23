@@ -17,6 +17,7 @@ import { RecurringShiftsCard } from "@/components/owner/AttendanceOwnerTools";
 import {
   ownerCancelAttendanceShift,
   ownerCreateAttendanceShift,
+  ownerUpdateAttendanceShift,
   ownerCreateAttendanceStation,
   ownerUpdateAttendanceStation,
   ownerIssueAttendanceQrChallenge,
@@ -40,6 +41,8 @@ function AttendanceManagement() {
   const setStationActive = useServerFn(ownerSetAttendanceStationActive);
   const createShift = useServerFn(ownerCreateAttendanceShift);
   const cancelShift = useServerFn(ownerCancelAttendanceShift);
+  const updateShift = useServerFn(ownerUpdateAttendanceShift);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const [stationName, setStationName] = useState("");
   const [stationDescription, setStationDescription] = useState("");
   const [stationLatitude, setStationLatitude] = useState("");
@@ -68,7 +71,7 @@ function AttendanceManagement() {
   if (query.error || !query.data) return <EmptyState title="Attendance management unavailable" description="Could not load staff schedules from the TEST database." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
 
   const stations: { id: string; name: string; description: string | null; isActive: boolean; sortOrder: number; latitude: number | null; longitude: number | null; geofenceRadiusMeters: number }[] = query.data.stations;
-  const shifts: { id: string; staffName: string; dutyRole: string | null; shiftDate: string; startTime: string; endTime: string; isOvernight: boolean; stationId: string | null; plannedBreakMinutes: number; status: string; notes: string | null }[] = query.data.shifts;
+  const shifts: { id: string; userId: string; staffName: string; dutyRole: string | null; shiftDate: string; startTime: string; endTime: string; isOvernight: boolean; stationId: string | null; plannedBreakMinutes: number; status: string; notes: string | null }[] = query.data.shifts;
   const staff: { id: string; name: string }[] = query.data.staff;
   return <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -89,10 +92,10 @@ function AttendanceManagement() {
       {qrChallenge ? <div className="rounded-lg border p-4 text-center space-y-3"><p className="font-semibold">One-time QR · {qrChallenge.stationName}</p><QRCodeSVG value={qrChallenge.token} size={220} level="M" className="mx-auto max-w-full" /><p className="text-xs text-muted-foreground">Expires at {new Date(qrChallenge.expiresAt).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka" })} Bangladesh time. The token works once only; generate a fresh QR after expiry or use.</p><code className="block break-all rounded bg-muted p-2 text-xs">{qrChallenge.token}</code><Button type="button" variant="outline" onClick={() => { void navigator.clipboard?.writeText(qrChallenge.token); toast.success("Token copied"); }}>Copy token</Button><Button type="button" variant="ghost" onClick={() => setQrChallenge(null)}>Hide QR</Button></div> : null}
     </CardContent></Card>
     <Card><CardContent className="space-y-3 p-4">
-      <h3 className="font-display font-bold">Schedule a shift</h3>
+      <h3 className="font-display font-bold">{editingShiftId ? "Edit scheduled shift" : "Schedule a shift"}</h3>{editingShiftId ? <p className="text-sm text-primary">Editing an unstarted shift. The staff member cannot be changed — cancel and recreate instead.</p> : null}
       <p className="text-sm text-muted-foreground">Times use Bangladesh time. Overnight shifts are supported. Overlapping scheduled shifts for the same staff member are rejected.</p>
-      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (!userId) { toast.error("Choose a staff member"); return; } void run(async () => { await createShift({ data: { userId, stationId: stationId || null, dutyRole: dutyRole.trim() || null, shiftDate, startTime, endTime, plannedBreakMinutes: Number(breakMinutes), notes: notes.trim() || null } }); setNotes(""); }, "Shift scheduled"); }}>
-        <div className="space-y-1"><Label htmlFor="shift-staff">Staff member</Label><select id="shift-staff" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required value={userId} onChange={(e) => setUserId(e.target.value)}><option value="">Select staff</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></div>
+      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (!userId) { toast.error("Choose a staff member"); return; } const common = { stationId: stationId || null, dutyRole: dutyRole.trim() || null, shiftDate, startTime, endTime, plannedBreakMinutes: Number(breakMinutes), notes: notes.trim() || null }; if (editingShiftId) { void run(async () => { await updateShift({ data: { id: editingShiftId, ...common } }); setEditingShiftId(null); setNotes(""); }, "Shift updated"); return; } void run(async () => { await createShift({ data: { userId, ...common } }); setNotes(""); }, "Shift scheduled"); }}>
+        <div className="space-y-1"><Label htmlFor="shift-staff">Staff member</Label><select id="shift-staff" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required disabled={Boolean(editingShiftId)} value={userId} onChange={(e) => setUserId(e.target.value)}><option value="">Select staff</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></div>
         <div className="space-y-1"><Label htmlFor="shift-station">Station (optional)</Label><select id="shift-station" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={stationId} onChange={(e) => setStationId(e.target.value)}><option value="">No station</option>{stations.filter((s) => s.isActive).map((station) => <option key={station.id} value={station.id}>{station.name}</option>)}</select></div>
         <div className="space-y-1"><Label htmlFor="shift-date">Duty date</Label><Input id="shift-date" type="date" required value={shiftDate} onChange={(e) => setShiftDate(e.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="shift-role">Duty role (optional)</Label><Input id="shift-role" maxLength={80} value={dutyRole} onChange={(e) => setDutyRole(e.target.value)} placeholder="e.g. Kitchen" /></div>
@@ -100,13 +103,13 @@ function AttendanceManagement() {
         <div className="space-y-1"><Label htmlFor="shift-end">End time</Label><Input id="shift-end" type="time" required value={endTime} onChange={(e) => setEndTime(e.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="shift-break">Planned break (minutes)</Label><Input id="shift-break" type="number" min={0} max={240} required value={breakMinutes} onChange={(e) => setBreakMinutes(e.target.value)} /></div>
         <div className="space-y-1"><Label htmlFor="shift-notes">Notes (optional)</Label><Textarea id="shift-notes" rows={2} maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
-        <Button type="submit" disabled={busy || staff.length === 0} className="sm:col-span-2"><CalendarClock className="mr-2 h-4 w-4" />Create shift</Button>
+        <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={busy || staff.length === 0} className="flex-1"><CalendarClock className="mr-2 h-4 w-4" />{editingShiftId ? "Save shift changes" : "Create shift"}</Button>{editingShiftId ? <Button type="button" variant="outline" onClick={() => { setEditingShiftId(null); setNotes(""); }}>Cancel edit</Button> : null}</div>
       </form>
     </CardContent></Card>
     <RecurringShiftsCard />
     <Card><CardContent className="space-y-3 p-4">
       <h3 className="font-display font-bold">Upcoming / recent shifts</h3>
-      {shifts.length === 0 ? <p className="text-sm text-muted-foreground">No shifts found in the current window.</p> : <div className="space-y-2">{shifts.map((shift) => <div key={shift.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"><div><p className="font-semibold">{shift.staffName}{shift.dutyRole ? " · " + shift.dutyRole : ""}</p><p className="text-sm text-muted-foreground">{shift.shiftDate} · {shift.startTime.slice(0,5)}–{shift.endTime.slice(0,5)}{shift.isOvernight ? " (overnight)" : ""}</p><p className="text-xs text-muted-foreground">{stations.find((s) => s.id === shift.stationId)?.name ?? "No station"} · break {shift.plannedBreakMinutes} min · {shift.status}</p>{shift.notes ? <p className="mt-1 text-sm">{shift.notes}</p> : null}</div>{shift.status === "scheduled" ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (confirm("Cancel this scheduled shift?")) void run(() => cancelShift({ data: { id: shift.id } }), "Shift cancelled"); }}><XCircle className="mr-1 h-4 w-4" />Cancel</Button> : null}</div>)}</div>}
+      {shifts.length === 0 ? <p className="text-sm text-muted-foreground">No shifts found in the current window.</p> : <div className="space-y-2">{shifts.map((shift) => <div key={shift.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"><div><p className="font-semibold">{shift.staffName}{shift.dutyRole ? " · " + shift.dutyRole : ""}</p><p className="text-sm text-muted-foreground">{shift.shiftDate} · {shift.startTime.slice(0,5)}–{shift.endTime.slice(0,5)}{shift.isOvernight ? " (overnight)" : ""}</p><p className="text-xs text-muted-foreground">{stations.find((s) => s.id === shift.stationId)?.name ?? "No station"} · break {shift.plannedBreakMinutes} min · {shift.status}</p>{shift.notes ? <p className="mt-1 text-sm">{shift.notes}</p> : null}</div>{shift.status === "scheduled" ? <div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => { setEditingShiftId(shift.id); setUserId(shift.userId); setStationId(shift.stationId ?? ""); setDutyRole(shift.dutyRole ?? ""); setShiftDate(shift.shiftDate); setStartTime(shift.startTime.slice(0,5)); setEndTime(shift.endTime.slice(0,5)); setBreakMinutes(String(shift.plannedBreakMinutes)); setNotes(shift.notes ?? ""); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Edit</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => { if (confirm("Cancel this scheduled shift?")) void run(() => cancelShift({ data: { id: shift.id } }), "Shift cancelled"); }}><XCircle className="mr-1 h-4 w-4" />Cancel</Button></div> : null}</div>)}</div>}
     </CardContent></Card>
   </div>;
 }
