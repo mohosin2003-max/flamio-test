@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appendFlags, decideClockOutLocation, EXCEPTION_REQUIRED_PREFIX, parseExceptionRequired } from "./attendance-clockout.ts";
+import { appendFlags, decideClockOutLocation, EXCEPTION_REQUIRED_PREFIX, parseExceptionRequired, validateClockInLocationTimestamp } from "./attendance-clockout.ts";
 
 const now = Date.parse("2026-10-23T12:00:00Z");
 const station = { latitude: 23.8103, longitude: 90.4125, radius: 50, isActive: true };
@@ -7,6 +7,14 @@ const inside = { latitude: 23.8103, longitude: 90.4126, accuracyMeters: 10, capt
 const outside = { latitude: 23.8121, longitude: 90.4125, accuracyMeters: 10, capturedAt: now };
 const base = { geofenceEnabled: true, sessionUserId: "a", callerId: "a", station, point: inside, now };
 const REASON = "Closed the shop and left the premises";
+
+describe("clock-in GPS freshness", () => {
+  test("accepts a fresh timestamp", () => expect(validateClockInLocationTimestamp(now, now)).toEqual({ ok: true }));
+  test("rejects missing timestamp", () => expect(validateClockInLocationTimestamp(undefined, now)).toEqual({ ok: false, reason: "missing" }));
+  test("rejects timestamp older than two minutes", () => expect(validateClockInLocationTimestamp(now - 120_001, now)).toEqual({ ok: false, reason: "stale" }));
+  test("rejects timestamp too far in the future", () => expect(validateClockInLocationTimestamp(now + 30_001, now)).toEqual({ ok: false, reason: "invalid" }));
+  test("tolerates small device clock skew", () => expect(validateClockInLocationTimestamp(now + 10_000, now)).toEqual({ ok: true }));
+});
 
 describe("clock-out geofence", () => {
   test("inside radius passes as verified location", () => {
