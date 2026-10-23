@@ -33,13 +33,12 @@ export function validateTaskPhotoBytes(bytes: Uint8Array): { ok: true } | { ok: 
   return { ok: true };
 }
 
-export function canCompleteTask(task: { status: string; requires_photo: boolean }, checklistItems: Array<{ is_done: boolean }>, photoPath: unknown, userId: string, now: number): { ok: true } | { ok: false; reason: string } {
+export function canCompleteTask(task: { id: string; status: string; requires_photo: boolean }, checklistItems: Array<{ is_done: boolean }>, photoPath: unknown, userId: string, now: number): { ok: true } | { ok: false; reason: string } {
   if (!["pending", "in_progress", "rejected"].includes(task.status)) return { ok: false, reason: "This task is already closed." };
   if (checklistItems.some((item) => item.is_done !== true)) return { ok: false, reason: "All checklist items must be ticked before marking this task complete." };
   if (task.requires_photo) {
-    const checked = checkTaskPhotoPath(photoPath, userId, "00000000-0000-4000-8000-000000000000", now);
-    // Task ID-specific validation is performed by the server RPC. This helper only gates presence/format here.
-    if (!checked.ok && (typeof photoPath !== "string" || !photoPath.includes("/tasks/"))) return { ok: false, reason: "Photo proof is required to complete this task." };
+    const checked = checkTaskPhotoPath(photoPath, userId, task.id, now);
+    if (!checked.ok) return { ok: false, reason: checked.reason };
   }
   return { ok: true };
 }
