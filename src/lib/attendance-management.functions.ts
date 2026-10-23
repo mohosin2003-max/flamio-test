@@ -286,3 +286,75 @@ export const ownerCancelAttendanceShift = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+const shiftUpdateInput = z.object({
+  id: z.string().uuid(),
+  stationId: z.string().uuid().nullable().optional(),
+  dutyRole: z.string().trim().max(80).nullable().optional(),
+  shiftDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/),
+  plannedBreakMinutes: z.number().int().min(0).max(240).default(0),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+
+/**
+ * Owner edit of an unstarted scheduled shift. The staff member cannot be
+ * changed (cancel and recreate instead). Overlap is checked excluding this
+ * shift; the database exclusion constraint remains the final guard.
+ */
+export const ownerUpdateAttendanceShift = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => shiftUpdateInput.parse(input))
+  .handler(async ({ data, context }) => {
+    await requireAttendanceOwner(context.userId);
+    const { shiftEditEligibility, findOverlapExcluding, isShiftOverlapConstraintError, validatePlannedBreak } = await import("@/lib/attendance-rules");
+    const { untypedAdmin } = await import("@/lib/untyped-db.server");
+    const db = await untypedAdmin();
+    const parsedDate = new Date(`${data.shiftDate}T00:00:00Z`);
+    if (!Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== data.shiftDate) throw new Error("Invalid shift date.");
+    const { data: current, error: readError } = await db.from("attendance_shifts")
+      .select("id, user_id, station_id, duty_role, shift_date, start_time, end_time, starts_at, ends_at, is_overnight, planned_break_minutes, status, notes")
+      .eq("id", data.id).maybeSingle();
+    if (readError || !current) throw new Error("Shift was not found.");
+    const eligible = shiftEditEligibility(current, Date.now());
+    if (!eligible.ok) throw new Error(eligible.reason);
+    const timestamps = shiftTimestamps(data.shiftDate, data.startTime, data.endTime);
+    if (Date.parse(timestamps.startAt) <= Date.now()) throw new Error("The new start time must be in the future.");
+    validatePlannedBreak(timestamps.startAt, timestamps.endAt, data.plannedBreakMinutes);
+    if (data.stationId) {
+      const { data: station, error: stationError } = await db.from("attendance_stations")
+        .select("id").eq("id", data.stationId).eq("is_active", true).maybeSingle();
+      if (stationError || !station) throw new Error("Choose an active station.");
+    }
+    const { data: others, error: overlapError } = await db.from("attendance_shifts")
+      .select("id, starts_at, ends_at, status")
+      .eq("user_id", current.user_id).neq("id", current.id)
+      .lt("starts_at", timestamps.endAt).gt("ends_at", timestamps.startAt).limit(20);
+    if (overlapError) {
+      console.error("Attendance shift overlap check failed", overlapError.message);
+      throw new Error("Could not verify schedule overlap; the shift was not changed.");
+    }
+    const clash = findOverlapExcluding((others ?? []).map((o: { id: string; starts_at: string; ends_at: string; status: string }) => ({ id: o.id, startAt: o.starts_at, endAt: o.ends_at, status: o.status })), current.id, timestamps);
+    if (clash) throw new Error("This staff member already has an overlapping shift.");
+    const updated = {
+      station_id: data.stationId ?? null, duty_role: data.dutyRole ?? null,
+      shift_date: data.shiftDate, start_time: timestamps.startTime, end_time: timestamps.endTime,
+      starts_at: timestamps.startAt, ends_at: timestamps.endAt, is_overnight: timestamps.overnight,
+      planned_break_minutes: data.plannedBreakMinutes, notes: data.notes ?? null,
+    };
+    const { data: saved, error } = await db.from("attendance_shifts").update(updated)
+      .eq("id", current.id).eq("status", "scheduled").select("id").maybeSingle();
+    if (error) {
+      if (isShiftOverlapConstraintError(error)) throw new Error("This staff member already has an overlapping shift.");
+      console.error("Attendance shift update failed", error.message);
+      throw new Error("Could not update shift.");
+    }
+    if (!saved) throw new Error("The shift changed before saving. Refresh and try again.");
+    const { error: auditError } = await db.from("attendance_audit_log").insert({
+      table_name: "attendance_shifts", row_id: current.id, action: "UPDATE", actor_id: context.userId,
+      subject_user_id: current.user_id, old_data: current, new_data: { ...updated, _attendance_event: "shift_edited" },
+    });
+    if (auditError) console.error("Attendance shift edit audit failed", auditError.message);
+    return { ok: true };
+  });
