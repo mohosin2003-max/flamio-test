@@ -48,6 +48,8 @@ jobs:
           src/lib/attendance-task-photo.ts
           src/lib/attendance-task-photo.functions.ts
           src/lib/attendance-task-photo.test.mjs
+          src/lib/attendance-clockout.ts
+          src/lib/attendance-clockout.test.mjs
           src/routeTree.gen.ts
           --rule 'prettier/prettier: off'
       - name: Setup Bun for pure rule tests
@@ -55,4 +57,4 @@ jobs:
         with:
           bun-version: latest
       - name: Test task photo validation
-        run: bun test src/lib/attendance-task-photo.test.mjs
+        run: bun test src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs

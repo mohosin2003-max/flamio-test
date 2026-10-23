@@ -134,7 +134,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
 
 export const staffClockIn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema, latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), accuracyMeters: z.number().min(0).max(1000).optional(), qrToken: z.string().trim().min(32).max(512).optional(), selfiePath: z.string().max(200).optional() }).parse(input))
+  .inputValidator((input: unknown) => z.object({ shiftId: z.string().uuid().nullable().optional(), note: noteSchema, latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), accuracyMeters: z.number().min(0).max(1000).optional(), capturedAt: z.number().int().positive().optional(), qrToken: z.string().trim().min(32).max(512).optional(), selfiePath: z.string().max(200).optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
@@ -223,8 +223,15 @@ export const staffClockIn = createServerFn({ method: "POST" })
       }
     }
     if (settings.geofence_enabled) {
-      if (data.latitude === undefined || data.longitude === undefined || data.accuracyMeters === undefined) {
-        throw new Error("Location permission is required because the Owner enabled the attendance geofence.");
+      if (data.latitude === undefined || data.longitude === undefined || data.accuracyMeters === undefined || data.capturedAt === undefined) {
+        throw new Error("A fresh GPS reading is required because the Owner enabled the attendance geofence.");
+      }
+      const { validateClockInLocationTimestamp } = await import("@/lib/attendance-clockout");
+      const freshness = validateClockInLocationTimestamp(data.capturedAt, now.getTime());
+      if (!freshness.ok) {
+        throw new Error(freshness.reason === "stale"
+          ? "GPS reading is older than two minutes. Refresh your location and try again."
+          : "GPS timestamp is invalid. Refresh your location and try again.");
       }
       if (data.accuracyMeters > 50) {
         throw new Error("GPS accuracy is too low. Move to an open area and try again.");
