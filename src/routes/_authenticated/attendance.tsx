@@ -44,7 +44,8 @@ type AttendanceShift = { id: string; start_time: string; end_time: string; is_ov
 type AttendanceSession = { id: string; shift_id: string | null; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
 type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean };
 type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null };
-type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled?: boolean } | null; shifts: AttendanceShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; session_id?: string; started_at: string } | null; lastClosedBreak?: { id: string; session_id: string; started_at: string; ended_at: string } | null };
+type UpcomingShift = AttendanceShift & { shift_date: string; station_name: string | null };
+type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled?: boolean } | null; shifts: AttendanceShift[]; upcomingShifts?: UpcomingShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; session_id?: string; started_at: string } | null; lastClosedBreak?: { id: string; session_id: string; started_at: string; ended_at: string } | null };
 
 function MyAttendance() {
   const qc = useQueryClient();
