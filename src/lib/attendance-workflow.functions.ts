@@ -67,7 +67,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
         .select("id, session_id, started_at, ended_at")
         .eq("user_id", context.userId).is("ended_at", null).order("started_at", { ascending: false }).limit(1),
       db.from("attendance_tasks")
-        .select("id, title, description, due_date, due_at, priority, status, requires_verification, started_at, completed_at, completion_note, review_note")
+        .select("id, title, description, due_date, due_at, priority, status, requires_verification, requires_photo, photo_path, started_at, completed_at, completion_note, review_note")
         .eq("assigned_to", context.userId).order("due_date", { ascending: false }).limit(100),
       db.from("attendance_requests")
         .select("id, request_type, leave_type, leave_start_date, leave_end_date, target_date, reason, status, review_note, created_at")
