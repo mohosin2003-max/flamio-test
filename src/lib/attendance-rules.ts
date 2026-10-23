@@ -364,3 +364,41 @@ export function shiftClockInEligibility(shift: ClockInShift, userId: string, now
   if (!allowed) return { ok: false, reason: "This shift is not for today." };
   return { ok: true };
 }
+
+/* ---------------------- Upcoming shifts & shift editing ---------------------- */
+
+export const UPCOMING_SHIFT_DAYS = 14;
+
+/** Dhaka date range [tomorrow, today+14] for the staff upcoming roster. */
+export function upcomingShiftRange(nowMs: number, days = UPCOMING_SHIFT_DAYS): { from: string; to: string } {
+  const today = dhakaDateKey(nowMs);
+  return { from: addCalendarDays(today, 1), to: addCalendarDays(today, days) };
+}
+
+export type UpcomingShiftLike = { user_id: string; shift_date: string; status: string; starts_at: string };
+
+/** Only this user's own scheduled/on-leave shifts inside the window, sorted by start. */
+export function filterUpcomingShifts<T extends UpcomingShiftLike>(rows: T[], userId: string, nowMs: number, days = UPCOMING_SHIFT_DAYS): T[] {
+  const { from, to } = upcomingShiftRange(nowMs, days);
+  return rows
+    .filter((s) => s.user_id === userId && s.shift_date >= from && s.shift_date <= to && (s.status === "scheduled" || s.status === "on_leave"))
+    .sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
+}
+
+/** Only unstarted scheduled shifts may be edited; history stays intact. */
+export function shiftEditEligibility(shift: { status: string; starts_at: string }, nowMs: number): { ok: true } | { ok: false; reason: string } {
+  if (shift.status !== "scheduled") return { ok: false, reason: "Only scheduled shifts can be edited." };
+  if (Date.parse(shift.starts_at) <= nowMs) return { ok: false, reason: "This shift has already started and can no longer be edited." };
+  return { ok: true };
+}
+
+/** Overlap among a person's other live shifts, ignoring the shift being edited. */
+export function findOverlapExcluding<T extends { id: string; startAt: string; endAt: string; status: string }>(rows: T[], excludeId: string, window: { startAt: string; endAt: string }): T | null {
+  return rows.find((r) => r.id !== excludeId && r.status !== "cancelled" && r.status !== "on_leave" && overlaps(r, window)) ?? null;
+}
+
+/** Recognises the attendance_shifts_no_overlap exclusion constraint (SQLSTATE 23P01). */
+export function isShiftOverlapConstraintError(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === "23P01" || /attendance_shifts_no_overlap|exclusion constraint/i.test(error.message ?? "");
+}

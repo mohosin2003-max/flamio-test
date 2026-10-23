@@ -92,19 +92,39 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       current.push(item);
       itemsByTask.set(item.task_id, current);
     }
-    const { addCalendarDays, dhakaDateKey, isShiftVisibleToStaff } = await import("@/lib/attendance-rules");
+    const { addCalendarDays, dhakaDateKey, isShiftVisibleToStaff, upcomingShiftRange, filterUpcomingShifts } = await import("@/lib/attendance-rules");
     const nowMs = Date.now();
     const today = dhakaDateKey(nowMs);
-    const todayShiftResult = await db.from("attendance_shifts")
-      .select("id, shift_date, start_time, end_time, starts_at, ends_at, is_overnight, planned_break_minutes, station_id, duty_role, status")
-      .eq("user_id", context.userId).in("shift_date", [addCalendarDays(today, -1), today]).neq("status", "cancelled").order("starts_at");
+    const range = upcomingShiftRange(nowMs);
+    const shiftCols = "id, user_id, shift_date, start_time, end_time, starts_at, ends_at, is_overnight, planned_break_minutes, station_id, duty_role, status";
+    const [todayShiftResult, upcomingResult] = await Promise.all([
+      db.from("attendance_shifts").select(shiftCols)
+        .eq("user_id", context.userId).in("shift_date", [addCalendarDays(today, -1), today]).neq("status", "cancelled").order("starts_at"),
+      // Read-only roster: strictly this user's own shifts, tomorrow through +14 days.
+      db.from("attendance_shifts").select(shiftCols)
+        .eq("user_id", context.userId).gte("shift_date", range.from).lte("shift_date", range.to)
+        .in("status", ["scheduled", "on_leave"]).order("starts_at").limit(60),
+    ]);
     if (todayShiftResult.error) throw new Error("Today's shift could not be loaded.");
+    if (upcomingResult.error) console.error("Upcoming shifts read failed", upcomingResult.error.message);
+    const stationIds = [...new Set((upcomingResult.data ?? []).map((s: { station_id: string | null }) => s.station_id).filter(Boolean))];
+    const stationNames = new Map<string, string>();
+    if (stationIds.length) {
+      const { data: st } = await db.from("attendance_stations").select("id, name").in("id", stationIds);
+      for (const s of st ?? []) stationNames.set(s.id, s.name);
+    }
+    const upcomingShifts = filterUpcomingShifts(upcomingResult.data ?? [], context.userId, nowMs)
+      .map((s: { user_id: string; station_id: string | null; [k: string]: unknown }) => {
+        const { user_id: _omit, ...rest } = s;
+        return { ...rest, station_name: s.station_id ? stationNames.get(s.station_id) ?? null : null } as Record<string, unknown>;
+      });
     const { loadFeatureToggles } = await import("@/lib/attendance-features.server");
     const features = await loadFeatureToggles(db);
     return {
       features,
       settings: settingsResult.data,
       today,
+      upcomingShifts,
       shifts: (todayShiftResult.data ?? []).filter((s: { shift_date: string; ends_at: string; is_overnight: boolean }) => isShiftVisibleToStaff(s, nowMs)),
       activeBreak: breaksResult.data?.[0] ?? null,
       lastClosedBreak: closedBreakResult.data?.[0] ?? null,
