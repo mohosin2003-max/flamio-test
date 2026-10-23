@@ -271,40 +271,86 @@ export const staffClockIn = createServerFn({ method: "POST" })
 
 export const staffClockOut = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ note: noteSchema }).parse(input))
+  .inputValidator((input: unknown) => z.object({
+    note: noteSchema,
+    latitude: z.number().optional(), longitude: z.number().optional(),
+    accuracyMeters: z.number().min(0).max(100000).optional(),
+    capturedAt: z.number().int().positive().optional(),
+    exceptionReason: z.string().max(1000).nullable().optional(),
+  }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const now = new Date();
     const { data: session, error: readError } = await db.from("attendance_sessions")
-      .select("id, user_id, shift_id, clock_in_at, break_minutes, status")
+      .select("id, user_id, shift_id, clock_in_at, break_minutes, status, flags")
       .eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (readError || !session) throw new Error("No open attendance session was found.");
     const { data: openBreaks, error: breakReadError } = await db.from("attendance_breaks")
       .select("id, started_at").eq("session_id", session.id).is("ended_at", null).limit(1);
     if (breakReadError) throw new Error("Could not check your break status.");
     if (openBreaks?.length) throw new Error("End your active break before clocking out.");
-    const { data: settings } = await db.from("attendance_settings").select("max_session_hours").eq("id", true).maybeSingle();
+    const { data: settings, error: settingsError } = await db.from("attendance_settings").select("max_session_hours, geofence_enabled").eq("id", true).maybeSingle();
+    if (settingsError) throw new Error("Attendance settings are not available.");
     const elapsed = now.getTime() - Date.parse(session.clock_in_at);
     if (elapsed <= 0 || elapsed > Number(settings?.max_session_hours ?? 16) * 60 * 60 * 1000) {
       throw new Error("Session duration is invalid; ask the Owner to review it.");
     }
-    const workedMinutes = Math.max(0, Math.floor(elapsed / 60000) - Number(session.break_minutes ?? 0));
     const { data: shift } = session.shift_id
-      ? await db.from("attendance_shifts").select("ends_at").eq("id", session.shift_id).maybeSingle()
+      ? await db.from("attendance_shifts").select("ends_at, station_id").eq("id", session.shift_id).eq("user_id", context.userId).maybeSingle()
       : { data: null };
+    // Station comes only from the open session's own linked shift.
+    let station: { latitude: number | null; longitude: number | null; radius: number; isActive: boolean } | null = null;
+    if (settings?.geofence_enabled && shift?.station_id) {
+      const { data: st } = await db.from("attendance_stations")
+        .select("latitude, longitude, geofence_radius_meters, is_active").eq("id", shift.station_id).maybeSingle();
+      if (st) station = {
+        latitude: st.latitude == null ? null : Number(st.latitude), longitude: st.longitude == null ? null : Number(st.longitude),
+        radius: Number(st.geofence_radius_meters), isActive: Boolean(st.is_active),
+      };
+    }
+    const { decideClockOutLocation, appendFlags } = await import("@/lib/attendance-clockout");
+    const decision = decideClockOutLocation({
+      geofenceEnabled: Boolean(settings?.geofence_enabled), sessionUserId: String(session.user_id), callerId: context.userId,
+      station, point: { latitude: data.latitude, longitude: data.longitude, accuracyMeters: data.accuracyMeters, capturedAt: data.capturedAt },
+      exceptionReason: data.exceptionReason ?? null, now: now.getTime(),
+    });
+    if (!decision.ok) throw new Error(decision.error);
+    const workedMinutes = Math.max(0, Math.floor(elapsed / 60000) - Number(session.break_minutes ?? 0));
     const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - now.getTime()) / 60000)) : 0;
-    const { error: updateError } = await db.from("attendance_sessions").update({
-      clock_out_at: now.toISOString(), clock_out_source: "app", clock_out_note: data.note ?? null,
+    const isException = decision.mode === "exception";
+    const note = isException
+      ? `[Location exception: ${decision.discrepancy}] ${decision.reason}${data.note ? ` | ${data.note}` : ""}`.slice(0, 500)
+      : data.note ?? null;
+    const update: Record<string, unknown> = {
+      clock_out_at: now.toISOString(), clock_out_source: "app", clock_out_note: note,
       worked_minutes: workedMinutes, early_leave_minutes: earlyLeave, status: "closed",
-    }).eq("id", session.id).eq("user_id", context.userId).is("clock_out_at", null);
+    };
+    if (isException) {
+      update.flags = appendFlags(session.flags, ["clock_out_location_exception", decision.discrepancy]);
+      update.verification_status = "unverified";
+      update.verified_by = null;
+      update.verified_at = null;
+    }
+    const { data: closed, error: updateError } = await db.from("attendance_sessions").update(update)
+      .eq("id", session.id).eq("user_id", context.userId).is("clock_out_at", null).select("id").maybeSingle();
     if (updateError) {
       console.error("Attendance clock-out failed", updateError.message);
       throw new Error("Clock-out failed.");
     }
-    await audit(db, { tableName: "attendance_sessions", rowId: session.id, action: "clock_out", actorId: context.userId, subjectUserId: context.userId, oldData: session, newData: { clockOutAt: now.toISOString(), workedMinutes } });
-    return { ok: true, workedMinutes };
+    if (!closed) throw new Error("This session was already closed.");
+    await audit(db, {
+      tableName: "attendance_sessions", rowId: session.id, action: isException ? "clock_out_location_exception" : "clock_out",
+      actorId: context.userId, subjectUserId: context.userId, oldData: session,
+      newData: {
+        clockOutAt: now.toISOString(), workedMinutes, locationCheck: decision.mode,
+        ...(isException ? { discrepancy: decision.discrepancy, reason: decision.reason } : {}),
+        ...(decision.distance !== undefined ? { distanceMeters: Math.round(decision.distance) } : {}),
+        ...(data.accuracyMeters !== undefined ? { accuracyMeters: Math.round(data.accuracyMeters) } : {}),
+      },
+    });
+    return { ok: true, workedMinutes, locationException: isException };
   });
 
 export const staffStartBreak = createServerFn({ method: "POST" })
