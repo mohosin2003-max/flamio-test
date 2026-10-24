@@ -8,7 +8,7 @@
  */
 
 export type QueueState = "pending" | "syncing" | "confirmed" | "failed";
-export type QueueKind = "clock_in" | "clock_out" | "break_start" | "break_end";
+export type QueueKind = "clock_in" | "clock_out" | "break_start" | "break_end" | "task_item_toggle" | "task_complete";
 
 export interface QueuedAction {
   id: string; // idempotency key
@@ -39,20 +39,70 @@ export function memoryStorage(): QueueStorage {
 
 /** Errors that will never succeed on retry (validation / conflict). */
 export function isPermanentError(message: string): boolean {
-  return /already|no open|not found|outside|geofence|qr|expired|disabled|only staff|invalid|end your active break|clock in before/i.test(message);
+  return /already|no open|not found|outside|geofence|qr|expired|disabled|only staff|invalid|end your active break|clock in before|closed|must be ticked|photo proof/i.test(message);
+}
+
+export const TASK_KINDS: QueueKind[] = ["task_item_toggle", "task_complete"];
+export const isTaskKind = (k: QueueKind) => TASK_KINDS.includes(k);
+
+/** Identity of the thing an action targets: punches are one-per-kind, task actions are per task / item. */
+export function queueTarget(kind: QueueKind, payload?: Record<string, unknown>): string {
+  if (kind === "task_item_toggle") return `${kind}:${String(payload?.itemId ?? "")}`;
+  if (kind === "task_complete") return `${kind}:${String(payload?.taskId ?? "")}`;
+  return kind;
 }
 
 export async function enqueue(storage: QueueStorage, kind: QueueKind, id: string, now: Date, payload?: Record<string, unknown>) {
   const items = await storage.all();
-  // Conflict guard: never queue the same kind twice while one is unresolved.
-  if (items.some((i) => i.kind === kind && (i.state === "pending" || i.state === "syncing"))) {
-    throw new Error("This action is already waiting to sync.");
-  }
   // QR tokens expire in 60 s, so QR-verified punches cannot be queued.
   if (payload && "qrToken" in payload) throw new Error("QR clock-in needs a live connection.");
+  if (kind === "task_item_toggle" && (typeof payload?.itemId !== "string" || typeof payload?.isDone !== "boolean")) throw new Error("Invalid checklist action.");
+  if (kind === "task_complete") {
+    if (typeof payload?.taskId !== "string") throw new Error("Invalid task action.");
+    // Photo-proof paths expire after 15 minutes, so photo tasks need a live connection.
+    if (payload.photoPath || payload.requiresPhoto) throw new Error("Photo-proof tasks need a live connection.");
+  }
+  const target = queueTarget(kind, payload);
+  const open = items.find((i) => queueTarget(i.kind, i.payload) === target && (i.state === "pending" || i.state === "syncing"));
+  if (open) {
+    // A newer tick/untick of the same checklist item replaces the waiting one (latest intent wins).
+    if (kind === "task_item_toggle" && open.state === "pending") {
+      const replaced = { ...open, payload, requestedAt: now.toISOString() };
+      await storage.put(replaced);
+      return replaced;
+    }
+    // Conflict guard: never queue the same action twice while one is unresolved.
+    throw new Error("This action is already waiting to sync.");
+  }
   const item: QueuedAction = { id, kind, requestedAt: now.toISOString(), state: "pending", attempts: 0, payload };
   await storage.put(item);
   return item;
+}
+
+/** Server task state read after a conflict, for the signed-in staff member only. */
+export interface ServerTaskState {
+  tasks: { id: string; status: string; checklist?: { id: string; is_done?: boolean | null }[] }[];
+}
+
+/** Decides whether a task conflict means "already applied" (confirmed) or a real conflict. */
+export function reconcileTaskConflict(item: Pick<QueuedAction, "kind"> & { payload?: Record<string, unknown> }, state: ServerTaskState): { confirmed: boolean; reason: string } {
+  const p = item.payload ?? {};
+  if (item.kind === "task_complete") {
+    const t = state.tasks.find((x) => x.id === p.taskId);
+    return t && ["completed", "awaiting_verification", "verified"].includes(t.status)
+      ? { confirmed: true, reason: "Server shows this task is already completed." }
+      : { confirmed: false, reason: "Task could not be completed — it may have been cancelled or changed by the Owner." };
+  }
+  if (item.kind === "task_item_toggle") {
+    for (const t of state.tasks) {
+      const it = t.checklist?.find((c) => c.id === p.itemId);
+      if (it) return Boolean(it.is_done) === p.isDone
+        ? { confirmed: true, reason: "Server already shows this checklist item in the same state." }
+        : { confirmed: false, reason: "Checklist item could not be updated — the task may be closed." };
+    }
+    return { confirmed: false, reason: "Checklist item no longer exists on the server." };
+  }
+  return { confirmed: false, reason: "Not a task action." };
 }
 
 /**
