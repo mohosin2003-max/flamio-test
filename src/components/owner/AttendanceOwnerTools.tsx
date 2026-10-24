@@ -15,6 +15,7 @@ import {
   ownerListStoreChecklists, ownerRecoverStaleSession, ownerSetAttendanceFeatures,
   ownerListEditableTasks, ownerUpdateAttendanceTask, ownerDisableAttendanceTask,
 } from "@/lib/attendance-extras.functions";
+import { ownerScanOrphanSelfies } from "@/lib/attendance-selfie.functions";
 import { ownerListAttendanceManagement } from "@/lib/attendance-management.functions";
 import { STORE_CHECKLISTS } from "@/lib/attendance-rules";
 import { formatMinutes } from "@/lib/attendance-logic";
@@ -206,6 +207,28 @@ export function OpenTasksEditCard() {
           ) : null}
         </div>
       )) : <p className="text-sm text-muted-foreground">No open tasks.</p>}
+    </CardContent></Card>
+  );
+}
+
+/** Dry-run only: reports orphan selfie files. No delete button exists by design. */
+export function OrphanSelfieScanCard() {
+  const scan = useServerFn(ownerScanOrphanSelfies);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<Awaited<ReturnType<typeof ownerScanOrphanSelfies>> | null>(null);
+  const run = async () => {
+    setBusy(true);
+    try { setRes(await scan()); } catch (e) { toast.error(e instanceof Error ? e.message : "Scan failed"); } finally { setBusy(false); }
+  };
+  return (
+    <Card><CardContent className="space-y-3 p-4">
+      <h3 className="font-display font-bold">Unused selfie check (preview only)</h3>
+      <p className="text-xs text-muted-foreground">Lists clock-in selfies older than 24 hours that no attendance record uses. Nothing is deleted.</p>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => void run()}><RefreshCw className="mr-2 h-4 w-4" />Run check</Button>
+      {res ? <div className="space-y-1 text-sm">
+        <p>Checked {res.scanned} · in use {res.referenced} · too recent {res.tooRecent} · skipped {res.ignored} · <span className="font-semibold">unused {res.candidates.length}</span>{res.truncated ? " · scan limit reached" : ""}</p>
+        <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">{res.candidates.map((c) => <li key={c.path}>{c.path} · {c.ageHours} h old</li>)}</ul>
+      </div> : null}
     </CardContent></Card>
   );
 }

@@ -15,7 +15,7 @@ import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functio
 import { ownerGetAttendanceSelfieUrl } from "@/lib/attendance-selfie.functions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AttendanceFeatureTogglesCard, AttendanceNeedsAttentionCard } from "@/components/owner/AttendanceOwnerTools";
+import { AttendanceFeatureTogglesCard, AttendanceNeedsAttentionCard, OrphanSelfieScanCard } from "@/components/owner/AttendanceOwnerTools";
 
 export const Route = createFileRoute("/_authenticated/owner/attendance")({
   head: () => ({
@@ -116,6 +116,7 @@ function OwnerAttendance() {
 
       <AttendanceNeedsAttentionCard />
       <AttendanceFeatureTogglesCard />
+      <OrphanSelfieScanCard />
 
       <Card>
         <CardContent className="space-y-3 p-4">
