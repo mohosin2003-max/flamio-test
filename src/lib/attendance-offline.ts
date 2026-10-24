@@ -85,7 +85,7 @@ export interface ServerTaskState {
 }
 
 /** Decides whether a task conflict means "already applied" (confirmed) or a real conflict. */
-export function reconcileTaskConflict(item: Pick<QueuedAction, "kind"> & { payload?: Record<string, unknown> }, state: ServerTaskState): { confirmed: boolean; reason: string } {
+export function reconcileTaskConflict(item: Pick<QueuedAction, "kind"> & { payload?: Record<string, unknown> | undefined }, state: ServerTaskState): { confirmed: boolean; reason: string } {
   const p = item.payload ?? {};
   if (item.kind === "task_complete") {
     const t = state.tasks.find((x) => x.id === p.taskId);
