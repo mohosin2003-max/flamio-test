@@ -9,7 +9,8 @@ export interface ReviewSession { userId: string; clockOutAt: string | null }
 export function reviewSessionError(actor: ReviewActor, session: ReviewSession, status: ReviewStatus, note?: string | null): string | null {
   if (!actor.isOwner && !actor.isManager) return "Only the Owner or a manager can review attendance.";
   if (!["verified", "disputed", "unverified"].includes(status)) return "Invalid status.";
-  if (!actor.isOwner && session.userId === actor.userId) return "You cannot review your own attendance.";
+  // Matches the TEST RPC: nobody (Owner included) may review their own session.
+  if (session.userId === actor.userId) return "You cannot review your own attendance.";
   if (status === "verified" && !session.clockOutAt) return "Cannot verify an open session.";
   if (status === "disputed" && (note ?? "").trim().length < 5) return "A dispute needs a note of at least 5 characters.";
   return null;
