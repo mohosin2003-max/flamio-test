@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { BackToAttendance } from "@/components/owner/BackToAttendance";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -41,6 +42,7 @@ function AttendanceReports() {
 
   return (
     <div className="space-y-5">
+      <BackToAttendance />
       <div><h2 className="font-display text-xl font-bold">Attendance Reports</h2><p className="text-sm text-muted-foreground">Read-only · Bangladesh time · Owner only · weeks start Saturday</p></div>
       <Card><CardContent className="space-y-3 p-4">
         <h3 className="font-display font-bold">Attendance report</h3>
