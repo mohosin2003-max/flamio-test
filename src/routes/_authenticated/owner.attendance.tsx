@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CalendarClock, CheckCircle2, Clock3, RefreshCw, ShieldAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +46,7 @@ function duration(minutes: number) {
 
 function OwnerAttendance() {
   const queryClient = useQueryClient();
+  const viewerId = useAuth().user?.id ?? null;
   const getOverview = useServerFn(ownerGetAttendanceOverview);
   const updateSettings = useServerFn(ownerUpdateAttendanceSettings);
   const [settingsForm, setSettingsForm] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true, geofenceEnabled: false, qrVerificationEnabled: false, selfieVerificationEnabled: false, attendanceAlertsEnabled: false });
@@ -77,7 +79,7 @@ function OwnerAttendance() {
     );
   }
 
-  const sessions: { id: string; staffName: string; clockOutAt: string | null; lateMinutes: number; status: string; clockInAt: string; dutyDate: string; workedMinutes: number; verificationStatus: string }[] = overview.data.sessions;
+  const sessions: { id: string; userId: string; staffName: string; clockOutAt: string | null; lateMinutes: number; status: string; clockInAt: string; dutyDate: string; workedMinutes: number; verificationStatus: string }[] = overview.data.sessions;
   const tasks: { id: string; title: string; staffName: string; dueDate: string; dueAt: string | null; priority: string; status: string; completedAt: string | null }[] = overview.data.tasks;
   const openSessions = sessions.filter((session) => !session.clockOutAt);
   const lateSessions = sessions.filter((session) => session.lateMinutes > 0);
@@ -169,7 +171,9 @@ function OwnerAttendance() {
                     <p>Worked: {duration(session.workedMinutes)}</p>
                     <p>Verification: {session.verificationStatus}</p>
                   </div>
-                  <SessionReviewControls sessionId={session.id} isOpen={!session.clockOutAt} current={session.verificationStatus} />
+                  {viewerId && session.userId === viewerId
+                    ? <p className="mt-2 text-xs text-muted-foreground">Your own session — another manager must review it.</p>
+                    : <SessionReviewControls sessionId={session.id} isOpen={!session.clockOutAt} current={session.verificationStatus} />}
                   <SelfieEvidenceButton sessionId={session.id} />
                 </div>
               ))}
