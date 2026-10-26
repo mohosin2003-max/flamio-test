@@ -41,6 +41,7 @@ import { Route as AuthenticatedOwnerAccountRouteImport } from './routes/_authent
 import { Route as AuthenticatedOwnerAttendanceRouteImport } from './routes/_authenticated/owner.attendance'
 import { Route as AuthenticatedOwnerAttendanceManagementRouteImport } from './routes/_authenticated/owner.attendance-management'
 import { Route as AuthenticatedOwnerAttendanceReportsRouteImport } from './routes/_authenticated/owner.attendance-reports'
+import { Route as AuthenticatedOwnerAttendanceSettingsRouteImport } from './routes/_authenticated/owner.attendance-settings'
 import { Route as AuthenticatedOwnerAttendanceWorkflowRouteImport } from './routes/_authenticated/owner.attendance-workflow'
 import { Route as AuthenticatedOwnerBannersRouteImport } from './routes/_authenticated/owner.banners'
 import { Route as AuthenticatedOwnerChallengesRouteImport } from './routes/_authenticated/owner.challenges'
@@ -249,6 +250,12 @@ const AuthenticatedOwnerAttendanceReportsRoute =
   AuthenticatedOwnerAttendanceReportsRouteImport.update({
     id: '/attendance-reports',
     path: '/attendance-reports',
+    getParentRoute: () => AuthenticatedOwnerRoute,
+  } as any)
+const AuthenticatedOwnerAttendanceSettingsRoute =
+  AuthenticatedOwnerAttendanceSettingsRouteImport.update({
+    id: '/attendance-settings',
+    path: '/attendance-settings',
     getParentRoute: () => AuthenticatedOwnerRoute,
   } as any)
 const AuthenticatedOwnerAttendanceWorkflowRoute =
@@ -486,6 +493,7 @@ export interface FileRoutesByFullPath {
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/attendance-reports': typeof AuthenticatedOwnerAttendanceReportsRoute
+  '/owner/attendance-settings': typeof AuthenticatedOwnerAttendanceSettingsRoute
   '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/banners': typeof AuthenticatedOwnerBannersRoute
   '/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
@@ -553,6 +561,7 @@ export interface FileRoutesByTo {
   '/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/owner/attendance-reports': typeof AuthenticatedOwnerAttendanceReportsRoute
+  '/owner/attendance-settings': typeof AuthenticatedOwnerAttendanceSettingsRoute
   '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/banners': typeof AuthenticatedOwnerBannersRoute
   '/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
@@ -622,6 +631,7 @@ export interface FileRoutesById {
   '/_authenticated/owner/attendance': typeof AuthenticatedOwnerAttendanceRoute
   '/_authenticated/owner/attendance-management': typeof AuthenticatedOwnerAttendanceManagementRoute
   '/_authenticated/owner/attendance-reports': typeof AuthenticatedOwnerAttendanceReportsRoute
+  '/_authenticated/owner/attendance-settings': typeof AuthenticatedOwnerAttendanceSettingsRoute
   '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/banners': typeof AuthenticatedOwnerBannersRoute
   '/_authenticated/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
@@ -692,6 +702,7 @@ export interface FileRouteTypes {
     | '/owner/attendance'
     | '/owner/attendance-management'
     | '/owner/attendance-reports'
+    | '/owner/attendance-settings'
     | '/owner/attendance-workflow'
     | '/owner/banners'
     | '/owner/challenges'
@@ -759,6 +770,7 @@ export interface FileRouteTypes {
     | '/owner/attendance'
     | '/owner/attendance-management'
     | '/owner/attendance-reports'
+    | '/owner/attendance-settings'
     | '/owner/attendance-workflow'
     | '/owner/banners'
     | '/owner/challenges'
@@ -827,6 +839,7 @@ export interface FileRouteTypes {
     | '/_authenticated/owner/attendance'
     | '/_authenticated/owner/attendance-management'
     | '/_authenticated/owner/attendance-reports'
+    | '/_authenticated/owner/attendance-settings'
     | '/_authenticated/owner/attendance-workflow'
     | '/_authenticated/owner/banners'
     | '/_authenticated/owner/challenges'
@@ -1110,6 +1123,13 @@ declare module '@tanstack/react-router' {
       path: '/attendance-reports'
       fullPath: '/owner/attendance-reports'
       preLoaderRoute: typeof AuthenticatedOwnerAttendanceReportsRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
+    '/_authenticated/owner/attendance-settings': {
+      id: '/_authenticated/owner/attendance-settings'
+      path: '/attendance-settings'
+      fullPath: '/owner/attendance-settings'
+      preLoaderRoute: typeof AuthenticatedOwnerAttendanceSettingsRouteImport
       parentRoute: typeof AuthenticatedOwnerRoute
     }
     '/_authenticated/owner/attendance-workflow': {
@@ -1396,6 +1416,7 @@ interface AuthenticatedOwnerRouteChildren {
   AuthenticatedOwnerAttendanceRoute: typeof AuthenticatedOwnerAttendanceRoute
   AuthenticatedOwnerAttendanceManagementRoute: typeof AuthenticatedOwnerAttendanceManagementRoute
   AuthenticatedOwnerAttendanceReportsRoute: typeof AuthenticatedOwnerAttendanceReportsRoute
+  AuthenticatedOwnerAttendanceSettingsRoute: typeof AuthenticatedOwnerAttendanceSettingsRoute
   AuthenticatedOwnerAttendanceWorkflowRoute: typeof AuthenticatedOwnerAttendanceWorkflowRoute
   AuthenticatedOwnerBannersRoute: typeof AuthenticatedOwnerBannersRoute
   AuthenticatedOwnerChallengesRoute: typeof AuthenticatedOwnerChallengesRoute
@@ -1433,6 +1454,8 @@ const AuthenticatedOwnerRouteChildren: AuthenticatedOwnerRouteChildren = {
     AuthenticatedOwnerAttendanceManagementRoute,
   AuthenticatedOwnerAttendanceReportsRoute:
     AuthenticatedOwnerAttendanceReportsRoute,
+  AuthenticatedOwnerAttendanceSettingsRoute:
+    AuthenticatedOwnerAttendanceSettingsRoute,
   AuthenticatedOwnerAttendanceWorkflowRoute:
     AuthenticatedOwnerAttendanceWorkflowRoute,
   AuthenticatedOwnerBannersRoute: AuthenticatedOwnerBannersRoute,
