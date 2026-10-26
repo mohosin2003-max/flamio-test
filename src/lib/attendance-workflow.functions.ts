@@ -652,3 +652,22 @@ export const staffToggleAttendanceTaskItem = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+export const ownerReviewAttendanceSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ sessionId: z.string().uuid(), status: z.enum(["verified", "disputed", "unverified"]), note: z.string().trim().max(500).nullable().optional() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { access, db } = await dbForUser(context.userId);
+    const { data: session, error: readError } = await db.from("attendance_sessions").select("id, user_id, clock_out_at").eq("id", data.sessionId).maybeSingle();
+    if (readError || !session) throw new Error("Session not found.");
+    const { reviewSessionError } = await import("@/lib/attendance-review");
+    const refusal = reviewSessionError(
+      { userId: context.userId, isOwner: !!access.isOwner, isManager: !!(access as { isManager?: boolean }).isManager },
+      { userId: session.user_id, clockOutAt: session.clock_out_at }, data.status, data.note);
+    if (refusal) throw new Error(refusal);
+    // Call as the signed-in user so the DB procedure sees auth.uid() and enforces its own checks.
+    const { error } = await (context.supabase as unknown as { rpc: (n: string, a: Record<string, unknown>) => Promise<{ error: { message: string } | null }> })
+      .rpc("attendance_verify_session", { _session_id: data.sessionId, _status: data.status, _note: data.note ?? null });
+    if (error) { console.error("Session review failed", error.message); throw new Error(error.message || "Could not review session."); }
+    return { ok: true, status: data.status };
+  });

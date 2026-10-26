@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ownerGetAttendanceOverview } from "@/lib/attendance.functions";
 import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functions";
 import { ownerGetAttendanceSelfieUrl } from "@/lib/attendance-selfie.functions";
+import { ownerReviewAttendanceSession } from "@/lib/attendance-workflow.functions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AttendanceFeatureTogglesCard, AttendanceNeedsAttentionCard, OrphanSelfieScanCard } from "@/components/owner/AttendanceOwnerTools";
@@ -168,6 +169,7 @@ function OwnerAttendance() {
                     <p>Worked: {duration(session.workedMinutes)}</p>
                     <p>Verification: {session.verificationStatus}</p>
                   </div>
+                  <SessionReviewControls sessionId={session.id} isOpen={!session.clockOutAt} current={session.verificationStatus} />
                   <SelfieEvidenceButton sessionId={session.id} />
                 </div>
               ))}
@@ -193,6 +195,29 @@ function OwnerAttendance() {
       </Card>
     </div>
   );
+}
+
+function SessionReviewControls({ sessionId, isOpen, current }: { sessionId: string; isOpen: boolean; current: string }) {
+  const review = useServerFn(ownerReviewAttendanceSession);
+  const queryClient = useQueryClient();
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = async (status: "verified" | "disputed" | "unverified") => {
+    setBusy(true);
+    try {
+      await review({ data: { sessionId, status, note: note.trim() || null } });
+      await queryClient.invalidateQueries({ queryKey: ["owner-attendance-overview"] });
+      toast.success(`Session marked ${status}`);
+      setNote("");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not review session"); }
+    finally { setBusy(false); }
+  };
+  return <div className="mt-2 flex flex-wrap items-center gap-2">
+    <Input aria-label="Review note" placeholder="Review note (needed to dispute)" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className="h-8 max-w-xs text-xs" />
+    <Button type="button" size="sm" disabled={busy || isOpen || current === "verified"} onClick={() => void run("verified")}>Verify</Button>
+    <Button type="button" size="sm" variant="outline" disabled={busy || current === "disputed"} onClick={() => void run("disputed")}>Dispute</Button>
+    <Button type="button" size="sm" variant="ghost" disabled={busy || current === "unverified"} onClick={() => void run("unverified")}>Reset</Button>
+  </div>;
 }
 
 function SelfieEvidenceButton({ sessionId }: { sessionId: string }) {
