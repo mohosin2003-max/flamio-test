@@ -1,9 +1,9 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { CalendarClock, CheckCircle2, Clock3, RefreshCw, ShieldAlert, Users } from "lucide-react";
+import { AlertTriangle, CalendarClock, ChevronRight, ClipboardList, Clock3, FileBarChart, RefreshCw, Settings2, ShieldAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -11,18 +11,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { ownerGetAttendanceOverview } from "@/lib/attendance.functions";
-import { ownerUpdateAttendanceSettings } from "@/lib/attendance-settings.functions";
 import { ownerGetAttendanceSelfieUrl } from "@/lib/attendance-selfie.functions";
 import { ownerReviewAttendanceSession } from "@/lib/attendance-workflow.functions";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { AttendanceFeatureTogglesCard, AttendanceNeedsAttentionCard, OrphanSelfieScanCard } from "@/components/owner/AttendanceOwnerTools";
+import { ownerCheckAttendanceIssues } from "@/lib/attendance-extras.functions";
+import { AttendanceNeedsAttentionCard } from "@/components/owner/AttendanceOwnerTools";
+
+type View = "duty" | "late" | "review";
 
 export const Route = createFileRoute("/_authenticated/owner/attendance")({
+  validateSearch: (search: Record<string, unknown>): { view?: View } => {
+    const v = search.view;
+    return v === "duty" || v === "late" || v === "review" ? { view: v } : {};
+  },
   head: () => ({
     meta: [
-      { title: "Staff Duty Monitoring — Flamio" },
+      { title: "Attendance — Flamio" },
+      { name: "description", content: "Owner attendance dashboard: staff on duty, lateness, breaks and open tasks." },
       { name: "robots", content: "noindex" },
     ],
   }),
@@ -44,160 +50,173 @@ function duration(minutes: number) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+type SessionRow = { id: string; userId: string; staffName: string; clockOutAt: string | null; lateMinutes: number; status: string; clockInAt: string; dutyDate: string; workedMinutes: number; verificationStatus: string };
+
 function OwnerAttendance() {
-  const queryClient = useQueryClient();
-  const viewerId = useAuth().user?.id ?? null;
+  const { view } = Route.useSearch();
   const getOverview = useServerFn(ownerGetAttendanceOverview);
-  const updateSettings = useServerFn(ownerUpdateAttendanceSettings);
-  const [settingsForm, setSettingsForm] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true, geofenceEnabled: false, qrVerificationEnabled: false, selfieVerificationEnabled: false, attendanceAlertsEnabled: false });
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [settingsBusy, setSettingsBusy] = useState(false);
   const overview = useQuery({
     queryKey: ["owner-attendance-overview"],
     queryFn: () => getOverview(),
     refetchInterval: 30_000,
   });
-  const settings = overview.data?.settings;
-  useEffect(() => {
-    if (settings && !settingsLoaded) {
-      setSettingsForm({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in, geofenceEnabled: settings.geofence_enabled, qrVerificationEnabled: settings.qr_verification_enabled, selfieVerificationEnabled: settings.selfie_verification_enabled, attendanceAlertsEnabled: settings.attendance_alerts_enabled });
-      setSettingsLoaded(true);
-    }
-  }, [settings, settingsLoaded]);
 
   if (overview.isLoading) {
-    return <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-48 w-full" /><Skeleton className="h-48 w-full" /></div>;
+    return <div className="space-y-3"><Skeleton className="h-10 w-1/2" /><div className="grid grid-cols-2 gap-3"><Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" /></div><Skeleton className="h-28 w-full" /></div>;
   }
 
   if (overview.error || !overview.data) {
     return (
       <EmptyState
         title="Attendance data is not ready"
-        description={overview.error instanceof Error ? overview.error.message : "The TEST database may need setup. No database changes were made by this page."}
+        description={overview.error instanceof Error ? overview.error.message : "Attendance data could not be loaded."}
         action={<Button onClick={() => void overview.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>}
       />
     );
   }
 
-  const sessions: { id: string; userId: string; staffName: string; clockOutAt: string | null; lateMinutes: number; status: string; clockInAt: string; dutyDate: string; workedMinutes: number; verificationStatus: string }[] = overview.data.sessions;
-  const tasks: { id: string; title: string; staffName: string; dueDate: string; dueAt: string | null; priority: string; status: string; completedAt: string | null }[] = overview.data.tasks;
-  const openSessions = sessions.filter((session) => !session.clockOutAt);
-  const lateSessions = sessions.filter((session) => session.lateMinutes > 0);
-  const pendingTasks = tasks.filter((task) => !["completed", "verified", "cancelled"].includes(task.status));
+  const { counts } = overview.data;
+  if (view) return <MonitoringView view={view} data={overview.data as unknown as { sessions: SessionRow[]; openSessions: SessionRow[]; lateSessions: SessionRow[] }} onRefresh={() => void overview.refetch()} />;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-xl font-bold">Staff Duty Monitoring</h2>
-          <p className="text-sm text-muted-foreground">Duty overview · TEST environment · refreshes every 30 seconds</p>
+          <h2 className="font-display text-xl font-bold">Attendance</h2>
+          <p className="text-sm text-muted-foreground">Live duty overview · Bangladesh time · refreshes every 30 seconds</p>
         </div>
-        <Button variant="outline" onClick={() => void overview.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+        <Button variant="outline" className="min-h-12" onClick={() => void overview.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat icon={Users} label="Recent sessions" value={String(sessions.length)} />
-        <Stat icon={Clock3} label="Currently on duty" value={String(openSessions.length)} />
-        <Stat icon={ShieldAlert} label="Late records" value={String(lateSessions.length)} />
-        <Stat icon={CheckCircle2} label="Open tasks" value={String(pendingTasks.length)} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard to="/owner/staff" icon={Users} label="Total Staff" value={String(counts.totalStaff)} />
+        <KpiCard to="/owner/attendance" search={{ view: "duty" }} icon={Clock3} label="On Duty" value={String(counts.onDuty)} />
+        <KpiCard to="/owner/attendance" search={{ view: "late" }} icon={ShieldAlert} label="Late / Break" value={`${counts.lateToday} Late · ${counts.activeBreaks} Break`} small />
+        <KpiCard to="/owner/attendance-workflow" icon={ClipboardList} label="Open Tasks" value={String(counts.openTasks)} />
       </div>
+
+      <NeedsAttention disputed={counts.disputed} />
+
+      <Link to="/owner/attendance-reports" className="flex min-h-24 items-center gap-4 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <FileBarChart className="h-8 w-8 shrink-0 text-primary" />
+        <div className="flex-1">
+          <p className="font-display text-lg font-bold">Attendance Reports</p>
+          <p className="text-sm text-muted-foreground">Hours, attendance logs, CSV export and cleanup preview (read-only).</p>
+        </div>
+        <ChevronRight className="h-5 w-5 text-muted-foreground" />
+      </Link>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Link to="/owner/attendance-management" className="rounded-xl border p-4 transition-colors hover:bg-muted/50">
-          <p className="font-semibold">Stations & shifts</p>
-          <p className="mt-1 text-sm text-muted-foreground">Manage work areas, assign staff shifts, and cancel scheduled shifts.</p>
-        </Link>
-        <Link to="/owner/attendance-workflow" className="rounded-xl border p-4 transition-colors hover:bg-muted/50">
-          <p className="font-semibold">Tasks & requests</p>
-          <p className="mt-1 text-sm text-muted-foreground">Assign checklist tasks, review completions, and process staff requests.</p>
-        </Link>
-        <Link to="/owner/attendance-reports" className="rounded-xl border p-4 transition-colors hover:bg-muted/50 sm:col-span-2">
-          <p className="font-semibold">Attendance reports</p>
-          <p className="mt-1 text-sm text-muted-foreground">Read-only hours, attendance logs, CSV export and monthly cleanup preview.</p>
-        </Link>
+        <SmallLink to="/owner/attendance-management" icon={CalendarClock} label="Schedules & Stations" />
+        <SmallLink to="/owner/attendance-settings" icon={Settings2} label="Attendance Settings" />
       </div>
-
-      <AttendanceNeedsAttentionCard />
-      <AttendanceFeatureTogglesCard />
-      <OrphanSelfieScanCard />
-
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <h3 className="font-display font-bold">Attendance settings</h3>
-          {settings ? (
-            <div className="grid gap-3 text-sm sm:grid-cols-2">
-              <Setting label="Time zone" value={settings.timezone} />
-              <Setting label="Late grace period" value={`${settings.late_grace_minutes} minutes`} />
-              <Setting label="Early clock-in window" value={`${settings.early_clock_in_minutes} minutes`} />
-              <Setting label="Minimum punch gap" value={`${settings.min_punch_gap_seconds} seconds`} />
-              <Setting label="Maximum session" value={`${settings.max_session_hours} hours`} />
-              <Setting label="Unscheduled clock-in" value={settings.allow_unscheduled_clock_in ? "Allowed" : "Not allowed"} />
-              <Setting label="GPS geofence" value={settings.geofence_enabled ? "Enabled" : "Disabled"} />
-              <Setting label="QR verification" value={settings.qr_verification_enabled ? "Enabled" : "Disabled"} />
-              <Setting label="Selfie verification" value={settings.selfie_verification_enabled ? "Enabled" : "Disabled"} />
-              <Setting label="Attendance alerts" value={settings.attendance_alerts_enabled ? "Enabled" : "Disabled"} />
-            </div>
-          ) : <p className="text-sm text-muted-foreground">No settings row found.</p>}
-          <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); setSettingsBusy(true); void updateSettings({ data: { timezone: "Asia/Dhaka", ...settingsForm } }).then(async () => { await queryClient.invalidateQueries({ queryKey: ["owner-attendance-overview"] }); toast.success("Attendance settings saved"); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not save settings")).finally(() => setSettingsBusy(false)); }}>
-            <div className="space-y-1"><Label htmlFor="late-grace">Late grace (minutes)</Label><Input id="late-grace" type="number" min={0} max={120} value={settingsForm.lateGraceMinutes} onChange={(e) => setSettingsForm((old) => ({ ...old, lateGraceMinutes: Number(e.target.value) }))} /></div>
-            <div className="space-y-1"><Label htmlFor="early-window">Early clock-in window (minutes)</Label><Input id="early-window" type="number" min={0} max={240} value={settingsForm.earlyClockInMinutes} onChange={(e) => setSettingsForm((old) => ({ ...old, earlyClockInMinutes: Number(e.target.value) }))} /></div>
-            <div className="space-y-1"><Label htmlFor="punch-gap">Minimum punch gap (seconds)</Label><Input id="punch-gap" type="number" min={10} max={3600} value={settingsForm.minPunchGapSeconds} onChange={(e) => setSettingsForm((old) => ({ ...old, minPunchGapSeconds: Number(e.target.value) }))} /></div>
-            <div className="space-y-1"><Label htmlFor="max-session">Maximum session (hours)</Label><Input id="max-session" type="number" min={1} max={24} value={settingsForm.maxSessionHours} onChange={(e) => setSettingsForm((old) => ({ ...old, maxSessionHours: Number(e.target.value) }))} /></div>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.allowUnscheduledClockIn} onChange={(e) => setSettingsForm((old) => ({ ...old, allowUnscheduledClockIn: e.target.checked }))} /> Allow clock-in without a scheduled shift</label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.geofenceEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, geofenceEnabled: e.target.checked }))} /> Require GPS geofence at clock-in (stations need coordinates)</label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.qrVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, qrVerificationEnabled: e.target.checked }))} /> Require a single-use station QR token at clock-in (issuance UI still under development)</label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.selfieVerificationEnabled} disabled={!settingsForm.selfieVerificationEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, selfieVerificationEnabled: e.target.checked }))} /> Selfie photo evidence (stays off until the evidence storage is approved and set up; face matching NOT IMPLEMENTED)</label>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={settingsForm.attendanceAlertsEnabled} onChange={(e) => setSettingsForm((old) => ({ ...old, attendanceAlertsEnabled: e.target.checked }))} /> Attendance notification switch (delivery wiring still incomplete)</label>
-            <Button type="submit" disabled={settingsBusy} className="sm:col-span-2">{settingsBusy ? "Saving…" : "Save attendance settings"}</Button>
-          </form>
-          <p className="text-xs text-muted-foreground">Owner-only server authorization and TEST database RLS are enforced. GPS/QR checks run only when enabled; configure station coordinates first. Selfie and notification delivery are not yet end-to-end.</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <div className="flex items-center gap-2"><CalendarClock className="h-5 w-5 text-primary" /><h3 className="font-display font-bold">Recent attendance</h3></div>
-          {sessions.length === 0 ? <p className="text-sm text-muted-foreground">No attendance sessions found.</p> : (
-            <div className="space-y-2">
-              {sessions.map((session) => (
-                <div key={session.id} className="rounded-lg border border-border p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div><p className="font-semibold">{session.staffName}</p><p className="text-xs text-muted-foreground">Duty date: {session.dutyDate}</p></div>
-                    <span className={session.lateMinutes > 0 ? "rounded-full bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive" : "rounded-full bg-muted px-2 py-1 text-xs"}>{session.lateMinutes > 0 ? `Late ${duration(session.lateMinutes)}` : session.status}</span>
-                  </div>
-                  <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-                    <p>In: {formatDate(session.clockInAt)}</p>
-                    <p>Out: {session.clockOutAt ? formatDate(session.clockOutAt) : "Still on duty"}</p>
-                    <p>Worked: {duration(session.workedMinutes)}</p>
-                    <p>Verification: {session.verificationStatus}</p>
-                  </div>
-                  {viewerId && session.userId === viewerId
-                    ? <p className="mt-2 text-xs text-muted-foreground">Your own session — another manager must review it.</p>
-                    : <SessionReviewControls sessionId={session.id} isOpen={!session.clockOutAt} current={session.verificationStatus} />}
-                  <SelfieEvidenceButton sessionId={session.id} />
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <h3 className="font-display font-bold">Recent staff tasks</h3>
-          {tasks.length === 0 ? <p className="text-sm text-muted-foreground">No tasks found.</p> : (
-            <div className="space-y-2">
-              {tasks.map((task) => (
-                <div key={task.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-border p-3">
-                  <div><p className="font-semibold">{task.title}</p><p className="text-xs text-muted-foreground">{task.staffName} · Due {task.dueDate}{task.dueAt ? ` · ${formatDate(task.dueAt)}` : ""}</p></div>
-                  <span className="rounded-full bg-muted px-2 py-1 text-xs">{task.status} · {task.priority}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
+  );
+}
+
+function KpiCard({ to, search, icon: Icon, label, value, small }: { to: "/owner/staff" | "/owner/attendance" | "/owner/attendance-workflow"; search?: { view: View }; icon: LucideIcon; label: string; value: string; small?: boolean }) {
+  return (
+    <Link to={to} search={search as never} className="flex min-h-28 flex-col justify-between rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <div className="flex items-center justify-between"><Icon className="h-5 w-5 text-primary" /><ChevronRight className="h-4 w-4 text-muted-foreground" /></div>
+      <div>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className={"font-display font-bold " + (small ? "text-lg" : "text-2xl")}>{value}</p>
+      </div>
+    </Link>
+  );
+}
+
+function SmallLink({ to, icon: Icon, label }: { to: "/owner/attendance-management" | "/owner/attendance-settings"; icon: LucideIcon; label: string }) {
+  return (
+    <Link to={to} className="flex min-h-12 items-center gap-3 rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <Icon className="h-4 w-4 text-primary" />
+      <span className="flex-1">{label}</span>
+      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+    </Link>
+  );
+}
+
+type IssueData = { overlongBreaks: unknown[]; missedClockOuts: unknown[] };
+
+/** Compact alert; renders nothing when there are no real issues. */
+function NeedsAttention({ disputed }: { disputed: number }) {
+  const checkIssues = useServerFn(ownerCheckAttendanceIssues);
+  const issues = useQuery({ queryKey: ["att-issues"], queryFn: () => checkIssues({ data: { sendAlerts: false } }), refetchInterval: 60000 });
+  const d = issues.data as IssueData | undefined;
+  const longBreaks = d?.overlongBreaks.length ?? 0;
+  const missed = d?.missedClockOuts.length ?? 0;
+  if (!disputed && !longBreaks && !missed) return null;
+  const items: { label: string; view: View }[] = [];
+  if (disputed) items.push({ label: `${disputed} disputed session${disputed > 1 ? "s" : ""}`, view: "review" });
+  if (missed) items.push({ label: `${missed} possible missed clock-out${missed > 1 ? "s" : ""}`, view: "duty" });
+  if (longBreaks) items.push({ label: `${longBreaks} long break${longBreaks > 1 ? "s" : ""}`, view: "duty" });
+  return (
+    <div role="status" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+      <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-destructive"><AlertTriangle className="h-4 w-4" />Needs attention</p>
+      <ul className="space-y-1">
+        {items.map((i) => (
+          <li key={i.label}>
+            <Link to="/owner/attendance" search={{ view: i.view }} className="flex min-h-10 items-center justify-between rounded-md px-2 text-sm hover:bg-muted/50">
+              {i.label}<ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MonitoringView({ view, data, onRefresh }: { view: View; data: { sessions: SessionRow[]; openSessions: SessionRow[]; lateSessions: SessionRow[] }; onRefresh: () => void }) {
+  const titles: Record<View, string> = { duty: "On Duty", late: "Late / Break", review: "Session review" };
+  const list = view === "duty" ? data.openSessions : view === "late" ? data.lateSessions : data.sessions;
+  const empty = view === "duty" ? "No one is on duty right now." : view === "late" ? "No late arrivals today." : "No attendance sessions found.";
+  return (
+    <div className="space-y-5">
+      <Link to="/owner/attendance" className="inline-flex min-h-12 items-center gap-2 text-sm font-medium text-primary hover:underline">← Back to Attendance</Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-xl font-bold">{titles[view]}</h2>
+        <Button variant="outline" className="min-h-12" onClick={onRefresh}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+      </div>
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Session views">
+        {(["duty", "late", "review"] as View[]).map((v) => (
+          <Link key={v} role="tab" aria-selected={v === view} to="/owner/attendance" search={{ view: v }} className={"min-h-10 rounded-full border px-4 py-2 text-sm " + (v === view ? "bg-primary text-primary-foreground" : "hover:bg-muted/50")}>{titles[v]}</Link>
+        ))}
+      </div>
+      {view !== "review" ? <AttendanceNeedsAttentionCard /> : null}
+      <SessionList sessions={list} empty={empty} />
+    </div>
+  );
+}
+
+function SessionList({ sessions, empty }: { sessions: SessionRow[]; empty: string }) {
+  const viewerId = useAuth().user?.id ?? null;
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        {sessions.length === 0 ? <p className="text-sm text-muted-foreground">{empty}</p> : (
+          <div className="space-y-2">
+            {sessions.map((session) => (
+              <div key={session.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div><p className="font-semibold">{session.staffName}</p><p className="text-xs text-muted-foreground">Duty date: {session.dutyDate}</p></div>
+                  <span className={session.lateMinutes > 0 ? "rounded-full bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive" : "rounded-full bg-muted px-2 py-1 text-xs"}>{session.lateMinutes > 0 ? `Late ${duration(session.lateMinutes)}` : session.status}</span>
+                </div>
+                <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                  <p>In: {formatDate(session.clockInAt)}</p>
+                  <p>Out: {session.clockOutAt ? formatDate(session.clockOutAt) : "Still on duty"}</p>
+                  <p>Worked: {duration(session.workedMinutes)}</p>
+                  <p>Verification: {session.verificationStatus}</p>
+                </div>
+                {viewerId && session.userId === viewerId
+                  ? <p className="mt-2 text-xs text-muted-foreground">Your own session — another manager must review it.</p>
+                  : <SessionReviewControls sessionId={session.id} isOpen={!session.clockOutAt} current={session.verificationStatus} />}
+                <SelfieEvidenceButton sessionId={session.id} />
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -242,10 +261,3 @@ function SelfieEvidenceButton({ sessionId }: { sessionId: string }) {
   </div>;
 }
 
-function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
-  return <Card><CardContent className="space-y-2 p-3"><Icon className="h-5 w-5 text-primary" /><p className="text-xs text-muted-foreground">{label}</p><p className="font-display text-2xl font-bold">{value}</p></CardContent></Card>;
-}
-
-function Setting({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg border border-border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-medium">{value}</p></div>;
-}

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { BackToAttendance } from "@/components/owner/BackToAttendance";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -74,6 +75,7 @@ function AttendanceManagement() {
   const shifts: { id: string; userId: string; staffName: string; dutyRole: string | null; shiftDate: string; startTime: string; endTime: string; isOvernight: boolean; stationId: string | null; plannedBreakMinutes: number; status: string; notes: string | null }[] = query.data.shifts;
   const staff: { id: string; name: string }[] = query.data.staff;
   return <div className="space-y-5">
+    <BackToAttendance />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="font-display text-xl font-bold">Attendance schedules</h2><p className="text-sm text-muted-foreground">Owner-only controls · TEST environment</p></div>
       <Button variant="outline" onClick={() => void query.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>

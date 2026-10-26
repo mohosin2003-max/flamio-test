@@ -54,10 +54,7 @@ const MODULES: Module[] = [
 
   { to: "/owner/settings", label: "Settings", description: "Business configuration", icon: Settings2, permission: "settings" },
   { to: "/owner/data-storage", label: "Data & Storage", description: "Retention, cleanup and files", icon: Settings2, permission: "settings", ownerRoleOnly: true },
-  { to: "/owner/attendance", label: "Staff Duty Monitoring", description: "Attendance, duty sessions and tasks", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
-  { to: "/owner/attendance-management", label: "Attendance Schedules", description: "Manage work stations and staff shifts", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
-  { to: "/owner/attendance-workflow", label: "Attendance Tasks & Requests", description: "Assign tasks and review staff requests", icon: ClipboardList, permission: "staff", ownerRoleOnly: true },
-  { to: "/owner/attendance-reports", label: "Attendance Reports", description: "Hours, attendance logs and exports", icon: ClipboardList, permission: "staff", ownerRoleOnly: true },
+  { to: "/owner/attendance", label: "Attendance", description: "Duty, tasks, requests and reports", icon: CalendarClock, permission: "staff", ownerRoleOnly: true },
 ];
 
 function OwnerHome() {
