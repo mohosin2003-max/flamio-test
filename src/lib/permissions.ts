@@ -218,11 +218,15 @@ export function canManage(access: PermissionAccess, permission: StaffPermission)
 }
 
 /**
- * Staff-only "My duty" entry. Owners/managers manage attendance from the
- * owner area and cannot use the staff attendance workspace, so they never see it.
- * The server still enforces this independently.
+ * Staff-only "My duty" entry. Mirrors the server rule in
+ * staffGetAttendanceWorkspace (staff role, own records only), so any staff
+ * account can open its own duty. Owners/managers use /owner/attendance instead.
  */
 export function canSeeStaffDuty(access: (NonNullable<PermissionAccess> & { isStaff?: boolean }) | null | undefined): boolean {
-  if (!access || !access.isStaff || access.isOwner || access.isManager) return false;
-  return hasPermission(access, "attendance");
+  return Boolean(access && access.isStaff && !access.isOwner && !access.isManager);
+}
+
+/** Owners/managers get the owner attendance entry in the workspace nav. */
+export function canSeeOwnerAttendance(access: { isOwner?: boolean; isManager?: boolean } | null | undefined): boolean {
+  return Boolean(access && (access.isOwner || access.isManager));
 }

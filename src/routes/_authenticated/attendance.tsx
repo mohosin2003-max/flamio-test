@@ -1,4 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useDashboardAccess } from "@/hooks/use-dashboard-access";
+import { canSeeOwnerAttendance, canSeeStaffDuty } from "@/lib/permissions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -54,6 +56,13 @@ type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verificat
 
 function MyAttendance() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const access = useDashboardAccess();
+  const ownerSide = canSeeOwnerAttendance(access.data);
+  const staffDuty = canSeeStaffDuty(access.data);
+  useEffect(() => {
+    if (ownerSide) void navigate({ to: "/owner/attendance", replace: true });
+  }, [ownerSide, navigate]);
   const getWorkspace = useServerFn(staffGetAttendanceWorkspace);
   const clockIn = useServerFn(staffClockIn);
   const clockOut = useServerFn(staffClockOut);
@@ -188,7 +197,7 @@ function MyAttendance() {
       }
     }, d, reason ? "Clocked out — sent for Owner review" : "Clocked out");
   };
-  const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000 });
+  const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000, enabled: staffDuty });
   const refresh = async () => qc.invalidateQueries({ queryKey: ["my-attendance-workspace"] });
   const run = async (operation: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -216,6 +225,8 @@ function MyAttendance() {
     };
     reader.readAsDataURL(file);
   };
+  if (access.isLoading || ownerSide) return <div className="space-y-3"><Skeleton className="h-32 w-full"/><Skeleton className="h-48 w-full"/></div>;
+  if (!staffDuty) return <EmptyState title="Staff access only" description="This page is only for staff duty accounts." />;
   if (query.isLoading) return <div className="space-y-3"><Skeleton className="h-32 w-full"/><Skeleton className="h-48 w-full"/></div>;
   if (query.error || !query.data) return <EmptyState title="Attendance unavailable" description="Your attendance workspace could not be loaded." action={<Button onClick={() => void query.refetch()}>Retry</Button>} />;
   const { shifts, sessions, tasks, requests, activeBreak, settings } = query.data as AttendanceWorkspace;
