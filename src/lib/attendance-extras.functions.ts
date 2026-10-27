@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
-  STORE_CHECKLISTS, buildReport, buildWeeklyWindows, canEditTask, incompleteTasks, normalizeChecklistItems, selfieCountsByRow, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks,
-  retentionEligibleSessions, rollingCutoff, shiftWindow, validatePlannedBreak, type ReportPeriod,
+  STORE_CHECKLISTS, buildReport, buildWeeklyWindows, canEditTask, incompleteTasks, normalizeChecklistItems, selfieCountsByRow, missedClockOuts, overlaps, overlongBreaks,
+  retentionEligibleSessions, rollingCutoff, type ReportPeriod,
 } from "@/lib/attendance-rules";
 
 /**
