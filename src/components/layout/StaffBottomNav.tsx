@@ -8,16 +8,18 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDashboardAccess } from "@/hooks/use-dashboard-access";
 import { ownerListContactThreads } from "@/lib/contact-messages.functions";
 import { ownerGetDashboardSummary } from "@/lib/dashboard.functions";
-import { canSeeStaffDuty, hasPermission } from "@/lib/permissions";
+import { canSeeOwnerAttendance, canSeeStaffDuty, hasPermission } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
+const BASE_ITEMS = [
   { to: "/owner", label: "Home", icon: Home, kind: "home" },
   { to: "/owner/inbox", label: "Messages", icon: MessageCircle, kind: "messages" },
   { to: "/owner/orders", label: "Orders", icon: ReceiptText, kind: "orders" },
   { to: "/attendance", label: "My duty", icon: Clock, kind: "duty" },
   { to: "/owner/account", label: "Account", icon: UserRound, kind: "account" },
 ] as const;
+const OWNER_ATTENDANCE_ITEM = { to: "/owner/attendance", label: "Attendance", icon: Clock, kind: "attendance" } as const;
+type NavItem = (typeof BASE_ITEMS)[number] | typeof OWNER_ATTENDANCE_ITEM;
 
 export function StaffBottomNav() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -29,6 +31,9 @@ export function StaffBottomNav() {
   const canMessage = signedIn && hasPermission(access.data, "customers");
   const canOrder = signedIn && (hasPermission(access.data, "online_orders") || hasPermission(access.data, "order_management"));
   const canDuty = signedIn && canSeeStaffDuty(access.data);
+  const ownerSide = signedIn && canSeeOwnerAttendance(access.data);
+  const workspaceUser = Boolean(access.data?.isStaff || access.data?.isManager || access.data?.isOwner);
+  const NAV_ITEMS: NavItem[] = BASE_ITEMS.map((item) => (item.kind === "duty" && ownerSide ? OWNER_ATTENDANCE_ITEM : item));
 
   const threads = useQuery({
     queryKey: ["contact-inbox", "owner"],
