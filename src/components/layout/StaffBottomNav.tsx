@@ -53,14 +53,18 @@ export function StaffBottomNav() {
   const unread = (threads.data ?? []).reduce((total, thread) => total + thread.unreadCount, 0);
   const activeOrders = summary.data?.activeOnlineOrders ?? 0;
 
-  function isActive(kind: (typeof NAV_ITEMS)[number]["kind"]) {
+  // Customers / unauthorized accounts never get staff navigation.
+  if (!signedIn || !access.data || !workspaceUser) return null;
+
+  function isActive(kind: NavItem["kind"]) {
     if (kind === "messages") return pathname.startsWith("/owner/inbox");
     if (kind === "orders") return pathname.startsWith("/owner/orders");
     if (kind === "duty") return pathname === "/attendance";
+    if (kind === "attendance") return pathname.startsWith("/owner/attendance");
     if (kind === "account") {
       return ["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
     }
-    return !pathname.startsWith("/owner/inbox") && !pathname.startsWith("/owner/orders") && !["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
+    return !pathname.startsWith("/owner/inbox") && !pathname.startsWith("/owner/orders") && !pathname.startsWith("/owner/attendance") && pathname !== "/attendance" && !["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
   }
 
   return (
