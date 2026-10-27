@@ -402,3 +402,27 @@ export function isShiftOverlapConstraintError(error: { code?: string | null; mes
   if (!error) return false;
   return error.code === "23P01" || /attendance_shifts_no_overlap|exclusion constraint/i.test(error.message ?? "");
 }
+
+/* ------------------------ Per-weekday schedule builder ------------------------ */
+
+export interface DayTimes { startTime: string; endTime: string; plannedBreakMinutes: number }
+
+/**
+ * Expands a date range into individual shift windows where each weekday may
+ * have its own start, end and planned break. Weekdays missing from `perDay`
+ * use `fallback`. Reuses shiftWindow (Asia/Dhaka, overnight, 18h cap) and
+ * validatePlannedBreak; rejects windows in the same batch that overlap.
+ */
+export function buildWeeklyWindows(from: string, to: string, weekdays: number[], fallback: DayTimes, perDay?: Partial<Record<number, DayTimes>>) {
+  const dates = expandWeeklyDates(from, to, weekdays);
+  const windows = dates.map((date) => {
+    const t = perDay?.[new Date(`${date}T00:00:00Z`).getUTCDay()] ?? fallback;
+    const w = shiftWindow(date, t.startTime, t.endTime);
+    validatePlannedBreak(w.startAt, w.endAt, t.plannedBreakMinutes);
+    return { date, startTime: t.startTime.slice(0, 5), endTime: t.endTime.slice(0, 5), plannedBreakMinutes: t.plannedBreakMinutes, ...w };
+  });
+  for (let i = 1; i < windows.length; i++) {
+    if (overlaps(windows[i - 1]!, windows[i]!)) throw new Error(`Shifts on ${windows[i - 1]!.date} and ${windows[i]!.date} overlap. Adjust the times.`);
+  }
+  return windows;
+}
