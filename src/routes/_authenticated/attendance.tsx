@@ -197,7 +197,8 @@ function MyAttendance() {
   const activeSession = sessions.find((s) => !s.clock_out_at);
   const pendingTasks = tasks.filter((t) => !["completed","verified","cancelled"].includes(t.status));
   const dateTime = (v: string) => new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-  const activeSection = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("section") ?? "home" : "home";
+  const requestedSection = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("section") ?? "home" : "home";
+  const activeSection = ["home", "shifts", "tasks", "history", "request"].includes(requestedSection) ? requestedSection : "home";
   const sectionTitles: Record<string, string> = { home: "My Duty", shifts: "Upcoming Shifts — Next 14 Days", tasks: "My Tasks", history: "Attendance History", request: "Submit a Request" };
   const sectionTitle = sectionTitles[activeSection] ?? sectionTitles.home;
   return <div className="space-y-5">
