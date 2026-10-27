@@ -257,7 +257,7 @@ function SelfieEvidenceButton({ sessionId }: { sessionId: string }) {
   return <div className="mt-2 space-y-2">
     {!url ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void load()}>{busy ? "Loading…" : "View clock-in selfie"}</Button> : <img src={url} alt="Clock-in selfie evidence" className="h-32 w-32 rounded-md object-cover" />}
     {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
-    {url ? <p className="text-xs text-muted-foreground">Photo evidence only. Face matching: NOT IMPLEMENTED. Link expires in 10 minutes.</p> : null}
+    {url ? <p className="text-xs text-muted-foreground">Private check-in photo evidence. Link expires in 10 minutes.</p> : null}
   </div>;
 }
 
