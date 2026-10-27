@@ -1,10 +1,7 @@
 /**
- * Pure, browser-safe rules for attendance selfie evidence.
- *
- * A selfie is photographic EVIDENCE only, reviewed by a person. It is NOT
- * biometric face matching: no face comparison, template or score exists.
+ * Pure, browser-safe rules for mandatory check-in photo evidence.
+ * Photos are stored as private evidence for human Owner/Manager review.
  */
-export const FACE_MATCHING_STATUS = "NOT_IMPLEMENTED" as const;
 export const SELFIE_BUCKET = "attendance-evidence";
 export const SELFIE_MAX_BYTES = 1_500_000;
 export const SELFIE_MIN_BYTES = 2_000;
@@ -51,15 +48,14 @@ export function validateSelfieBytes(bytes: Uint8Array): { ok: true } | { ok: fal
 export type SelfieGate = { required: false } | { required: true; available: boolean; reason?: string };
 
 /** Fail closed: if the Owner requires selfies but storage/columns are not ready, block clock-in. */
-export function selfieGate(input: { selfieEnabled: boolean; columnsPresent: boolean }): SelfieGate {
-  if (!input.selfieEnabled) return { required: false };
-  if (!input.columnsPresent) return { required: true, available: false, reason: "Selfie verification is enabled but evidence storage is not set up. Ask the Owner to disable it." };
+export function selfieGate(input: { columnsPresent: boolean }): SelfieGate {
+  if (!input.columnsPresent) return { required: true, available: false, reason: "Check-in photo storage is not ready. Ask the Owner to contact support." };
   return { required: true, available: true };
 }
 
 /** Clock-out and break-end are never gated by a selfie, so staff can't be trapped on duty. */
-export function selfieRequiredFor(kind: "clock_in" | "clock_out" | "break_start" | "break_end", selfieEnabled: boolean): boolean {
-  return kind === "clock_in" && selfieEnabled;
+export function selfieRequiredFor(kind: "clock_in" | "clock_out" | "break_start" | "break_end"): boolean {
+  return kind === "clock_in";
 }
 
 export function decodeBase64(b64: string): Uint8Array {
