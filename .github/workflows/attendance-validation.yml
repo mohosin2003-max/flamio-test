@@ -2,7 +2,7 @@ name: Attendance branch validation
 
 on:
   pull_request:
-    branches: [main, feature/attendance-master-safe]
+    branches: [main]
   push:
     branches: [feature/attendance-master-safe]
 
