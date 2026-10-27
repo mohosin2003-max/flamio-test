@@ -49,7 +49,7 @@ function AttendanceSettings() {
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.allowUnscheduledClockIn} onChange={(e) => setF((o) => ({ ...o, allowUnscheduledClockIn: e.target.checked }))} /> Allow clock-in without a scheduled shift</label>
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.geofenceEnabled} onChange={(e) => setF((o) => ({ ...o, geofenceEnabled: e.target.checked }))} /> Require GPS geofence at clock-in</label>
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.qrVerificationEnabled} onChange={(e) => setF((o) => ({ ...o, qrVerificationEnabled: e.target.checked }))} /> Require a station QR token at clock-in</label>
-            <p className="text-sm sm:col-span-2 rounded-md border p-3">A fresh camera photo is required for every staff check-in. Gallery upload and face matching are not part of this workflow.</p>
+            <p className="text-sm sm:col-span-2 rounded-md border p-3">A fresh photo must be taken with the live camera for every staff check-in. Photos are stored privately for Owner/Manager review.</p>
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.attendanceAlertsEnabled} onChange={(e) => setF((o) => ({ ...o, attendanceAlertsEnabled: e.target.checked }))} /> Attendance notification switch</label>
             <Button type="submit" disabled={busy} className="min-h-12 sm:col-span-2">{busy ? "Saving…" : "Save attendance settings"}</Button>
           </form>
