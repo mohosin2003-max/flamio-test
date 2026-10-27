@@ -19,7 +19,7 @@ export const staffUploadAttendanceSelfie = createServerFn({ method: "POST" })
   }).parse(input))
   .handler(async ({ data, context }) => {
     const access = await getAccessProfile(context.userId);
-    if (!access.isStaff) throw new Error("Only staff accounts can submit attendance selfies.");
+    if (!access.isStaff) throw new Error("Only staff accounts can submit check-in photos.");
     let bytes: Uint8Array;
     try { bytes = decodeBase64(data.imageBase64); } catch { throw new Error("The photo could not be read. Retake it."); }
     const valid = validateSelfieBytes(bytes);
@@ -31,7 +31,7 @@ export const staffUploadAttendanceSelfie = createServerFn({ method: "POST" })
     const { error } = await db.storage.from(SELFIE_BUCKET).upload(path, bytes, { contentType: "image/jpeg", upsert: false });
     if (error) {
       console.error("Attendance selfie upload failed", error.message);
-      throw new Error("Selfie upload failed. Check your connection and retry.");
+      throw new Error("Check-in photo upload failed. Check your connection and retry.");
     }
     return { path, capturedAt: now.toISOString() };
   });
@@ -48,10 +48,10 @@ export const ownerGetAttendanceSelfieUrl = createServerFn({ method: "POST" })
     const { data: row, error } = await db.from("attendance_sessions").select("id, user_id, clock_in_selfie_path").eq("id", data.sessionId).maybeSingle();
     if (error) {
       if (/clock_in_selfie_path/.test(error.message)) return { url: null, reason: "Selfie evidence storage is not set up yet." };
-      throw new Error("Could not load this session.");
+      throw new Error("Could not load this check-in session.");
     }
     if (!row) throw new Error("Session not found.");
-    if (!row.clock_in_selfie_path) return { url: null, reason: "No selfie was recorded for this clock-in." };
+    if (!row.clock_in_selfie_path) return { url: null, reason: "No photo was recorded for this check-in." };
     if (!String(row.clock_in_selfie_path).startsWith(`${row.user_id}/`)) return { url: null, reason: "Evidence path does not match this staff member." };
     const { data: signed, error: signError } = await db.storage.from(SELFIE_BUCKET).createSignedUrl(row.clock_in_selfie_path, SELFIE_SIGNED_URL_SECONDS);
     if (signError || !signed?.signedUrl) return { url: null, reason: "The selfie file is no longer available." };
