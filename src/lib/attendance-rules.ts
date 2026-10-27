@@ -426,3 +426,26 @@ export function buildWeeklyWindows(from: string, to: string, weekdays: number[],
   }
   return windows;
 }
+
+/* ------------------------------ Station deletion ------------------------------ */
+
+export interface StationReferences { shifts: number; tasks: number; usedQrChallenges: number; activeQrChallenges: number }
+
+/**
+ * A station may be hard-deleted only when nothing records it: no shifts or
+ * tasks (which would lose their station via SET NULL), no consumed QR
+ * challenge (clock-in evidence) and no QR still valid. Only expired, never
+ * used QR challenges are removed with it. Unknown counts block deletion.
+ */
+export function stationDeletionDecision(refs: Partial<StationReferences> | null | undefined): { allowed: true } | { allowed: false; reason: string } {
+  const keys: (keyof StationReferences)[] = ["shifts", "tasks", "usedQrChallenges", "activeQrChallenges"];
+  if (!refs || keys.some((k) => typeof refs[k] !== "number" || !Number.isFinite(refs[k]))) {
+    return { allowed: false, reason: "Could not confirm this station is unused, so it was not deleted." };
+  }
+  const r = refs as StationReferences;
+  if (r.shifts > 0 || r.tasks > 0 || r.usedQrChallenges > 0) {
+    return { allowed: false, reason: "This station has shift, task or clock-in history. Disable it instead so past attendance and reports keep their station." };
+  }
+  if (r.activeQrChallenges > 0) return { allowed: false, reason: "A QR code for this station is still valid. Wait a minute for it to expire, then try again." };
+  return { allowed: true };
+}
