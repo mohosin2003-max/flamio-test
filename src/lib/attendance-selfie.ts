@@ -26,14 +26,14 @@ export type SelfiePathCheck = { ok: true; capturedAt: number } | { ok: false; re
 
 /** Verifies a path belongs to this user and is fresh. */
 export function checkSelfiePath(path: unknown, userId: string, now: number): SelfiePathCheck {
-  if (typeof path !== "string" || path.length > 200) return { ok: false, reason: "Selfie evidence is missing." };
+  if (typeof path !== "string" || path.length > 200) return { ok: false, reason: "Check-in photo is missing." };
   const m = new RegExp(`^(${UUID})/(\\d{4}-\\d{2}-\\d{2})/(\\d{13})-(${UUID})\\.jpg$`).exec(path);
-  if (!m) return { ok: false, reason: "Selfie evidence is invalid." };
-  if (m[1] !== userId.toLowerCase()) return { ok: false, reason: "This selfie does not belong to you." };
+  if (!m) return { ok: false, reason: "Check-in photo is invalid." };
+  if (m[1] !== userId.toLowerCase()) return { ok: false, reason: "This photo does not belong to your account." };
   const capturedAt = Number(m[3]);
-  if (dhakaDate(new Date(capturedAt)) !== m[2]) return { ok: false, reason: "Selfie evidence is invalid." };
-  if (capturedAt > now + 60_000) return { ok: false, reason: "Selfie evidence is invalid." };
-  if (now - capturedAt > SELFIE_MAX_AGE_MS) return { ok: false, reason: "Your selfie has expired. Take a new one." };
+  if (dhakaDate(new Date(capturedAt)) !== m[2]) return { ok: false, reason: "Check-in photo is invalid." };
+  if (capturedAt > now + 60_000) return { ok: false, reason: "Check-in photo is invalid." };
+  if (now - capturedAt > SELFIE_MAX_AGE_MS) return { ok: false, reason: "Your check-in photo has expired. Take a new one." };
   return { ok: true, capturedAt };
 }
 
