@@ -50,6 +50,7 @@ type UpcomingShift = AttendanceShift & { shift_date: string; station_name: strin
 type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled?: boolean } | null; shifts: AttendanceShift[]; upcomingShifts?: UpcomingShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; session_id?: string; started_at: string } | null; lastClosedBreak?: { id: string; session_id: string; started_at: string; ended_at: string } | null };
 
 function MyAttendance() {
+  const { section: requestedSection } = Route.useSearch();
   const qc = useQueryClient();
   const getWorkspace = useServerFn(staffGetAttendanceWorkspace);
   const clockIn = useServerFn(staffClockIn);
@@ -198,7 +199,6 @@ function MyAttendance() {
   const activeSession = sessions.find((s) => !s.clock_out_at);
   const pendingTasks = tasks.filter((t) => !["completed","verified","cancelled"].includes(t.status));
   const dateTime = (v: string) => new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-  const { section: requestedSection } = Route.useSearch();
   const activeSection = ["home", "shifts", "tasks", "history", "request"].includes(requestedSection) ? requestedSection : "home";
   const sectionTitles: Record<string, string> = { home: "My Duty", shifts: "Upcoming Shifts — Next 14 Days", tasks: "My Tasks", history: "Attendance History", request: "Submit a Request" };
   const sectionTitle = sectionTitles[activeSection] ?? sectionTitles.home;
