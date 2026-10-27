@@ -25,12 +25,12 @@ function AttendanceSettings() {
   const updateSettings = useServerFn(ownerUpdateAttendanceSettings);
   const overview = useQuery({ queryKey: ["owner-attendance-overview"], queryFn: () => getOverview() });
   const settings = overview.data?.settings;
-  const [f, setF] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true, geofenceEnabled: false, qrVerificationEnabled: false, selfieVerificationEnabled: false, attendanceAlertsEnabled: false });
+  const [f, setF] = useState({ lateGraceMinutes: 10, earlyClockInMinutes: 60, minPunchGapSeconds: 60, maxSessionHours: 16, allowUnscheduledClockIn: true, geofenceEnabled: false, qrVerificationEnabled: false, attendanceAlertsEnabled: false });
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (settings && !loaded) {
-      setF({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in, geofenceEnabled: settings.geofence_enabled, qrVerificationEnabled: settings.qr_verification_enabled, selfieVerificationEnabled: settings.selfie_verification_enabled, attendanceAlertsEnabled: settings.attendance_alerts_enabled });
+      setF({ lateGraceMinutes: settings.late_grace_minutes, earlyClockInMinutes: settings.early_clock_in_minutes, minPunchGapSeconds: settings.min_punch_gap_seconds, maxSessionHours: settings.max_session_hours, allowUnscheduledClockIn: settings.allow_unscheduled_clock_in, geofenceEnabled: settings.geofence_enabled, qrVerificationEnabled: settings.qr_verification_enabled, attendanceAlertsEnabled: settings.attendance_alerts_enabled });
       setLoaded(true);
     }
   }, [settings, loaded]);
@@ -49,7 +49,7 @@ function AttendanceSettings() {
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.allowUnscheduledClockIn} onChange={(e) => setF((o) => ({ ...o, allowUnscheduledClockIn: e.target.checked }))} /> Allow clock-in without a scheduled shift</label>
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.geofenceEnabled} onChange={(e) => setF((o) => ({ ...o, geofenceEnabled: e.target.checked }))} /> Require GPS geofence at clock-in</label>
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.qrVerificationEnabled} onChange={(e) => setF((o) => ({ ...o, qrVerificationEnabled: e.target.checked }))} /> Require a station QR token at clock-in</label>
-            <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.selfieVerificationEnabled} disabled={!f.selfieVerificationEnabled} onChange={(e) => setF((o) => ({ ...o, selfieVerificationEnabled: e.target.checked }))} /> Selfie photo evidence (stays off until approved; face matching NOT IMPLEMENTED)</label>
+            <p className="text-sm sm:col-span-2 rounded-md border p-3">A fresh camera photo is required for every staff check-in. Gallery upload and face matching are not part of this workflow.</p>
             <label className="flex min-h-12 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.attendanceAlertsEnabled} onChange={(e) => setF((o) => ({ ...o, attendanceAlertsEnabled: e.target.checked }))} /> Attendance notification switch</label>
             <Button type="submit" disabled={busy} className="min-h-12 sm:col-span-2">{busy ? "Saving…" : "Save attendance settings"}</Button>
           </form>
