@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { QrScannerDialog } from "@/components/attendance/QrScannerDialog";
 import { SelfieCaptureDialog } from "@/components/attendance/SelfieCaptureDialog";
 import { staffUploadAttendanceSelfie } from "@/lib/attendance-selfie.functions";
+import { SELFIE_MAX_AGE_MS } from "@/lib/attendance-selfie";
 import { staffUploadAttendanceTaskPhoto } from "@/lib/attendance-task-photo.functions";
 import {
   staffClockIn, staffClockOut, staffCreateAttendanceRequest, staffCancelAttendanceRequest, staffEndBreak, staffToggleAttendanceTaskItem,
@@ -77,7 +78,7 @@ function MyAttendance() {
   const [taskPhotoPaths, setTaskPhotoPaths] = useState<Record<string, string>>({});
   const [taskPhotoPreviews, setTaskPhotoPreviews] = useState<Record<string, string>>({});
   const [selfieOpen, setSelfieOpen] = useState(false);
-  const [selfie, setSelfie] = useState<{ base64: string; preview: string } | null>(null);
+  const [selfie, setSelfie] = useState<{ base64: string; preview: string; capturedAt: number } | null>(null);
   const [exceptionPrompt, setExceptionPrompt] = useState<string | null>(null);
   const [exceptionReason, setExceptionReason] = useState("");
   const [shiftId, setShiftId] = useState("");
@@ -263,6 +264,7 @@ function MyAttendance() {
             if (settings?.geofence_enabled) { if (!navigator.onLine) throw new Error("Geofence clock-in needs an online connection so the GPS reading can be checked immediately."); if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; payload.capturedAt = Math.round(position.timestamp); }
             if (settings?.qr_verification_enabled) { if (!qrToken.trim()) throw new Error("Enter the station QR token before clocking in."); payload.qrToken = qrToken.trim(); }
             if (!selfie) throw new Error("Take a new check-in photo with your camera before clocking in.");
+            if (Date.now() - selfie.capturedAt > SELFIE_MAX_AGE_MS) { setSelfie(null); throw new Error("This photo has expired. Take a new check-in photo."); }
             if (!navigator.onLine) throw new Error("Check-in photo upload needs an internet connection. Try again when online.");
             setBusy(true);
             try { const up = await uploadSelfie({ data: { imageBase64: selfie.base64 } }); payload.selfiePath = up.path; }
@@ -295,7 +297,7 @@ function MyAttendance() {
         <DialogFooter><Button variant="outline" disabled={busy} onClick={() => { setExceptionPrompt(null); setExceptionReason(""); }}>Cancel</Button><Button variant="destructive" disabled={busy || exceptionReason.trim().length < EXCEPTION_REASON_MIN} onClick={() => void doClockOut(exceptionReason.trim())}>Clock out for review</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <SelfieCaptureDialog open={selfieOpen} onOpenChange={setSelfieOpen} onCapture={(base64, preview) => setSelfie({ base64, preview })} />
+    <SelfieCaptureDialog open={selfieOpen} onOpenChange={setSelfieOpen} onCapture={(base64, preview, capturedAt) => setSelfie({ base64, preview, capturedAt })} />
     <QrScannerDialog open={qrScannerOpen} onOpenChange={setQrScannerOpen} onScan={(token)=>{setQrToken(token);toast.success("Station QR scanned");}} />
   </div>;
 }
