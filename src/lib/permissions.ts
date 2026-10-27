@@ -230,3 +230,16 @@ export function canSeeStaffDuty(access: (NonNullable<PermissionAccess> & { isSta
 export function canSeeOwnerAttendance(access: { isOwner?: boolean; isManager?: boolean } | null | undefined): boolean {
   return Boolean(access && (access.isOwner || access.isManager));
 }
+
+/**
+ * Bottom-nav items for the workspace. Owners/managers get exactly four
+ * (no attendance or duty tab); staff get five including "My duty".
+ * Returns [] for anyone without a workspace role (customers).
+ */
+export type WorkspaceNavKind = "home" | "messages" | "orders" | "duty" | "account";
+export function workspaceNavKinds(access: { isStaff?: boolean; isOwner?: boolean; isManager?: boolean } | null | undefined): WorkspaceNavKind[] {
+  if (!access) return [];
+  if (access.isOwner || access.isManager) return ["home", "messages", "orders", "account"];
+  if (access.isStaff) return ["home", "messages", "orders", "duty", "account"];
+  return [];
+}

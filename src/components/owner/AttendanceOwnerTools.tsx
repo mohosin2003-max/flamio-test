@@ -109,27 +109,52 @@ export function RecurringShiftsCard() {
   const { staff, stations } = useStaffAndStations();
   const { busy, act } = useAct();
   const [rec, setRec] = useState({ userId: "", stationId: "", from: today, to: today, weekdays: [6, 0, 1, 2, 3] as number[], start: "10:00", end: "18:00", breakMin: 30 });
-  const recKey = JSON.stringify(rec);
+  // Per-weekday overrides; a selected day without an entry uses the shared times.
+  const [perDay, setPerDay] = useState<Record<number, { startTime: string; endTime: string; plannedBreakMinutes: number }>>({});
+  const recKey = JSON.stringify([rec, perDay]);
+  const dayTimes = Object.fromEntries(Object.entries(perDay).filter(([k]) => rec.weekdays.includes(Number(k))));
+  const setDay = (i: number, patch: Partial<{ startTime: string; endTime: string; plannedBreakMinutes: number }>) =>
+    setPerDay((o) => ({ ...o, [i]: { startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin, ...o[i], ...patch } }));
   const [recPreview, setRecPreview] = useState<{ key: string; items: { date: string; startAt: string; endAt: string; overnight: boolean; conflict: boolean }[] } | null>(null);
   return (
     <Card><CardContent className="space-y-3 p-4">
       <h3 className="font-display font-bold">Repeat a weekly shift</h3>
-      <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin, preview: true } }); setRecPreview({ key: recKey, items: r.items }); }, "Preview ready — check it, then confirm", []); }}>
+      <p className="text-sm text-muted-foreground">Bangladesh time. Set shared hours, then optionally give any selected day its own start, end and break.</p>
+      <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin, dayTimes, preview: true } }); setRecPreview({ key: recKey, items: r.items }); }, "Preview ready — check it, then confirm", []); }}>
         <div><Label htmlFor="rec-staff">Staff</Label><select id="rec-staff" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={rec.userId} onChange={(e) => setRec((o) => ({ ...o, userId: e.target.value }))}><option value="">Choose…</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         <div><Label htmlFor="rec-station">Station (optional)</Label><select id="rec-station" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={rec.stationId} onChange={(e) => setRec((o) => ({ ...o, stationId: e.target.value }))}><option value="">None</option>{stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         <div><Label htmlFor="rec-from">From</Label><Input id="rec-from" type="date" required value={rec.from} onChange={(e) => setRec((o) => ({ ...o, from: e.target.value }))} /></div>
         <div><Label htmlFor="rec-to">To (max 62 days)</Label><Input id="rec-to" type="date" required value={rec.to} onChange={(e) => setRec((o) => ({ ...o, to: e.target.value }))} /></div>
-        <div><Label htmlFor="rec-start">Start</Label><Input id="rec-start" type="time" required value={rec.start} onChange={(e) => setRec((o) => ({ ...o, start: e.target.value }))} /></div>
-        <div><Label htmlFor="rec-end">End (earlier = next day)</Label><Input id="rec-end" type="time" required value={rec.end} onChange={(e) => setRec((o) => ({ ...o, end: e.target.value }))} /></div>
-        <div><Label htmlFor="rec-break">Break minutes</Label><Input id="rec-break" type="number" min={0} max={240} value={rec.breakMin} onChange={(e) => setRec((o) => ({ ...o, breakMin: Number(e.target.value) }))} /></div>
+        <div><Label htmlFor="rec-start">Shared start</Label><Input id="rec-start" type="time" required value={rec.start} onChange={(e) => setRec((o) => ({ ...o, start: e.target.value }))} /></div>
+        <div><Label htmlFor="rec-end">Shared end (earlier = next day)</Label><Input id="rec-end" type="time" required value={rec.end} onChange={(e) => setRec((o) => ({ ...o, end: e.target.value }))} /></div>
+        <div><Label htmlFor="rec-break">Shared break minutes</Label><Input id="rec-break" type="number" min={0} max={240} value={rec.breakMin} onChange={(e) => setRec((o) => ({ ...o, breakMin: Number(e.target.value) }))} /></div>
         <div className="flex flex-wrap items-end gap-2 text-sm">{WEEKDAYS.map((d, i) => <label key={d} className="flex items-center gap-1"><input type="checkbox" checked={rec.weekdays.includes(i)} onChange={(e) => setRec((o) => ({ ...o, weekdays: e.target.checked ? [...o.weekdays, i] : o.weekdays.filter((x) => x !== i) }))} />{d}</label>)}</div>
+        <div className="space-y-2 sm:col-span-2">
+          {[...rec.weekdays].sort((a, b) => ((a + 1) % 7) - ((b + 1) % 7)).map((i) => {
+            const own = perDay[i];
+            return <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm">
+              <span className="w-10 font-semibold">{WEEKDAYS[i]}</span>
+              {own ? <>
+                <Input aria-label={`${WEEKDAYS[i]} start`} type="time" required className="h-9 w-28" value={own.startTime} onChange={(e) => setDay(i, { startTime: e.target.value })} />
+                <span aria-hidden="true">–</span>
+                <Input aria-label={`${WEEKDAYS[i]} end`} type="time" required className="h-9 w-28" value={own.endTime} onChange={(e) => setDay(i, { endTime: e.target.value })} />
+                <Input aria-label={`${WEEKDAYS[i]} break minutes`} type="number" min={0} max={240} className="h-9 w-20" value={own.plannedBreakMinutes} onChange={(e) => setDay(i, { plannedBreakMinutes: Number(e.target.value) })} />
+                <span className="text-xs text-muted-foreground">min break{own.endTime <= own.startTime ? " · ends next day" : ""}</span>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setPerDay((o) => { const n = { ...o }; delete n[i]; return n; })}>Use shared</Button>
+              </> : <>
+                <span className="text-muted-foreground">{rec.start} – {rec.end} · {rec.breakMin} min break (shared)</span>
+                <Button type="button" size="sm" variant="outline" onClick={() => setDay(i, {})}>Set own hours</Button>
+              </>}
+            </div>;
+          })}
+        </div>
         <Button disabled={busy} variant="outline" className="sm:col-span-2">Preview shifts</Button>
       </form>
       {recPreview && recPreview.key === recKey ? (
         <div className="space-y-2 rounded border p-2 text-sm">
           <p className="font-semibold">{recPreview.items.filter((i) => !i.conflict).length} new · {recPreview.items.filter((i) => i.conflict).length} skipped (already booked)</p>
           <ul className="max-h-48 space-y-1 overflow-y-auto">{recPreview.items.map((i) => <li key={i.date} className={i.conflict ? "text-muted-foreground line-through" : ""}>{i.date} · {dt(i.startAt)} → {dt(i.endAt)}{i.overnight ? " (overnight)" : ""}{i.conflict ? " · overlaps existing shift" : ""}</li>)}</ul>
-          <Button size="sm" disabled={busy || !recPreview.items.some((i) => !i.conflict)} onClick={() => void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin } }); setRecPreview(null); toast.message(`${r.created} shifts created${r.skippedOverlaps ? `, ${r.skippedOverlaps} skipped (already booked)` : ""}`); }, "Schedule saved", [["att-mgmt-staff"], ["owner-attendance-management"]])}>Confirm and create</Button>
+          <Button size="sm" disabled={busy || !recPreview.items.some((i) => !i.conflict)} onClick={() => void act(async () => { const r = await createRecurring({ data: { userId: rec.userId, stationId: rec.stationId || null, fromDate: rec.from, toDate: rec.to, weekdays: rec.weekdays, startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin, dayTimes } }); setRecPreview(null); toast.message(`${r.created} shifts created${r.skippedOverlaps ? `, ${r.skippedOverlaps} skipped (already booked)` : ""}`); }, "Schedule saved", [["att-mgmt-staff"], ["owner-attendance-management"]])}>Confirm and create</Button>
         </div>
       ) : recPreview ? <p className="text-xs text-muted-foreground">Settings changed — preview again before creating.</p> : null}
     </CardContent></Card>

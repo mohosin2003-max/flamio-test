@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDashboardAccess } from "@/hooks/use-dashboard-access";
 import { ownerListContactThreads } from "@/lib/contact-messages.functions";
 import { ownerGetDashboardSummary } from "@/lib/dashboard.functions";
-import { canSeeOwnerAttendance, canSeeStaffDuty, hasPermission } from "@/lib/permissions";
+import { canSeeStaffDuty, hasPermission, workspaceNavKinds } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 const BASE_ITEMS = [
@@ -18,8 +18,7 @@ const BASE_ITEMS = [
   { to: "/attendance", label: "My duty", icon: Clock, kind: "duty" },
   { to: "/owner/account", label: "Account", icon: UserRound, kind: "account" },
 ] as const;
-const OWNER_ATTENDANCE_ITEM = { to: "/owner/attendance", label: "Attendance", icon: Clock, kind: "attendance" } as const;
-type NavItem = (typeof BASE_ITEMS)[number] | typeof OWNER_ATTENDANCE_ITEM;
+type NavItem = (typeof BASE_ITEMS)[number];
 
 export function StaffBottomNav() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -31,9 +30,9 @@ export function StaffBottomNav() {
   const canMessage = signedIn && hasPermission(access.data, "customers");
   const canOrder = signedIn && (hasPermission(access.data, "online_orders") || hasPermission(access.data, "order_management"));
   const canDuty = signedIn && canSeeStaffDuty(access.data);
-  const ownerSide = signedIn && canSeeOwnerAttendance(access.data);
-  const workspaceUser = Boolean(access.data?.isStaff || access.data?.isManager || access.data?.isOwner);
-  const NAV_ITEMS: NavItem[] = BASE_ITEMS.map((item) => (item.kind === "duty" && ownerSide ? OWNER_ATTENDANCE_ITEM : item));
+  const kinds = signedIn ? workspaceNavKinds(access.data) : [];
+  const workspaceUser = kinds.length > 0;
+  const NAV_ITEMS: NavItem[] = BASE_ITEMS.filter((item) => kinds.includes(item.kind));
 
   const threads = useQuery({
     queryKey: ["contact-inbox", "owner"],
@@ -60,16 +59,15 @@ export function StaffBottomNav() {
     if (kind === "messages") return pathname.startsWith("/owner/inbox");
     if (kind === "orders") return pathname.startsWith("/owner/orders");
     if (kind === "duty") return pathname === "/attendance";
-    if (kind === "attendance") return pathname.startsWith("/owner/attendance");
     if (kind === "account") {
       return ["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
     }
-    return !pathname.startsWith("/owner/inbox") && !pathname.startsWith("/owner/orders") && !pathname.startsWith("/owner/attendance") && pathname !== "/attendance" && !["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
+    return !pathname.startsWith("/owner/inbox") && !pathname.startsWith("/owner/orders") && pathname !== "/attendance" && !["/owner/account", "/owner/my-account", "/owner/staff", "/owner/staff-accounts", "/owner/settings"].some((path) => pathname.startsWith(path));
   }
 
   return (
     <nav aria-label="Staff workspace" className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
-      <ul className="mx-auto grid max-w-lg grid-cols-5">
+      <ul className={cn("mx-auto grid max-w-lg", NAV_ITEMS.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
         {NAV_ITEMS.map((item) => {
           const allowed = item.kind === "messages" ? canMessage : item.kind === "orders" ? canOrder : item.kind === "duty" ? canDuty : true;
           const count = item.kind === "messages" ? unread : item.kind === "orders" ? activeOrders : 0;

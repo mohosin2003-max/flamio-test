@@ -402,3 +402,50 @@ export function isShiftOverlapConstraintError(error: { code?: string | null; mes
   if (!error) return false;
   return error.code === "23P01" || /attendance_shifts_no_overlap|exclusion constraint/i.test(error.message ?? "");
 }
+
+/* ------------------------ Per-weekday schedule builder ------------------------ */
+
+export interface DayTimes { startTime: string; endTime: string; plannedBreakMinutes: number }
+
+/**
+ * Expands a date range into individual shift windows where each weekday may
+ * have its own start, end and planned break. Weekdays missing from `perDay`
+ * use `fallback`. Reuses shiftWindow (Asia/Dhaka, overnight, 18h cap) and
+ * validatePlannedBreak; rejects windows in the same batch that overlap.
+ */
+export function buildWeeklyWindows(from: string, to: string, weekdays: number[], fallback: DayTimes, perDay?: Partial<Record<number, DayTimes>>) {
+  const dates = expandWeeklyDates(from, to, weekdays);
+  const windows = dates.map((date) => {
+    const t = perDay?.[new Date(`${date}T00:00:00Z`).getUTCDay()] ?? fallback;
+    const w = shiftWindow(date, t.startTime, t.endTime);
+    validatePlannedBreak(w.startAt, w.endAt, t.plannedBreakMinutes);
+    return { date, startTime: t.startTime.slice(0, 5), endTime: t.endTime.slice(0, 5), plannedBreakMinutes: t.plannedBreakMinutes, ...w };
+  });
+  for (let i = 1; i < windows.length; i++) {
+    if (overlaps(windows[i - 1]!, windows[i]!)) throw new Error(`Shifts on ${windows[i - 1]!.date} and ${windows[i]!.date} overlap. Adjust the times.`);
+  }
+  return windows;
+}
+
+/* ------------------------------ Station deletion ------------------------------ */
+
+export interface StationReferences { shifts: number; tasks: number; usedQrChallenges: number; activeQrChallenges: number }
+
+/**
+ * A station may be hard-deleted only when nothing records it: no shifts or
+ * tasks (which would lose their station via SET NULL), no consumed QR
+ * challenge (clock-in evidence) and no QR still valid. Only expired, never
+ * used QR challenges are removed with it. Unknown counts block deletion.
+ */
+export function stationDeletionDecision(refs: Partial<StationReferences> | null | undefined): { allowed: true } | { allowed: false; reason: string } {
+  const keys: (keyof StationReferences)[] = ["shifts", "tasks", "usedQrChallenges", "activeQrChallenges"];
+  if (!refs || keys.some((k) => typeof refs[k] !== "number" || !Number.isFinite(refs[k]))) {
+    return { allowed: false, reason: "Could not confirm this station is unused, so it was not deleted." };
+  }
+  const r = refs as StationReferences;
+  if (r.shifts > 0 || r.tasks > 0 || r.usedQrChallenges > 0) {
+    return { allowed: false, reason: "This station has shift, task or clock-in history. Disable it instead so past attendance and reports keep their station." };
+  }
+  if (r.activeQrChallenges > 0) return { allowed: false, reason: "A QR code for this station is still valid. Wait a minute for it to expire, then try again." };
+  return { allowed: true };
+}

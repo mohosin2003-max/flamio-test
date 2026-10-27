@@ -219,6 +219,44 @@ export const ownerSetAttendanceStationActive = createServerFn({ method: "POST" }
     return { ok: true };
   });
 
+/**
+ * Owner only. Hard-deletes a station only when nothing references it;
+ * otherwise refuses and asks the Owner to disable it, preserving history.
+ */
+export const ownerDeleteAttendanceStation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid(), confirmName: z.string().trim().min(1) }).parse(input))
+  .handler(async ({ data, context }) => {
+    await requireAttendanceOwner(context.userId);
+    const { stationDeletionDecision } = await import("@/lib/attendance-rules");
+    const { untypedAdmin } = await import("@/lib/untyped-db.server");
+    const db = await untypedAdmin();
+    const { data: station, error: readError } = await db.from("attendance_stations").select("id, name").eq("id", data.id).maybeSingle();
+    if (readError || !station) throw new Error("Station not found.");
+    if (station.name.trim().toLowerCase() !== data.confirmName.toLowerCase()) throw new Error("Type the station name exactly to confirm deletion.");
+    const nowIso = new Date().toISOString();
+    const count = async (q: PromiseLike<{ count: number | null; error: unknown }>) => { const r = await q; return r.error ? Number.NaN : (r.count ?? 0); };
+    const refs = {
+      shifts: await count(db.from("attendance_shifts").select("id", { count: "exact", head: true }).eq("station_id", data.id)),
+      tasks: await count(db.from("attendance_tasks").select("id", { count: "exact", head: true }).eq("station_id", data.id)),
+      usedQrChallenges: await count(db.from("attendance_qr_challenges").select("id", { count: "exact", head: true }).eq("station_id", data.id).not("consumed_at", "is", null)),
+      activeQrChallenges: await count(db.from("attendance_qr_challenges").select("id", { count: "exact", head: true }).eq("station_id", data.id).is("consumed_at", null).gt("expires_at", nowIso)),
+    };
+    const decision = stationDeletionDecision(refs);
+    if (!decision.allowed) throw new Error(decision.reason);
+    const { error } = await db.from("attendance_stations").delete().eq("id", data.id);
+    if (error) {
+      console.error("Attendance station delete failed", error.message);
+      throw new Error("Could not delete station. Disable it instead.");
+    }
+    const { error: auditError } = await db.from("attendance_audit_log").insert({
+      table_name: "attendance_stations", row_id: data.id, action: "DELETE", actor_id: context.userId,
+      old_data: { name: station.name }, new_data: { _attendance_event: "station_deleted" },
+    });
+    if (auditError) console.error("Attendance station delete audit failed", auditError.message);
+    return { ok: true };
+  });
+
 export const ownerCreateAttendanceShift = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => shiftInput.parse(input))
