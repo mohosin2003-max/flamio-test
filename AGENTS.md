@@ -13,3 +13,4 @@
 - Scheduled pre-orders are ordinary `orders` rows with status `scheduled`; `activate_due_scheduled_orders()` (run by the minute dispatcher) flips them to `placed`, which reuses the existing alert/Kitchen/alarm path — no parallel order system.
 - Home install UI is isolated in InstallAppBanner; it consumes browser install events without registering or changing service workers, keeping notification delivery independent.
 - Keep shared staff navigation eagerly imported by the root layout so a separate lazy navigation download cannot replace the entire workspace with a route error.
+- Client access shape comes only from `serializeOwnerAccess` (src/lib/access-shape.ts): `isOwner` means the real Owner role, `hasWorkspaceAccess` gates the workspace — mixing them hid My Duty from Staff.

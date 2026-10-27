@@ -111,8 +111,10 @@ export function RecurringShiftsCard() {
   const [rec, setRec] = useState({ userId: "", stationId: "", from: today, to: today, weekdays: [6, 0, 1, 2, 3] as number[], start: "10:00", end: "18:00", breakMin: 30 });
   // Per-weekday overrides; a selected day without an entry uses the shared times.
   const [perDay, setPerDay] = useState<Record<number, { startTime: string; endTime: string; plannedBreakMinutes: number }>>({});
-  const recKey = JSON.stringify([rec, perDay]);
-  const dayTimes = Object.fromEntries(Object.entries(perDay).filter(([k]) => rec.weekdays.includes(Number(k))));
+  // Overrides only apply while the optional disclosure is open; shared hours are the default.
+  const [customize, setCustomize] = useState(false);
+  const recKey = JSON.stringify([rec, perDay, customize]);
+  const dayTimes = customize ? Object.fromEntries(Object.entries(perDay).filter(([k]) => rec.weekdays.includes(Number(k)))) : {};
   const setDay = (i: number, patch: Partial<{ startTime: string; endTime: string; plannedBreakMinutes: number }>) =>
     setPerDay((o) => ({ ...o, [i]: { startTime: rec.start, endTime: rec.end, plannedBreakMinutes: rec.breakMin, ...o[i], ...patch } }));
   const [recPreview, setRecPreview] = useState<{ key: string; items: { date: string; startAt: string; endAt: string; overnight: boolean; conflict: boolean }[] } | null>(null);
@@ -129,7 +131,8 @@ export function RecurringShiftsCard() {
         <div><Label htmlFor="rec-end">Shared end (earlier = next day)</Label><Input id="rec-end" type="time" required value={rec.end} onChange={(e) => setRec((o) => ({ ...o, end: e.target.value }))} /></div>
         <div><Label htmlFor="rec-break">Shared break minutes</Label><Input id="rec-break" type="number" min={0} max={240} value={rec.breakMin} onChange={(e) => setRec((o) => ({ ...o, breakMin: Number(e.target.value) }))} /></div>
         <div className="flex flex-wrap items-end gap-2 text-sm">{WEEKDAYS.map((d, i) => <label key={d} className="flex items-center gap-1"><input type="checkbox" checked={rec.weekdays.includes(i)} onChange={(e) => setRec((o) => ({ ...o, weekdays: e.target.checked ? [...o.weekdays, i] : o.weekdays.filter((x) => x !== i) }))} />{d}</label>)}</div>
-        <div className="space-y-2 sm:col-span-2">
+        <label className="flex min-h-11 items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={customize} onChange={(e) => setCustomize(e.target.checked)} /> Customize individual weekday hours (optional)</label>
+        {customize ? <div className="space-y-2 sm:col-span-2">
           {[...rec.weekdays].sort((a, b) => ((a + 1) % 7) - ((b + 1) % 7)).map((i) => {
             const own = perDay[i];
             return <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm">
@@ -147,7 +150,7 @@ export function RecurringShiftsCard() {
               </>}
             </div>;
           })}
-        </div>
+        </div> : null}
         <Button disabled={busy} variant="outline" className="sm:col-span-2">Preview shifts</Button>
       </form>
       {recPreview && recPreview.key === recKey ? (

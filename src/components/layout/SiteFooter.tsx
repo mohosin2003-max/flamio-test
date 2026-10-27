@@ -5,7 +5,7 @@ import { useDashboardAccess } from "@/hooks/use-dashboard-access";
 
 export function SiteFooter() {
   const access = useDashboardAccess();
-  const showOwnerLink = Boolean(access.data?.isOwner || access.data?.canClaim);
+  const showOwnerLink = Boolean(access.data?.hasWorkspaceAccess || access.data?.canClaim);
 
 
   return (

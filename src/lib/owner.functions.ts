@@ -151,18 +151,8 @@ export const getOwnerAccess = createServerFn({ method: "GET" })
       .select("id", { count: "exact", head: true })
       .eq("role", "owner");
 
-    const hasAccess = access.isManager || access.isStaff || access.permissions.length > 0;
-
-    return {
-      isOwner: hasAccess,
-      isManager: access.isManager,
-      isStaff: access.isStaff,
-      permissions: access.permissions as string[],
-      grants: access.grants as Record<string, string>,
-
-      roles,
-      canClaim: !hasAccess && (count ?? 0) === 0,
-    };
+    const { serializeOwnerAccess } = await import("@/lib/access-shape");
+    return serializeOwnerAccess(access, roles, count ?? 0);
   });
 
 /** First-run bootstrap: the first signed-in user may claim ownership once. */
