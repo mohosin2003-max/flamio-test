@@ -149,7 +149,7 @@ export const staffClockIn = createServerFn({ method: "POST" })
       const { selfieGate, checkSelfiePath, SELFIE_BUCKET } = await import("@/lib/attendance-selfie");
       const probe = await db.from("attendance_sessions").select("clock_in_selfie_path").limit(1);
       const gate = selfieGate({ columnsPresent: !probe.error });
-      if (gate.required && !gate.available) throw new Error(gate.reason ?? "Selfie verification is unavailable.");
+      if (gate.required && !gate.available) throw new Error(gate.reason ?? "Check-in photo storage is unavailable.");
       const check = checkSelfiePath(data.selfiePath, context.userId, Date.now());
       if (!check.ok) throw new Error(check.reason);
       const path = data.selfiePath as string;
