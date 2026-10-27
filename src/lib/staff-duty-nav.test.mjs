@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { canSeeStaffDuty } from "./permissions.ts";
+import { canSeeOwnerAttendance, canSeeStaffDuty } from "./permissions.ts";
 
 describe("My duty visibility", () => {
-  test("staff with attendance access sees it", () => {
+  test("staff with attendance grant sees it", () => {
     expect(canSeeStaffDuty({ isStaff: true, grants: { attendance: "view" } })).toBe(true);
+  });
+  test("staff without attendance grant still sees own duty (matches server rule)", () => {
+    expect(canSeeStaffDuty({ isStaff: true, grants: { customers: "view" } })).toBe(true);
   });
   test("owner never sees it", () => {
     expect(canSeeStaffDuty({ isStaff: true, isOwner: true, isManager: true })).toBe(false);
@@ -11,11 +14,19 @@ describe("My duty visibility", () => {
   test("manager never sees it", () => {
     expect(canSeeStaffDuty({ isStaff: true, isManager: true })).toBe(false);
   });
-  test("staff without attendance access does not see it", () => {
-    expect(canSeeStaffDuty({ isStaff: true, grants: { customers: "view" } })).toBe(false);
-  });
   test("signed-out / customer does not see it", () => {
     expect(canSeeStaffDuty(null)).toBe(false);
+    expect(canSeeStaffDuty(undefined)).toBe(false);
     expect(canSeeStaffDuty({ grants: { attendance: "view" } })).toBe(false);
+  });
+});
+
+describe("Owner attendance entry", () => {
+  test("owner sees it", () => expect(canSeeOwnerAttendance({ isOwner: true, isManager: true })).toBe(true));
+  test("manager sees it", () => expect(canSeeOwnerAttendance({ isManager: true })).toBe(true));
+  test("staff does not", () => expect(canSeeOwnerAttendance({ isOwner: false, isManager: false })).toBe(false));
+  test("customer / signed-out does not", () => {
+    expect(canSeeOwnerAttendance(null)).toBe(false);
+    expect(canSeeOwnerAttendance({})).toBe(false);
   });
 });
