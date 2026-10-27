@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -37,6 +37,7 @@ async function readClockOutLocation(): Promise<{ latitude?: number; longitude?: 
 }
 
 export const Route = createFileRoute("/_authenticated/attendance")({
+  validateSearch: (search: Record<string, unknown>) => ({ section: typeof search.section === "string" ? search.section : "home" }),
   head: () => ({ meta: [{ title: "My Attendance — Flamio" }, { name: "robots", content: "noindex" }] }),
   component: MyAttendance,
 });
@@ -197,17 +198,17 @@ function MyAttendance() {
   const activeSession = sessions.find((s) => !s.clock_out_at);
   const pendingTasks = tasks.filter((t) => !["completed","verified","cancelled"].includes(t.status));
   const dateTime = (v: string) => new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-  const requestedSection = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("section") ?? "home" : "home";
+  const { section: requestedSection } = Route.useSearch();
   const activeSection = ["home", "shifts", "tasks", "history", "request"].includes(requestedSection) ? requestedSection : "home";
   const sectionTitles: Record<string, string> = { home: "My Duty", shifts: "Upcoming Shifts — Next 14 Days", tasks: "My Tasks", history: "Attendance History", request: "Submit a Request" };
   const sectionTitle = sectionTitles[activeSection] ?? sectionTitles.home;
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div>{activeSection !== "home" ? <a href="/attendance" className="mb-2 inline-flex text-sm font-medium text-primary hover:underline">← Back to My Duty</a> : null}<h2 className="font-display text-xl font-bold">{sectionTitle}</h2>{activeSection === "home" ? <p className="text-sm text-muted-foreground">Bangladesh time · Your records only</p> : null}</div>{activeSection === "home" ? <Button variant="outline" onClick={() => void query.refetch()}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button> : null}</div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div>{activeSection !== "home" ? <Link to="/attendance" search={{ section: "home" }} className="mb-2 inline-flex text-sm font-medium text-primary hover:underline">← Back to My Duty</Link> : null}<h2 className="font-display text-xl font-bold">{sectionTitle}</h2>{activeSection === "home" ? <p className="text-sm text-muted-foreground">Bangladesh time · Your records only</p> : null}</div>{activeSection === "home" ? <Button variant="outline" onClick={() => void query.refetch()}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button> : null}</div>
     {activeSection === "home" ? <div className="grid gap-3 sm:grid-cols-2">
-      <a href="/attendance?section=shifts" className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">Upcoming Shifts — Next 14 Days</p><p className="mt-1 text-sm text-muted-foreground">View your assigned upcoming shifts</p></a>
-      <a href="/attendance?section=tasks" className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">My Tasks</p><p className="mt-1 text-sm text-muted-foreground">View and complete your assigned tasks</p></a>
-      <a href="/attendance?section=history" className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">Attendance History</p><p className="mt-1 text-sm text-muted-foreground">Review your past attendance</p></a>
-      <a href="/attendance?section=request" className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">Submit a Request</p><p className="mt-1 text-sm text-muted-foreground">Submit leave or attendance requests</p></a>
+      <Link to="/attendance" search={{ section: "shifts" }} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">Upcoming Shifts — Next 14 Days</p><p className="mt-1 text-sm text-muted-foreground">View your assigned upcoming shifts</p></Link>
+      <Link to="/attendance" search={{ section: "tasks" }} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">My Tasks</p><p className="mt-1 text-sm text-muted-foreground">View and complete your assigned tasks</p></Link>
+      <Link to="/attendance" search={{ section: "history" }} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">Attendance History</p><p className="mt-1 text-sm text-muted-foreground">Review your past attendance</p></Link>
+      <Link to="/attendance" search={{ section: "request" }} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50"><p className="font-semibold">Submit a Request</p><p className="mt-1 text-sm text-muted-foreground">Submit leave or attendance requests</p></Link>
     </div> : null}
     {(activeSection === "home") && (
     <Card><CardContent className="space-y-4 p-4">
