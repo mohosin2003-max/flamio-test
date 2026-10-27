@@ -22,6 +22,16 @@ export function buildSelfiePath(userId: string, at: Date, id: string): string {
   return `${userId.toLowerCase()}/${dhakaDate(at)}/${at.getTime()}-${id.toLowerCase()}.jpg`;
 }
 
+export type SelfieCaptureTimeCheck = { ok: true } | { ok: false; reason: string };
+
+/** Reject stale or implausibly future capture times before storing photo evidence. */
+export function validateSelfieCaptureTime(capturedAt: unknown, now: number): SelfieCaptureTimeCheck {
+  if (typeof capturedAt !== "number" || !Number.isSafeInteger(capturedAt) || capturedAt <= 0) return { ok: false, reason: "Capture time is invalid. Take a new check-in photo." };
+  if (capturedAt > now + 60_000) return { ok: false, reason: "The device time is incorrect. Check your phone clock and retake the photo." };
+  if (now - capturedAt > SELFIE_MAX_AGE_MS) return { ok: false, reason: "Your check-in photo has expired. Take a new one." };
+  return { ok: true };
+}
+
 export type SelfiePathCheck = { ok: true; capturedAt: number } | { ok: false; reason: string };
 
 /** Verifies a path belongs to this user and is fresh. */
