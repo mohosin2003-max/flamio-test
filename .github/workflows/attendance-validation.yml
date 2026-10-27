@@ -41,6 +41,11 @@ jobs:
           src/lib/attendance-workflow.functions.ts
           src/lib/attendance-push.server.ts
           src/routes/_authenticated/owner.attendance.tsx
+          src/routes/_authenticated/owner.attendance-settings.tsx
+          src/routes/_authenticated/owner.attendance-reports.tsx
+          src/components/attendance/SelfieCaptureDialog.tsx
+          src/components/owner/AttendanceOwnerTools.tsx
+          src/lib/attendance.functions.ts
           src/routes/_authenticated/owner.attendance-management.tsx
           src/routes/_authenticated/owner.attendance-workflow.tsx
           src/routes/_authenticated/attendance.tsx
@@ -56,5 +61,5 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Test task photo validation
-        run: bun test src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs
+      - name: Test attendance photo and task-photo validation
+        run: bun test src/lib/attendance-selfie.test.mjs src/lib/attendance-selfie-scan.test.mjs src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs
