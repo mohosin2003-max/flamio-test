@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
-  STORE_CHECKLISTS, buildReport, canEditTask, incompleteTasks, normalizeChecklistItems, selfieCountsByRow, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks,
+  STORE_CHECKLISTS, buildReport, buildWeeklyWindows, canEditTask, incompleteTasks, normalizeChecklistItems, selfieCountsByRow, expandWeeklyDates, missedClockOuts, overlaps, overlongBreaks,
   retentionEligibleSessions, rollingCutoff, shiftWindow, validatePlannedBreak, type ReportPeriod,
 } from "@/lib/attendance-rules";
 
@@ -40,13 +40,15 @@ export const ownerCreateRecurringShifts = createServerFn({ method: "POST" })
     dutyRole: z.string().trim().max(80).nullable().optional(),
     fromDate: dateKey, toDate: dateKey, weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
     startTime: timeKey, endTime: timeKey, plannedBreakMinutes: z.number().int().min(0).max(240).default(0),
+    // Optional per-weekday times (0=Sun..6=Sat); missing days use the shared times above.
+    dayTimes: z.record(z.string().regex(/^[0-6]$/), z.object({ startTime: timeKey, endTime: timeKey, plannedBreakMinutes: z.number().int().min(0).max(240) })).optional(),
     preview: z.boolean().default(false),
   }).parse(input))
   .handler(async ({ data, context }) => {
     const db = await ownerDb(context.userId);
-    const dates = expandWeeklyDates(data.fromDate, data.toDate, data.weekdays);
-    const windows = dates.map((d) => ({ date: d, ...shiftWindow(d, data.startTime, data.endTime) }));
-    for (const w of windows) validatePlannedBreak(w.startAt, w.endAt, data.plannedBreakMinutes);
+    const perDay = data.dayTimes ? Object.fromEntries(Object.entries(data.dayTimes).map(([k, v]) => [Number(k), v])) : undefined;
+    const windows = buildWeeklyWindows(data.fromDate, data.toDate, data.weekdays,
+      { startTime: data.startTime, endTime: data.endTime, plannedBreakMinutes: data.plannedBreakMinutes }, perDay);
     const { data: role } = await db.from("user_roles").select("user_id").eq("user_id", data.userId).eq("role", "staff").maybeSingle();
     if (!role) throw new Error("Choose an existing staff account.");
     if (data.stationId) {
@@ -68,8 +70,8 @@ export const ownerCreateRecurringShifts = createServerFn({ method: "POST" })
     if (fresh.length) {
       const { error: insertError } = await db.from("attendance_shifts").insert(fresh.map((w) => ({
         user_id: data.userId, station_id: data.stationId ?? null, duty_role: data.dutyRole ?? null,
-        shift_date: w.date, start_time: data.startTime, end_time: data.endTime, starts_at: w.startAt, ends_at: w.endAt,
-        is_overnight: w.overnight, planned_break_minutes: data.plannedBreakMinutes, created_by: context.userId,
+        shift_date: w.date, start_time: w.startTime, end_time: w.endTime, starts_at: w.startAt, ends_at: w.endAt,
+        is_overnight: w.overnight, planned_break_minutes: w.plannedBreakMinutes, created_by: context.userId,
       })));
       if (insertError) { console.error("Recurring shift insert failed", insertError.message); throw new Error("Could not create the recurring shifts."); }
     }
