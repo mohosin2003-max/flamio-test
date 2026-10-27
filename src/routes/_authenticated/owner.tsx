@@ -137,7 +137,7 @@ function OwnerLayout() {
     );
   }
 
-  if (!access.data?.isOwner) {
+  if (!access.data?.hasWorkspaceAccess) {
     const canClaim = Boolean(access.data?.canClaim);
     return (
       <div className="mx-auto w-full max-w-5xl px-4 py-8">
