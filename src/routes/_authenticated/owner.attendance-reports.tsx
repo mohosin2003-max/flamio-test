@@ -53,7 +53,7 @@ function AttendanceReports() {
           <div className="flex items-end"><Button variant="outline" className="w-full" disabled={!report.data?.rows.length} onClick={() => report.data && downloadCsv(report.data.rows)}><Download className="mr-2 h-4 w-4" />CSV</Button></div>
         </div>
         {report.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : report.error ? <p className="text-sm text-destructive">{errMsg(report.error)}</p> : report.data?.rows.length ? (
-          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-1">Period</th><th className="p-1">Staff</th><th className="p-1">Worked</th><th className="p-1">Breaks</th><th className="p-1">Late</th><th className="p-1">Scheduled</th><th className="p-1">Overtime</th><th className="p-1">Selfie</th></tr></thead>
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-1">Period</th><th className="p-1">Staff</th><th className="p-1">Worked</th><th className="p-1">Breaks</th><th className="p-1">Late</th><th className="p-1">Scheduled</th><th className="p-1">Overtime</th><th className="p-1">Check-in photo</th></tr></thead>
             <tbody>{report.data.rows.map((r) => <tr key={`${r.period}-${r.userId}`} className="border-t"><td className="p-1">{r.period}</td><td className="p-1">{r.staffName}{r.openSessions ? ` (${r.openSessions} open)` : ""}</td><td className="p-1">{formatMinutes(r.workedMinutes)}</td><td className="p-1">{formatMinutes(r.breakMinutes)}</td><td className="p-1">{r.lateCount}× / {formatMinutes(r.lateMinutes)}</td><td className="p-1">{formatMinutes(r.scheduledMinutes)}</td><td className="p-1">{formatMinutes(r.overtimeMinutes)}</td><td className="p-1">{r.selfieCaptured > 0 ? <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">Captured {r.selfieCaptured}/{r.sessions}</span> : <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">None</span>}</td></tr>)}</tbody></table>
             <p className="mt-2 text-xs text-muted-foreground">Open sessions are excluded from worked time. Overtime is counted only for sessions linked to a scheduled shift.{report.data.truncated ? " Showing the first 5,000 sessions — narrow the dates." : ""}</p></div>
         ) : <p className="text-sm text-muted-foreground">No sessions in this range.</p>}
@@ -62,7 +62,7 @@ function AttendanceReports() {
       <Card><CardContent className="space-y-2 p-4">
         <h3 className="font-display font-bold">Not supported (manual review only)</h3>
         <ul className="list-disc space-y-1 pl-5 text-sm">
-          <li><b>Face matching: Not supported.</b> Clock-in selfies are photo evidence only; an Owner or Manager must review them by eye. No automatic identity check is done.</li>
+          <li>Each staff check-in requires a new camera photo. Photos are private evidence for Owner/Manager review.</li>
           <li><b>Background GPS: Not supported.</b> Location is checked only at the moment staff tap clock in/out with the app open. Staff are not tracked during the shift.</li>
           <li><b>Incomplete-task notifications: Not active.</b> Overdue badges show on the Tasks & Requests page only; nothing is sent automatically.</li>
         </ul>
@@ -75,7 +75,7 @@ function AttendanceReports() {
           <div className="space-y-2 text-sm">
             <p>Month <b>{monthly.data.window.label}</b> ({dt(monthly.data.window.startUtc)} → {dt(monthly.data.window.endUtc)})</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Eligible</p><p className="text-lg font-bold">{monthly.data.eligible.length}</p><p className="text-xs text-muted-foreground">{monthly.data.eligible.filter((e) => e.hasSelfie).length} with selfie</p></div>
+              <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Eligible</p><p className="text-lg font-bold">{monthly.data.eligible.length}</p><p className="text-xs text-muted-foreground">{monthly.data.eligible.filter((e) => e.hasSelfie).length} with photo</p></div>
               <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Protected</p><p className="text-lg font-bold">{monthly.data.protected.length}</p><p className="text-xs text-muted-foreground">{(["open", "auto_closed", "disputed", "pending_request"] as const).map((k) => `${k.replace("_", " ")}: ${monthly.data!.protected.filter((x) => x.reason === k).length}`).join(" · ")}</p></div>
               <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Skipped</p><p className="text-lg font-bold">{monthly.data.skipped.length}</p><p className="text-xs text-muted-foreground">outside month</p></div>
               <div className="rounded-md border p-2"><p className="text-xs text-muted-foreground">Failed</p><p className="text-lg font-bold">{monthly.data.failed.length}</p><p className="text-xs text-muted-foreground">unreadable data</p></div>
