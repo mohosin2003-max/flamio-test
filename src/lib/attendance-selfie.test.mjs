@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes } from "./attendance-selfie.ts";
+import { SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes, validateSelfieCaptureTime } from "./attendance-selfie.ts";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -24,6 +24,15 @@ describe("selfie path ownership", () => {
     expect(checkSelfiePath(undefined, A, at.getTime()).ok).toBe(false);
     expect(checkSelfiePath(`${A}/../${B}/x.jpg`, A, at.getTime()).ok).toBe(false);
     expect(checkSelfiePath(`${A}/2026-10-19/${at.getTime()}-${ID}.jpg`, A, at.getTime()).ok).toBe(false);
+  });
+});
+
+describe("camera capture timestamp", () => {
+  test("recent capture time accepted", () => expect(validateSelfieCaptureTime(at.getTime(), at.getTime() + 60_000).ok).toBe(true));
+  test("expired capture time rejected", () => expect(validateSelfieCaptureTime(at.getTime(), at.getTime() + SELFIE_MAX_AGE_MS + 1).ok).toBe(false));
+  test("invalid and future capture times rejected", () => {
+    expect(validateSelfieCaptureTime(Number.NaN, at.getTime()).ok).toBe(false);
+    expect(validateSelfieCaptureTime(at.getTime() + 60_001, at.getTime()).ok).toBe(false);
   });
 });
 

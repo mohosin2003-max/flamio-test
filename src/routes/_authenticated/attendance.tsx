@@ -267,7 +267,7 @@ function MyAttendance() {
             if (Date.now() - selfie.capturedAt > SELFIE_MAX_AGE_MS) { setSelfie(null); throw new Error("This photo has expired. Take a new check-in photo."); }
             if (!navigator.onLine) throw new Error("Check-in photo upload needs an internet connection. Try again when online.");
             setBusy(true);
-            try { const up = await uploadSelfie({ data: { imageBase64: selfie.base64 } }); payload.selfiePath = up.path; }
+            try { const up = await uploadSelfie({ data: { imageBase64: selfie.base64, capturedAt: selfie.capturedAt } }); payload.selfiePath = up.path; }
             finally { setBusy(false); }
           } catch (err) { toast.error(err instanceof Error ? err.message : "Clock-in failed"); return; }
           await punch("clock_in", () => clockIn({ data: payload }), payload, "Clocked in");
