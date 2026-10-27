@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getAccessProfile } from "@/lib/owner.server";
 import {
-  SELFIE_BUCKET, SELFIE_MAX_BYTES, SELFIE_SIGNED_URL_SECONDS, buildSelfiePath, decodeBase64, validateSelfieBytes,
+  SELFIE_BUCKET, SELFIE_MAX_BYTES, SELFIE_SIGNED_URL_SECONDS, buildSelfiePath, decodeBase64, validateSelfieBytes, validateSelfieCaptureTime,
 } from "@/lib/attendance-selfie";
 
 /**
@@ -16,6 +16,7 @@ export const staffUploadAttendanceSelfie = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({
     imageBase64: z.string().min(100).max(Math.ceil((SELFIE_MAX_BYTES * 4) / 3) + 8).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+    capturedAt: z.number().int().positive(),
   }).parse(input))
   .handler(async ({ data, context }) => {
     const access = await getAccessProfile(context.userId);
@@ -24,8 +25,11 @@ export const staffUploadAttendanceSelfie = createServerFn({ method: "POST" })
     try { bytes = decodeBase64(data.imageBase64); } catch { throw new Error("The photo could not be read. Retake it."); }
     const valid = validateSelfieBytes(bytes);
     if (!valid.ok) throw new Error(valid.reason);
-    const now = new Date();
-    const path = buildSelfiePath(context.userId, now, crypto.randomUUID());
+    const nowMs = Date.now();
+    const captureTime = validateSelfieCaptureTime(data.capturedAt, nowMs);
+    if (!captureTime.ok) throw new Error(captureTime.reason);
+    const capturedAt = new Date(data.capturedAt);
+    const path = buildSelfiePath(context.userId, capturedAt, crypto.randomUUID());
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
     const db = await untypedAdmin();
     const { error } = await db.storage.from(SELFIE_BUCKET).upload(path, bytes, { contentType: "image/jpeg", upsert: false });
@@ -33,7 +37,7 @@ export const staffUploadAttendanceSelfie = createServerFn({ method: "POST" })
       console.error("Attendance selfie upload failed", error.message);
       throw new Error("Check-in photo upload failed. Check your connection and retry.");
     }
-    return { path, capturedAt: now.toISOString() };
+    return { path, capturedAt: capturedAt.toISOString() };
   });
 
 /** Owner/Manager only: short-lived link to a session's clock-in selfie. */
