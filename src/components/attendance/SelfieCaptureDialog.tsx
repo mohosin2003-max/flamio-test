@@ -4,7 +4,7 @@ import { Camera, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-/** Captures a fresh front-camera JPEG. Evidence only — no face matching. */
+/** Captures a fresh JPEG directly from the live front-camera stream. */
 export function SelfieCaptureDialog({ open, onOpenChange, onCapture }: { open: boolean; onOpenChange: (v: boolean) => void; onCapture: (base64: string, previewUrl: string) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -45,13 +45,13 @@ export function SelfieCaptureDialog({ open, onOpenChange, onCapture }: { open: b
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>Clock-in selfie</DialogTitle>
-        <DialogDescription>Your photo is stored privately for Owner review and deleted under the retention rules. It is not face recognition.</DialogDescription>
+        <DialogTitle>Check-in photo</DialogTitle>
+        <DialogDescription>Take a new photo with your camera. It is stored privately for Owner review. Gallery uploads are not offered.</DialogDescription>
       </DialogHeader>
       {error ? <div className="space-y-2"><p className="text-sm text-destructive">{error}</p><Button variant="outline" onClick={() => setAttempt((a) => a + 1)}><RefreshCw className="mr-2 h-4 w-4" />Retry camera</Button></div> : null}
       {preview
-        ? <img src={preview} alt="Captured selfie preview" className="max-h-[55vh] w-full rounded-lg object-contain" />
-        : <video ref={videoRef} autoPlay playsInline muted aria-label="Front camera preview" className="max-h-[55vh] w-full -scale-x-100 rounded-lg bg-muted object-contain" />}
+        ? <img src={preview} alt="Captured check-in photo preview" className="max-h-[55vh] w-full rounded-lg object-contain" />
+        : <video ref={videoRef} autoPlay playsInline muted aria-label="Live front camera preview" className="max-h-[55vh] w-full -scale-x-100 rounded-lg bg-muted object-contain" />}
       <div className="flex flex-wrap gap-2">
         {preview
           ? <><Button variant="outline" onClick={() => setPreview(null)}>Retake</Button><Button onClick={() => { onCapture(preview.split(",")[1] ?? "", preview); onOpenChange(false); }}>Use this photo</Button></>
