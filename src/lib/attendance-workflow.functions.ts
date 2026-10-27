@@ -58,7 +58,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     const [settingsResult, sessionsResult, breaksResult, tasksResult, requestsResult, closedBreakResult] = await Promise.all([
       db.from("attendance_settings")
-        .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled")
+        .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled")
         .eq("id", true).maybeSingle(),
       db.from("attendance_sessions")
         .select("id, shift_id, duty_date, clock_in_at, clock_out_at, break_minutes, worked_minutes, late_minutes, status, verification_status")
@@ -140,12 +140,12 @@ export const staffClockIn = createServerFn({ method: "POST" })
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
-      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, attendance_alerts_enabled")
+      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
     let selfiePath: string | null = null;
-    {
-      // Mandatory check-in photo: fail closed and never accept a client-supplied path without checking owner, freshness and the stored object.
+    if (settings.selfie_verification_enabled) {
+      // When enabled, fail closed and require a fresh photo belonging to this staff account and stored in private evidence storage.
       const { selfieGate, checkSelfiePath, SELFIE_BUCKET } = await import("@/lib/attendance-selfie");
       const probe = await db.from("attendance_sessions").select("clock_in_selfie_path").limit(1);
       const gate = selfieGate({ columnsPresent: !probe.error });
@@ -156,9 +156,9 @@ export const staffClockIn = createServerFn({ method: "POST" })
       const folder = path.slice(0, path.lastIndexOf("/"));
       const file = path.slice(path.lastIndexOf("/") + 1);
       const { data: objects, error: listError } = await db.storage.from(SELFIE_BUCKET).list(folder, { search: file, limit: 2 });
-      if (listError || !objects?.some((o: { name: string }) => o.name === file)) throw new Error("Selfie upload was not found. Retake and retry.");
+      if (listError || !objects?.some((o: { name: string }) => o.name === file)) throw new Error("Check-in photo upload was not found. Retake and retry.");
       const { data: reused } = await db.from("attendance_sessions").select("id").eq("clock_in_selfie_path", path).limit(1);
-      if (reused?.length) throw new Error("This selfie was already used. Take a new one.");
+      if (reused?.length) throw new Error("This photo was already used. Take a new one.");
       selfiePath = path;
     }
     const now = new Date();
