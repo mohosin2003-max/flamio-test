@@ -251,13 +251,13 @@ function SelfieEvidenceButton({ sessionId }: { sessionId: string }) {
   const load = async () => {
     setBusy(true);
     try { const r = await getUrl({ data: { sessionId } }); setUrl(r.url); setNote(r.reason); }
-    catch (e) { setNote(e instanceof Error ? e.message : "Could not load selfie"); }
+    catch (e) { setNote(e instanceof Error ? e.message : "Could not load check-in photo"); }
     finally { setBusy(false); }
   };
   return <div className="mt-2 space-y-2">
-    {!url ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void load()}>{busy ? "Loading…" : "View clock-in selfie"}</Button> : <img src={url} alt="Clock-in selfie evidence" className="h-32 w-32 rounded-md object-cover" />}
+    {!url ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void load()}>{busy ? "Loading…" : "View check-in photo"}</Button> : <img src={url} alt="Check-in photo evidence" className="h-32 w-32 rounded-md object-cover" />}
     {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
-    {url ? <p className="text-xs text-muted-foreground">Photo evidence only. Face matching: NOT IMPLEMENTED. Link expires in 10 minutes.</p> : null}
+    {url ? <p className="text-xs text-muted-foreground">Private check-in photo evidence. Link expires in 10 minutes.</p> : null}
   </div>;
 }
 

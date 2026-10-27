@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FACE_MATCHING_STATUS, SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes } from "./attendance-selfie.ts";
+import { SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes } from "./attendance-selfie.ts";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -38,14 +38,13 @@ describe("selfie bytes", () => {
   });
 });
 
-describe("toggle and safe clock-out", () => {
-  test("disabled toggle requires nothing", () => expect(selfieGate({ selfieEnabled: false, columnsPresent: false }).required).toBe(false));
-  test("enabled without storage fails closed", () => expect(selfieGate({ selfieEnabled: true, columnsPresent: false })).toMatchObject({ required: true, available: false }));
-  test("enabled with storage is available", () => expect(selfieGate({ selfieEnabled: true, columnsPresent: true })).toMatchObject({ required: true, available: true }));
-  test("only clock-in needs a selfie", () => {
-    expect(selfieRequiredFor("clock_in", true)).toBe(true);
-    expect(selfieRequiredFor("clock_out", true)).toBe(false);
-    expect(selfieRequiredFor("break_end", true)).toBe(false);
+describe("mandatory check-in photo and safe clock-out", () => {
+  test("missing photo storage fails closed", () => expect(selfieGate({ columnsPresent: false })).toMatchObject({ required: true, available: false }));
+  test("configured photo storage is available", () => expect(selfieGate({ columnsPresent: true })).toMatchObject({ required: true, available: true }));
+  test("only clock-in needs a photo", () => {
+    expect(selfieRequiredFor("clock_in")).toBe(true);
+    expect(selfieRequiredFor("clock_out")).toBe(false);
+    expect(selfieRequiredFor("break_start")).toBe(false);
+    expect(selfieRequiredFor("break_end")).toBe(false);
   });
-  test("face matching is labelled not implemented", () => expect(FACE_MATCHING_STATUS).toBe("NOT_IMPLEMENTED"));
 });

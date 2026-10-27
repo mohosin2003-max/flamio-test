@@ -1,10 +1,7 @@
 /**
- * Pure, browser-safe rules for attendance selfie evidence.
- *
- * A selfie is photographic EVIDENCE only, reviewed by a person. It is NOT
- * biometric face matching: no face comparison, template or score exists.
+ * Pure, browser-safe rules for mandatory check-in photo evidence.
+ * Photos are stored as private evidence for human Owner/Manager review.
  */
-export const FACE_MATCHING_STATUS = "NOT_IMPLEMENTED" as const;
 export const SELFIE_BUCKET = "attendance-evidence";
 export const SELFIE_MAX_BYTES = 1_500_000;
 export const SELFIE_MIN_BYTES = 2_000;
@@ -29,14 +26,14 @@ export type SelfiePathCheck = { ok: true; capturedAt: number } | { ok: false; re
 
 /** Verifies a path belongs to this user and is fresh. */
 export function checkSelfiePath(path: unknown, userId: string, now: number): SelfiePathCheck {
-  if (typeof path !== "string" || path.length > 200) return { ok: false, reason: "Selfie evidence is missing." };
+  if (typeof path !== "string" || path.length > 200) return { ok: false, reason: "Check-in photo is missing." };
   const m = new RegExp(`^(${UUID})/(\\d{4}-\\d{2}-\\d{2})/(\\d{13})-(${UUID})\\.jpg$`).exec(path);
-  if (!m) return { ok: false, reason: "Selfie evidence is invalid." };
-  if (m[1] !== userId.toLowerCase()) return { ok: false, reason: "This selfie does not belong to you." };
+  if (!m) return { ok: false, reason: "Check-in photo is invalid." };
+  if (m[1] !== userId.toLowerCase()) return { ok: false, reason: "This photo does not belong to your account." };
   const capturedAt = Number(m[3]);
-  if (dhakaDate(new Date(capturedAt)) !== m[2]) return { ok: false, reason: "Selfie evidence is invalid." };
-  if (capturedAt > now + 60_000) return { ok: false, reason: "Selfie evidence is invalid." };
-  if (now - capturedAt > SELFIE_MAX_AGE_MS) return { ok: false, reason: "Your selfie has expired. Take a new one." };
+  if (dhakaDate(new Date(capturedAt)) !== m[2]) return { ok: false, reason: "Check-in photo is invalid." };
+  if (capturedAt > now + 60_000) return { ok: false, reason: "Check-in photo is invalid." };
+  if (now - capturedAt > SELFIE_MAX_AGE_MS) return { ok: false, reason: "Your check-in photo has expired. Take a new one." };
   return { ok: true, capturedAt };
 }
 
@@ -51,15 +48,14 @@ export function validateSelfieBytes(bytes: Uint8Array): { ok: true } | { ok: fal
 export type SelfieGate = { required: false } | { required: true; available: boolean; reason?: string };
 
 /** Fail closed: if the Owner requires selfies but storage/columns are not ready, block clock-in. */
-export function selfieGate(input: { selfieEnabled: boolean; columnsPresent: boolean }): SelfieGate {
-  if (!input.selfieEnabled) return { required: false };
-  if (!input.columnsPresent) return { required: true, available: false, reason: "Selfie verification is enabled but evidence storage is not set up. Ask the Owner to disable it." };
+export function selfieGate(input: { columnsPresent: boolean }): SelfieGate {
+  if (!input.columnsPresent) return { required: true, available: false, reason: "Check-in photo storage is not ready. Ask the Owner to contact support." };
   return { required: true, available: true };
 }
 
 /** Clock-out and break-end are never gated by a selfie, so staff can't be trapped on duty. */
-export function selfieRequiredFor(kind: "clock_in" | "clock_out" | "break_start" | "break_end", selfieEnabled: boolean): boolean {
-  return kind === "clock_in" && selfieEnabled;
+export function selfieRequiredFor(kind: "clock_in" | "clock_out" | "break_start" | "break_end"): boolean {
+  return kind === "clock_in";
 }
 
 export function decodeBase64(b64: string): Uint8Array {

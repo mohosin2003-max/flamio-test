@@ -140,16 +140,16 @@ export const staffClockIn = createServerFn({ method: "POST" })
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: settings, error: settingsError } = await db.from("attendance_settings")
-      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
+      .select("early_clock_in_minutes, late_grace_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (settingsError || !settings) throw new Error("Attendance settings are not available.");
     let selfiePath: string | null = null;
-    if (settings.selfie_verification_enabled) {
-      // Fail closed: never accept a client-supplied path without checking owner, freshness and the stored object.
+    {
+      // Mandatory check-in photo: fail closed and never accept a client-supplied path without checking owner, freshness and the stored object.
       const { selfieGate, checkSelfiePath, SELFIE_BUCKET } = await import("@/lib/attendance-selfie");
       const probe = await db.from("attendance_sessions").select("clock_in_selfie_path").limit(1);
-      const gate = selfieGate({ selfieEnabled: true, columnsPresent: !probe.error });
-      if (gate.required && !gate.available) throw new Error(gate.reason ?? "Selfie verification is unavailable.");
+      const gate = selfieGate({ columnsPresent: !probe.error });
+      if (gate.required && !gate.available) throw new Error(gate.reason ?? "Check-in photo storage is unavailable.");
       const check = checkSelfiePath(data.selfiePath, context.userId, Date.now());
       if (!check.ok) throw new Error(check.reason);
       const path = data.selfiePath as string;

@@ -250,8 +250,8 @@ export function OrphanSelfieScanCard() {
   };
   return (
     <Card><CardContent className="space-y-3 p-4">
-      <h3 className="font-display font-bold">Unused selfie check (preview only)</h3>
-      <p className="text-xs text-muted-foreground">Lists clock-in selfies older than 24 hours that no attendance record uses. Nothing is deleted.</p>
+      <h3 className="font-display font-bold">Unused check-in photo check (preview only)</h3>
+      <p className="text-xs text-muted-foreground">Lists check-in photos older than 24 hours that no attendance record uses. Nothing is deleted.</p>
       <Button size="sm" variant="outline" disabled={busy} onClick={() => void run()}><RefreshCw className="mr-2 h-4 w-4" />Run check</Button>
       {res ? <div className="space-y-1 text-sm">
         <p>Checked {res.scanned} · in use {res.referenced} · too recent {res.tooRecent} · skipped {res.ignored} · <span className="font-semibold">unused {res.candidates.length}</span>{res.truncated ? " · scan limit reached" : ""}</p>
