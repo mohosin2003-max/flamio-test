@@ -2,9 +2,9 @@ name: Attendance branch validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/attendance-master-safe]
   push:
-    branches: [feature/attendance-master-safe]
+    branches: [feature/attendance-master-safe, fix/my-duty-section-pages]
 
 permissions:
   contents: read
