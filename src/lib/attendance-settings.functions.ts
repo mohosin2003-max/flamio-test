@@ -13,8 +13,6 @@ const settingsInput = z.object({
   allowUnscheduledClockIn: z.boolean(),
   geofenceEnabled: z.boolean(),
   qrVerificationEnabled: z.boolean(),
-  // Fail closed until the selfie capture flow is implemented end-to-end.
-  selfieVerificationEnabled: z.literal(false),
   attendanceAlertsEnabled: z.boolean(),
 });
 
@@ -27,7 +25,7 @@ export const ownerUpdateAttendanceSettings = createServerFn({ method: "POST" })
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
     const db = await untypedAdmin();
     const { data: previous, error: readError } = await db.from("attendance_settings")
-      .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, selfie_verification_enabled, attendance_alerts_enabled")
+      .select("timezone, late_grace_minutes, early_clock_in_minutes, min_punch_gap_seconds, max_session_hours, allow_unscheduled_clock_in, geofence_enabled, qr_verification_enabled, attendance_alerts_enabled")
       .eq("id", true).maybeSingle();
     if (readError || !previous) throw new Error("Attendance settings were not found.");
     const updated = {
@@ -39,7 +37,6 @@ export const ownerUpdateAttendanceSettings = createServerFn({ method: "POST" })
       allow_unscheduled_clock_in: data.allowUnscheduledClockIn,
       geofence_enabled: data.geofenceEnabled,
       qr_verification_enabled: data.qrVerificationEnabled,
-      selfie_verification_enabled: data.selfieVerificationEnabled,
       attendance_alerts_enabled: data.attendanceAlertsEnabled,
       updated_by: context.userId,
       updated_at: new Date().toISOString(),
