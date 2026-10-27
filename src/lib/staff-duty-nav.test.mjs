@@ -30,3 +30,20 @@ describe("Owner attendance entry", () => {
     expect(canSeeOwnerAttendance({})).toBe(false);
   });
 });
+
+import { workspaceNavKinds } from "./permissions.ts";
+describe("Workspace bottom nav items", () => {
+  test("owner gets exactly Home, Messages, Orders, Account", () => {
+    expect(workspaceNavKinds({ isOwner: true, isManager: true, isStaff: true })).toEqual(["home", "messages", "orders", "account"]);
+  });
+  test("manager gets exactly four items, no duty/attendance", () => {
+    expect(workspaceNavKinds({ isManager: true, isStaff: true })).toEqual(["home", "messages", "orders", "account"]);
+  });
+  test("staff gets five items including My duty", () => {
+    expect(workspaceNavKinds({ isStaff: true })).toEqual(["home", "messages", "orders", "duty", "account"]);
+  });
+  test("customer / signed-out gets no workspace nav", () => {
+    expect(workspaceNavKinds(null)).toEqual([]);
+    expect(workspaceNavKinds({})).toEqual([]);
+  });
+});
