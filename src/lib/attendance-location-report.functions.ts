@@ -36,14 +36,20 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
       stationIds.length ? db.from("attendance_stations").select("id, name").in("id", stationIds) : Promise.resolve({ data: [], error: null }),
     ]);
     if (profilesRes.error || stationsRes.error) throw new Error("GPS report names could not be loaded.");
-    const names = new Map((profilesRes.data ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name?.trim() || "Unnamed staff"]));
-    const stations = new Map((stationsRes.data ?? []).map((s: { id: string; name: string }) => [s.id, s.name]));
+    const names = new Map<string, string>();
+    for (const profile of (profilesRes.data ?? []) as Array<{ id: string; full_name: string | null }>) {
+      names.set(profile.id, profile.full_name?.trim() || "Unnamed staff");
+    }
+    const stations = new Map<string, string>();
+    for (const station of (stationsRes.data ?? []) as Array<{ id: string; name: string }>) {
+      stations.set(station.id, station.name);
+    }
     const groups = new Map<string, Array<Record<string, unknown>>>();
     for (const row of rows) {
       const key = String(row.session_id);
       groups.set(key, [...(groups.get(key) ?? []), row]);
     }
-    const reportRows = rows.map((row, index) => {
+    const reportRows = rows.map((row) => {
       const type = String(row.event_type);
       const group = groups.get(String(row.session_id)) ?? [];
       const position = group.findIndex((e) => e.id === row.id);
