@@ -16,20 +16,49 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+
 class GpsForegroundService:Service(),LocationListener{
  private lateinit var lm:LocationManager
  private val channel="flamio_gps_test"
  private val network=Executors.newSingleThreadExecutor()
  private var lastSentAt=0L
- override fun onCreate(){super.onCreate()
+ override fun onCreate(){
+  super.onCreate()
   if(Build.VERSION.SDK_INT>=26)(getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(channel,"Flamio Attendance GPS",NotificationManager.IMPORTANCE_LOW))
-  startForeground(1001,notification("Connecting to TEST Attendance"));lm=getSystemService(Context.LOCATION_SERVICE) as LocationManager
+  startForeground(1001,notification("Connecting to TEST Attendance"))
+  lm=getSystemService(Context.LOCATION_SERVICE) as LocationManager
   if((getSharedPreferences("gps_test",Context.MODE_PRIVATE).getString("access_token","")?:"").isBlank()){add("AUTH_REQUIRED","Sign in with TEST Staff account first");stopSelf();return}
-  try{lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,10000L,5f,this,mainLooper);add("SERVICE_STARTED","Foreground GPS active; sending transitions to TEST Supabase")}catch(e:SecurityException){add("PERMISSION_ERROR",e.message?:"Permission denied");stopSelf()}catch(e:Exception){add("GPS_START_ERROR",e.message?:"Could not start GPS");stopSelf()}
+  try{
+   lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,10000L,5f,this,mainLooper)
+   add("SERVICE_STARTED","Foreground GPS active; TEST Attendance duty will be checked")
+  }catch(e:SecurityException){add("PERMISSION_ERROR",e.message?:"Permission denied");stopSelf()}
+   catch(e:Exception){add("GPS_START_ERROR",e.message?:"Could not start GPS");stopSelf()}
  }
- override fun onLocationChanged(location:Location){if(location.accuracy>50f){add("GPS_IGNORED","accuracy ${location.accuracy.toInt()}m exceeds 50m limit");return};val now=System.currentTimeMillis();if(now-lastSentAt<8000L)return;lastSentAt=now
+ override fun onLocationChanged(location:Location){
+  if(location.accuracy>50f){add("GPS_IGNORED","accuracy ${location.accuracy.toInt()}m exceeds 50m limit");return}
+  val now=System.currentTimeMillis()
+  if(now-lastSentAt<8000L)return
+  lastSentAt=now
   add("GPS_FIX","accuracy=${location.accuracy.toInt()}m; checking active Duty/geofence")
-  network.execute{try{val response=SupabaseGpsClient.send(this,location.latitude,location.longitude,location.accuracy,location.time);val j=JSONObject(response);val recorded=j.optBoolean("recorded",false);val event=j.optString("eventType",j.optString("reason","no_transition"));add(if(recorded)"EVENT_SAVED" else "NO_EVENT",event);(getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1001,notification(if(recorded)"TEST event saved: $event" else "GPS active · $event"))}catch(e:Exception){add("SEND_ERROR",e.message?:"Could not send GPS event");(getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1001,notification("GPS active · event send failed; check log"))}}
+  network.execute{
+   try{
+    val j=JSONObject(SupabaseGpsClient.send(this,location.latitude,location.longitude,location.accuracy,location.time))
+    val recorded=j.optBoolean("recorded",false)
+    val event=j.optString("eventType",j.optString("reason","no_transition"))
+    add(if(recorded)"EVENT_SAVED" else "NO_EVENT",event)
+    val stopReasons=setOf("attendance_disabled","geofence_disabled","no_active_shift","no_station_shift","station_unconfigured")
+    if(!recorded && event in stopReasons){
+     add("GPS_AUTO_STOP","Stopped tracking because Duty/geofence is not active: $event")
+     (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1001,notification("GPS stopped · $event"))
+     stopSelf()
+    }else{
+     (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1001,notification(if(recorded)"TEST event saved: $event" else "GPS active · $event"))
+    }
+   }catch(e:Exception){
+    add("SEND_ERROR",e.message?:"Could not send GPS event")
+    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1001,notification("GPS active · event send failed; check log"))
+   }
+  }
  }
  override fun onDestroy(){try{lm.removeUpdates(this)}catch(_:Exception){};network.shutdown();add("SERVICE_STOPPED","GPS service stopped");super.onDestroy()}
  override fun onBind(intent:Intent?):IBinder?=null
