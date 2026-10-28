@@ -91,6 +91,16 @@ class GpsQueueTest {
         assertEquals(1L, q.pending().first().capturedAt)
     }
 
+    @Test fun heldOverflowIsCountedWhenBoundedHistoryTrimsOldItems() {
+        val q = GpsQueue(MemStore()) { 0L }
+        for (i in 1..(GpsQueue.MAX_HELD + 1)) {
+            q.enqueue(fix(i.toLong()))
+            q.flush { SendOutcome.Rejected("permanent_$i") }
+        }
+        assertEquals(GpsQueue.MAX_HELD, q.held().size)
+        assertEquals(1L, q.heldOverflowCount())
+    }
+
     @Test fun replyClassification() {
         assertTrue(classifyGpsReply(200, "") is SendOutcome.Confirmed)
         assertTrue(classifyGpsReply(401, "invalid_session") is SendOutcome.AuthRequired)
