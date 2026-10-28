@@ -148,3 +148,42 @@ export async function sendAttendanceIssueAlert(input: {
   });
   return sent;
 }
+
+
+export async function sendGpsGeofenceAlert(input: {
+  sessionId: string;
+  userId: string;
+  eventType: "geofence_exit" | "reentry";
+  occurredAt: string;
+  distanceMeters: number;
+}): Promise<void> {
+  await bestEffort("gps-geofence-transition", async () => {
+    const recipients = await managerUserIds();
+    if (!recipients.length) return;
+    const name = await staffDisplayName(input.userId);
+    const exited = input.eventType === "geofence_exit";
+    const title = exited ? `Staff left attendance area: ${name}` : `Staff returned to attendance area: ${name}`;
+    const body = exited
+      ? `${name} was detected outside the assigned station geofence at ${new Date(input.occurredAt).toLocaleString("en-GB", { timeZone: "Asia/Dhaka" })}. Distance from site: about ${input.distanceMeters} m.`
+      : `${name} returned inside the assigned station geofence at ${new Date(input.occurredAt).toLocaleString("en-GB", { timeZone: "Asia/Dhaka" })}.`;
+    await notifyUsers(
+      recipients.map((userId) => ({
+        userId,
+        kind: "personal" as const,
+        title,
+        body,
+        status: exited ? "attendance_geofence_exit" : "attendance_geofence_return",
+        dedupeKey: `attendance:gps:${input.sessionId}:${input.eventType}:${input.occurredAt}:${userId}`,
+      })),
+      {
+        title,
+        body,
+        url: "/owner/attendance-reports",
+        tag: `attendance-gps-${input.sessionId}-${input.eventType}`,
+        urgency: exited ? "high" : "normal",
+        requireInteraction: exited,
+        vibrate: exited ? [300, 150, 300] : [150, 100, 150],
+      },
+    );
+  });
+}
