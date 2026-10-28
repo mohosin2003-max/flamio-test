@@ -57,13 +57,13 @@ export function findNextInsideEvent(events: GpsEvent[], exitEventId: string): Gp
 }
 
 export function summarizeGpsExits(rows: GpsExitSummaryRow[]) {
-  const summary = new Map<string, { userId: string; staffName: string; exits: number; completedTrips: number; outsideMinutes: number; unreturnedExits: number }>();
+  const summary = new Map<string, { userId: string; staffName: string; exits: number; completedTrips: number; outsideMinutes: number; currentlyOutside: number }>();
   for (const row of rows) {
     const item = summary.get(row.userId) ?? {
-      userId: row.userId, staffName: row.staffName, exits: 0, completedTrips: 0, outsideMinutes: 0, unreturnedExits: 0,
+      userId: row.userId, staffName: row.staffName, exits: 0, completedTrips: 0, outsideMinutes: 0, currentlyOutside: 0,
     };
     item.exits += 1;
-    if (row.outsideMinutes === null) item.unreturnedExits += 1;
+    if (row.outsideMinutes === null) item.currentlyOutside += 1;
     else {
       item.completedTrips += 1;
       item.outsideMinutes += row.outsideMinutes;
