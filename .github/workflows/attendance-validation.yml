@@ -53,6 +53,8 @@ jobs:
           src/lib/attendance-task-photo.ts
           src/lib/attendance-task-photo.functions.ts
           src/lib/attendance-task-photo.test.mjs
+          src/lib/attendance-location-events.functions.ts
+          src/lib/attendance-location-report.functions.ts
           src/lib/attendance-clockout.ts
           src/lib/attendance-clockout.test.mjs
           src/routeTree.gen.ts
