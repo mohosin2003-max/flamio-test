@@ -106,7 +106,7 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
           exitAt,
           returnAt,
           outsideMinutes,
-          status: returnAt ? "Returned" as const : "Still outside / no return event" as const,
+          status: returnAt ? "Returned" as const : "No return event recorded" as const,
           distanceMeters: Number(event.distance_from_site_m),
           accuracyMeters: Number(event.accuracy_m),
         };
