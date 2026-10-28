@@ -40,7 +40,7 @@ function AttendanceReports() {
     const columns = ["Staff", "Duty date", "Role", "Station", "Exit time (Dhaka)", "Return time (Dhaka)", "Outside minutes", "Status", "Distance from site (m)", "GPS accuracy (m)", "Clock in", "Clock out"] as const;
     const cell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '\"\"')}"`;
     const lines = [columns.map(cell).join(","), ...rows.map((r) => [r.staffName, r.dutyDate, r.shiftRole, r.stationName, dt(r.exitAt), r.returnAt ? dt(r.returnAt) : "", r.outsideMinutes, r.status, r.distanceMeters, r.accuracyMeters, r.clockInAt ? dt(r.clockInAt) : "", r.clockOutAt ? dt(r.clockOutAt) : ""].map(cell).join(","))];
-    const blob = new Blob(["\\uFEFF", lines.join("\\r\\n")], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `gps-exit-return-${range.from}-to-${range.to}.csv`; a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
