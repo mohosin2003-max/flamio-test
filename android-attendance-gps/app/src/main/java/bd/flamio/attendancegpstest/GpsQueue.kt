@@ -141,3 +141,10 @@ fun classifyGpsReply(status: Int, error: String): SendOutcome = when {
     status == 400 -> SendOutcome.Transient("http_400:" + error)
     else -> SendOutcome.Rejected("http_$status:" + error)
 }
+
+/** A successful HTTP response can still say that no transition was recorded. */
+fun classifyGpsTransitionResponse(recorded: Boolean, reason: String): SendOutcome = when {
+    recorded -> SendOutcome.Confirmed
+    reason == "no_transition" || reason == "out_of_order_reading" -> SendOutcome.Confirmed
+    else -> SendOutcome.Rejected(reason.ifBlank { "transition_not_recorded" })
+}
