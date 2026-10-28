@@ -73,7 +73,7 @@ class GpsForegroundService:Service(),LocationListener{
  private fun flush(){
   val result=try{queue.flush{fix->sendOne(fix)}}catch(e:Exception){add("QUEUE_ERROR",e.message?:"queue error");return}
   val pending=queue.pending().size
-  if(result.held>0)add("HELD","${result.held} reading(s) refused by server and kept in held log (total held ${queue.held().size})")
+  if(result.held>0)add("HELD","${result.held} reading(s) refused by server; held list ${queue.held().size}, older entries trimmed ${queue.heldOverflowCount()}")
   val stop=result.stoppedBy
   if(stop!=null&&stop!=lastStop)add("QUEUE_PAUSED","$stop · $pending waiting")
   lastStop=stop
