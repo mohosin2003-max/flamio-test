@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { findNextInsideEvent, getDhakaDateRange, summarizeGpsExits, type GpsEvent } from "@/lib/attendance-gps-rules";
 
 const dateKey = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -11,14 +12,12 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
     const { getAccessProfile } = await import("@/lib/owner.server");
     const access = await getAccessProfile(context.userId);
     if (!access.isOwner) throw new Error("Only the Owner can view GPS movement reports.");
-    if (data.toDate < data.fromDate) throw new Error("End date must be on or after the start date.");
 
     const { untypedAdmin } = await import("@/lib/untyped-db.server");
     const db = await untypedAdmin();
     // Date controls are Dhaka calendar dates. Use a half-open UTC interval so
     // the end date is fully included and the next day is excluded.
-    const startUtc = new Date(`${data.fromDate}T00:00:00+06:00`).toISOString();
-    const endExclusive = new Date(new Date(`${data.toDate}T00:00:00+06:00`).getTime() + 86_400_000).toISOString();
+    const { startUtc, endExclusiveUtc: endExclusive } = getDhakaDateRange(data.fromDate, data.toDate);
     const nowIso = new Date().toISOString();
     const { data: targetEvents, error } = await db.from("attendance_location_events")
       .select("id, user_id, session_id, station_id, event_type, occurred_at, distance_from_site_m, accuracy_m")
@@ -84,8 +83,7 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
       .map((event) => {
         const sessionId = String(event.session_id);
         const timeline = bySession.get(sessionId) ?? [];
-        const index = timeline.findIndex((item) => item.id === event.id);
-        const returnEvent = timeline.slice(index + 1).find((item) => item.event_type === "reentry" || item.event_type === "geofence_enter");
+        const returnEvent = findNextInsideEvent(timeline as GpsEvent[], String(event.id));
         const exitAt = String(event.occurred_at);
         const returnAt = returnEvent ? String(returnEvent.occurred_at) : null;
         const outsideMinutes = returnAt ? Math.max(0, Math.round((Date.parse(returnAt) - Date.parse(exitAt)) / 60000)) : null;
@@ -113,17 +111,10 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
       })
       .sort((a, b) => b.exitAt.localeCompare(a.exitAt));
 
-    const summaryMap = new Map<string, { userId: string; staffName: string; exits: number; completedTrips: number; outsideMinutes: number; currentlyOutside: number }>();
-    for (const row of rows) {
-      const item = summaryMap.get(row.userId) ?? { userId: row.userId, staffName: row.staffName, exits: 0, completedTrips: 0, outsideMinutes: 0, currentlyOutside: 0 };
-      item.exits++;
-      if (row.outsideMinutes === null) item.currentlyOutside++;
-      else { item.completedTrips++; item.outsideMinutes += row.outsideMinutes; }
-      summaryMap.set(row.userId, item);
-    }
+    const summary = summarizeGpsExits(rows.map((row) => ({ userId: row.userId, staffName: row.staffName, outsideMinutes: row.outsideMinutes })));
     return {
       rows,
-      summary: [...summaryMap.values()].sort((a, b) => a.staffName.localeCompare(b.staffName)),
+      summary,
       truncated: targets.length >= 10000 || history.length >= 10000,
     };
   });
