@@ -91,12 +91,28 @@ class GpsQueueTest {
         assertEquals(1L, q.pending().first().capturedAt)
     }
 
+    @Test fun heldOverflowIsCountedWhenBoundedHistoryTrimsOldItems() {
+        val q = GpsQueue(MemStore()) { 0L }
+        for (i in 1..(GpsQueue.MAX_HELD + 1)) {
+            q.enqueue(fix(i.toLong()))
+            q.flush { SendOutcome.Rejected("permanent_$i") }
+        }
+        assertEquals(GpsQueue.MAX_HELD, q.held().size)
+        assertEquals(1L, q.heldOverflowCount())
+    }
+
     @Test fun replyClassification() {
         assertTrue(classifyGpsReply(200, "") is SendOutcome.Confirmed)
         assertTrue(classifyGpsReply(401, "invalid_session") is SendOutcome.AuthRequired)
         assertTrue(classifyGpsReply(403, "staff_only") is SendOutcome.Forbidden)
         assertTrue(classifyGpsReply(400, "stale_gps_reading") is SendOutcome.Rejected)
+        assertTrue(classifyGpsReply(400, "no_matching_attendance_session") is SendOutcome.Rejected)
         assertTrue(classifyGpsReply(500, "event_save_failed") is SendOutcome.Transient)
         assertTrue(classifyGpsReply(429, "") is SendOutcome.Transient)
+        assertTrue(classifyGpsTransitionResponse(true, "geofence_exit") is SendOutcome.Confirmed)
+        assertTrue(classifyGpsTransitionResponse(false, "no_transition") is SendOutcome.Confirmed)
+        assertTrue(classifyGpsTransitionResponse(false, "out_of_order_reading") is SendOutcome.Confirmed)
+        assertTrue(classifyGpsTransitionResponse(false, "geofence_disabled") is SendOutcome.Rejected)
+        assertTrue(classifyGpsTransitionResponse(false, "no_active_shift") is SendOutcome.Rejected)
     }
 }

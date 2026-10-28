@@ -73,7 +73,7 @@ class GpsForegroundService:Service(),LocationListener{
  private fun flush(){
   val result=try{queue.flush{fix->sendOne(fix)}}catch(e:Exception){add("QUEUE_ERROR",e.message?:"queue error");return}
   val pending=queue.pending().size
-  if(result.held>0)add("HELD","${result.held} reading(s) refused by server and kept in held log (total held ${queue.held().size})")
+  if(result.held>0)add("HELD","${result.held} reading(s) refused by server; held list ${queue.held().size}, older entries trimmed ${queue.heldOverflowCount()}")
   val stop=result.stoppedBy
   if(stop!=null&&stop!=lastStop)add("QUEUE_PAUSED","$stop · $pending waiting")
   lastStop=stop
@@ -94,10 +94,11 @@ class GpsForegroundService:Service(),LocationListener{
    add(if(recorded)"EVENT_SAVED" else "NO_EVENT","$event @ ${time(fix.capturedAt)}")
    val stopReasons=setOf("attendance_disabled","geofence_disabled","no_active_shift","no_station_shift","station_unconfigured")
    if(!recorded&&event in stopReasons){
-    // Server accepted the reading but Duty is not active: stop only when nothing else is waiting.
+    // Keep this reading visible in the held list instead of silently deleting it.
+    // Stop tracking only after the pending queue has drained to this last item.
     if(queue.pending().size<=1){add("GPS_AUTO_STOP","Stopped tracking because Duty/geofence is not active: $event");stopSelf()}
    }
-   SendOutcome.Confirmed
+   classifyGpsTransitionResponse(recorded,event)
   }catch(e:GpsHttpException){classifyGpsReply(e.status,e.error)}
    catch(e:IOException){SendOutcome.Transient("network:"+(e.message?:"io"))}
    catch(e:Exception){SendOutcome.Transient("error:"+(e.message?:"unknown"))}

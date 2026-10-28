@@ -52,10 +52,12 @@ class GpsQueue(private val store: QueueStore, private val clock: () -> Long = Sy
         const val MAX_BACKOFF_MS = 5 * 60_000L
         private const val PENDING_KEY = "gps_queue_pending"
         private const val HELD_KEY = "gps_queue_held"
+        private const val HELD_OVERFLOW_KEY = "gps_queue_held_overflow"
     }
 
     fun pending(): List<QueuedFix> = decode(store.read(PENDING_KEY))
     fun held(): List<QueuedFix> = decode(store.read(HELD_KEY))
+    fun heldOverflowCount(): Long = store.read(HELD_OVERFLOW_KEY)?.toLongOrNull() ?: 0L
 
     /** Returns false when the reading is a duplicate or the queue is full (caller must log it). */
     fun enqueue(fix: QueuedFix): Boolean {
@@ -109,8 +111,15 @@ class GpsQueue(private val store: QueueStore, private val clock: () -> Long = Sy
 
     private fun hold(fix: QueuedFix, reason: String) {
         // Keep the reason and time; drop coordinates since they will never be sent again.
-        val list = (held() + fix.copy(latitude = 0.0, longitude = 0.0, heldReason = reason)).takeLast(MAX_HELD)
-        save(HELD_KEY, list)
+        val all = held() + fix.copy(latitude = 0.0, longitude = 0.0, heldReason = reason)
+        val overflow = (all.size - MAX_HELD).coerceAtLeast(0)
+        if (overflow > 0) {
+            val previous = heldOverflowCount()
+            store.write(HELD_OVERFLOW_KEY, (previous + overflow).toString())
+        }
+        // Keep the most recent held items for diagnosis, but persist a counter
+        // so older held records trimmed by the storage cap are never hidden.
+        save(HELD_KEY, all.takeLast(MAX_HELD))
     }
 
     private fun save(key: String, list: List<QueuedFix>) = store.write(key, encode(list))
@@ -136,8 +145,15 @@ fun classifyGpsReply(status: Int, error: String): SendOutcome = when {
     status in 200..299 -> SendOutcome.Confirmed
     status == 401 -> SendOutcome.AuthRequired(error.ifBlank { "unauthorized" })
     status == 403 -> SendOutcome.Forbidden(error.ifBlank { "forbidden" })
-    status == 400 && error in setOf("stale_gps_reading", "invalid_gps_reading") -> SendOutcome.Rejected(error)
+    status == 400 && error in setOf("stale_gps_reading", "invalid_gps_reading", "no_matching_attendance_session") -> SendOutcome.Rejected(error)
     status == 408 || status == 429 || status >= 500 -> SendOutcome.Transient("http_$status:" + error)
     status == 400 -> SendOutcome.Transient("http_400:" + error)
     else -> SendOutcome.Rejected("http_$status:" + error)
+}
+
+/** A successful HTTP response can still say that no transition was recorded. */
+fun classifyGpsTransitionResponse(recorded: Boolean, reason: String): SendOutcome = when {
+    recorded -> SendOutcome.Confirmed
+    reason == "no_transition" || reason == "out_of_order_reading" -> SendOutcome.Confirmed
+    else -> SendOutcome.Rejected(reason.ifBlank { "transition_not_recorded" })
 }

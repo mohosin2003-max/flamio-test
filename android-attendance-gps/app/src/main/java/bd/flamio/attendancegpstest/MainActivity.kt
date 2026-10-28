@@ -90,7 +90,7 @@ class MainActivity:Activity(){
  private fun showStatus(){
   val q=GpsForegroundService.queueFor(this)
   status.text="Session: "+(prefs.getString("user_email","").takeUnless{it.isNullOrBlank()}?:"not signed in")+
-   "\nWaiting to send: ${q.pending().size} · Refused/held: ${q.held().size}\n"+GpsForegroundService.readLog(this)
+   "\nWaiting to send: ${q.pending().size} · Refused/held: ${q.held().size} · Older held entries trimmed: ${q.heldOverflowCount()}\n"+GpsForegroundService.readLog(this)
  }
  private fun signIn(){val url=urlField.text.toString().trim();val key=apiKey.text.toString().trim();val user=email.text.toString().trim();val pass=password.text.toString();if(user.isBlank()||pass.isBlank()){status.text="Enter TEST Staff email and password.";return};status.text="Signing in to TEST Supabase…"
   executor.execute{try{val signed=SupabaseGpsClient.signIn(this,url,key,user,pass);runOnUiThread{password.setText("");status.text="Signed in: $signed\nStart a Duty in the TEST Attendance app, then start GPS here."}}catch(e:Exception){runOnUiThread{status.text="Sign-in failed: "+(e.message?:"Unknown error")}}}
