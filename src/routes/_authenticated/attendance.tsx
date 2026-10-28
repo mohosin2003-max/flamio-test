@@ -25,6 +25,7 @@ import {
 } from "@/lib/attendance-workflow.functions";
 import { browserQueueStorage, clearConfirmed, enqueue, flush, recoverInterruptedSync, isPermanentError, isTransientNetworkError, reconcileConflict, reconcileTaskConflict, isTaskKind, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
 import { breakStatus } from "@/lib/attendance-rules";
+import { lateNoticeMinutes } from "@/lib/attendance-late-notice";
 import { EXCEPTION_REASON_MAX, EXCEPTION_REASON_MIN, parseExceptionRequired } from "@/lib/attendance-clockout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -285,7 +286,9 @@ function MyAttendance() {
         const late = activeSession.late_minutes ?? 0;
         const elapsed = Math.max(0, Math.floor((now - Date.parse(activeSession.clock_in_at)) / 60000));
         const pending = queue.filter((q) => q.state !== "confirmed").length;
+        const lateNotice = lateNoticeMinutes({ isStaffDuty: staffDuty, hasScheduledShift: Boolean(shift), lateMinutes: activeSession.late_minutes });
         return <div className="space-y-2">
+          {lateNotice ? <div role="alert" className="rounded-lg border-2 border-destructive bg-destructive p-3 text-destructive-foreground"><p className="font-display text-base font-bold">Late Arrival Notice</p><p className="text-sm font-semibold">You are late by {lateNotice} minute{lateNotice === 1 ? "" : "s"}.</p></div> : null}
           <div className="flex flex-wrap items-center gap-2">
             <span className={"rounded-full px-2.5 py-1 text-xs font-semibold " + (activeBreak ? "bg-accent text-accent-foreground" : "bg-primary/15 text-primary")}>{activeBreak ? "On break" : "On duty"}</span>
             {shift ? <span className={"rounded-full px-2.5 py-1 text-xs font-semibold " + (late > 0 ? "bg-destructive/15 text-destructive" : "bg-muted text-foreground")}>{late > 0 ? `Late by ${late} min` : "On time"}</span> : <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">Unscheduled</span>}
