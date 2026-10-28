@@ -55,6 +55,8 @@ jobs:
           src/lib/attendance-task-photo.test.mjs
           src/lib/attendance-location-events.functions.ts
           src/lib/attendance-location-report.functions.ts
+          src/lib/attendance-gps-rules.ts
+          src/lib/attendance-gps-rules.test.mjs
           src/lib/attendance-clockout.ts
           src/lib/attendance-clockout.test.mjs
           src/routeTree.gen.ts
@@ -63,5 +65,5 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Test attendance photo and task-photo validation
-        run: bun test src/lib/attendance-selfie.test.mjs src/lib/attendance-selfie-scan.test.mjs src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs
+      - name: Test attendance and GPS regression suite
+        run: bun test src/lib/*.test.mjs

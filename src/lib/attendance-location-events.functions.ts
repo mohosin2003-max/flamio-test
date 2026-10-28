@@ -1,23 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getAccessProfile } from "@/lib/owner.server";
-
-const gpsInput = z.object({
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  accuracyMeters: z.number().min(0).max(50),
-  capturedAt: z.number().int().positive(),
-});
-
-function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const radians = (degrees: number) => (degrees * Math.PI) / 180;
-  const dLat = radians(lat2 - lat1);
-  const dLon = radians(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+import { distanceMeters, gpsInput } from "@/lib/attendance-gps-rules";
 
 /**
  * Records geofence transitions only. Coordinates are used transiently for
