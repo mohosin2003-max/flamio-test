@@ -22,7 +22,7 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
 
     const { data: events, error } = await db.from("attendance_location_events")
       .select("id, user_id, session_id, station_id, event_type, occurred_at, distance_from_site_m, accuracy_m")
-      .gte("occurred_at", startUtc).lt("occurred_at", endUtc)
+      .gte("occurred_at", startUtc).lte("occurred_at", new Date().toISOString())
       .order("occurred_at", { ascending: true }).limit(10000);
     if (error) {
       console.error("GPS movement report failed", error.message);
@@ -66,8 +66,9 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
         outsideMinutes, isUnreturned: type === "geofence_exit" && outsideMinutes === null,
       };
     });
+    const visibleRows = reportRows.filter((row) => row.occurredAt >= startUtc && row.occurredAt < endUtc);
     const summary = new Map<string, { staffName: string; exits: number; completedTrips: number; outsideMinutes: number; currentlyOutside: number }>();
-    for (const row of reportRows) {
+    for (const row of visibleRows) {
       const key = row.staffName;
       const item = summary.get(key) ?? { staffName: key, exits: 0, completedTrips: 0, outsideMinutes: 0, currentlyOutside: 0 };
       if (row.eventType === "geofence_exit") {
@@ -78,7 +79,7 @@ export const ownerGetGpsMovementReport = createServerFn({ method: "GET" })
       summary.set(key, item);
     }
     return {
-      rows: reportRows.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
+      rows: visibleRows.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
       summary: [...summary.values()].sort((a, b) => a.staffName.localeCompare(b.staffName)),
       truncated: rows.length >= 10000,
     };
