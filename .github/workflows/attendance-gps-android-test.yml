@@ -22,7 +22,7 @@ jobs:
           gradle-version: '8.11.1'
       - name: Build debug APK
         working-directory: android-attendance-gps
-        run: gradle assembleDebug
+        run: gradle testDebugUnitTest assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: flamio-attendance-gps-test-apk
