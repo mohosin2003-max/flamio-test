@@ -52,7 +52,7 @@ describe("Dhaka report date range", () => {
 });
 
 describe("exit/return pairing", () => {
-  const event = (id: string, event_type: string, occurred_at: string) => ({ id, event_type, occurred_at });
+  const event = (id, event_type, occurred_at) => ({ id, event_type, occurred_at });
   test("pairs exit with first subsequent re-entry", () => {
     const timeline = [
       event("a", "geofence_enter", "2026-10-28T10:00:00Z"),
