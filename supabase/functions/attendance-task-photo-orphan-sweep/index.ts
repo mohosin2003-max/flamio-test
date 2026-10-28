@@ -1,64 +1,51 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-type OrphanPath = { object_name: string };
-
-const projectUrl = Deno.env.get("SUPABASE_URL");
-const secretKeysRaw = Deno.env.get("SUPABASE_SECRET_KEYS");
-if (!projectUrl || !secretKeysRaw) throw new Error("Supabase Edge Function environment is incomplete.");
-const secretKeys = JSON.parse(secretKeysRaw) as Record<string, string>;
-const serviceKey = secretKeys.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-if (!serviceKey) throw new Error("Supabase service key is unavailable.");
-const admin = createClient(projectUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+type ObjectPath = { object_name: string };
+const url = Deno.env.get("SUPABASE_URL");
+const keysRaw = Deno.env.get("SUPABASE_SECRET_KEYS");
+if (!url || !keysRaw) throw new Error("Missing Supabase environment.");
+const keys = JSON.parse(keysRaw) as Record<string, string>;
+const key = keys.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+if (!key) throw new Error("Missing service key.");
+const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST required" }, 405);
-
-  const providedSecret = req.headers.get("x-attendance-cleanup-secret") ?? "";
-  if (!providedSecret) return json({ error: "Unauthorized" }, 401);
-  const { data: valid, error: verifyError } = await admin.rpc("attendance_verify_task_photo_cleanup_secret", {
-    _provided_secret: providedSecret,
-  });
-  if (verifyError || valid !== true) return json({ error: "Unauthorized" }, 401);
+  const supplied = req.headers.get("x-attendance-cleanup-secret") ?? "";
+  if (!supplied) return json({ error: "Unauthorized" }, 401);
+  const auth = await admin.rpc("attendance_verify_task_photo_cleanup_secret", { _provided_secret: supplied });
+  if (auth.error || auth.data !== true) return json({ error: "Unauthorized" }, 401);
 
   let dryRun = false;
-  try {
-    const body = await req.json();
-    dryRun = body?.dryRun === true;
-  } catch {
-    // An empty cron request body is treated as a normal scheduled run.
-  }
+  try { dryRun = (await req.json())?.dryRun === true; } catch { /* scheduled request may have empty body */ }
 
-  const { data, error } = await admin.rpc("attendance_list_orphan_task_photo_paths", { _limit: 500 });
-  if (error) {
-    console.error("Task photo orphan scan failed", error.message);
-    return json({ error: "Orphan scan failed" }, 500);
+  const [orphans, expired] = await Promise.all([
+    admin.rpc("attendance_list_orphan_task_photo_paths", { _limit: 500 }),
+    admin.rpc("attendance_list_expired_evidence_paths", { _limit: 500 }),
+  ]);
+  if (orphans.error || expired.error) {
+    console.error("Evidence scan failed", { orphanError: orphans.error?.message, expiredError: expired.error?.message });
+    return json({ error: "Evidence scan failed" }, 500);
   }
-  const paths = ((data ?? []) as OrphanPath[]).map((row) => row.object_name).filter((path) => typeof path === "string");
-  if (dryRun || paths.length === 0) {
-    console.info("Task photo orphan sweep preview", { candidates: paths.length, dryRun });
-    return json({ dryRun, candidates: paths.length, removed: 0, failed: 0 }, 200);
-  }
+  const orphanPaths = ((orphans.data ?? []) as ObjectPath[]).map(x => x.object_name).filter(x => typeof x === "string");
+  const expiredPaths = ((expired.data ?? []) as ObjectPath[]).map(x => x.object_name).filter(x => typeof x === "string");
+  const paths = [...new Set([...orphanPaths, ...expiredPaths])];
+  if (dryRun || paths.length === 0) return json({ dryRun, orphanCandidates: orphanPaths.length, expiredEvidenceCandidates: expiredPaths.length, candidates: paths.length, removed: 0, failed: 0 }, 200);
 
-  let removed = 0;
-  let failed = 0;
+  if (expiredPaths.length) {
+    const cleared = await admin.rpc("attendance_clear_expired_evidence_refs", { _paths: [...new Set(expiredPaths)] });
+    if (cleared.error) return json({ error: "Could not clear expired evidence references" }, 500);
+  }
+  let removed = 0, failed = 0;
   for (let i = 0; i < paths.length; i += 100) {
     const batch = paths.slice(i, i + 100);
-    const { error: removeError } = await admin.storage.from("attendance-evidence").remove(batch);
-    if (removeError) {
-      failed += batch.length;
-      console.error("Task photo orphan removal failed", { count: batch.length, message: removeError.message });
-    } else {
-      removed += batch.length;
-    }
+    const result = await admin.storage.from("attendance-evidence").remove(batch);
+    if (result.error) { failed += batch.length; console.error("Storage removal failed", result.error.message); }
+    else removed += batch.length;
   }
-
-  console.info("Task photo orphan sweep completed", { candidates: paths.length, removed, failed });
-  return json({ dryRun: false, candidates: paths.length, removed, failed }, failed ? 207 : 200);
+  return json({ dryRun: false, orphanCandidates: orphanPaths.length, expiredEvidenceCandidates: expiredPaths.length, candidates: paths.length, removed, failed }, failed ? 207 : 200);
 });
 
 function json(value: unknown, status: number) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
+  return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
