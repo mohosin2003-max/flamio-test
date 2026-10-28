@@ -41,7 +41,7 @@ describe("Dhaka report date range", () => {
   test("includes month/year boundaries without local-machine timezone dependence", () => {
     expect(getDhakaDateRange("2026-12-31", "2027-01-01")).toEqual({
       startUtc: "2026-12-30T18:00:00.000Z",
-      endExclusiveUtc: "2027-01-02T18:00:00.000Z",
+      endExclusiveUtc: "2027-01-01T18:00:00.000Z",
     });
   });
   test("rejects impossible dates and reversed ranges", () => {
