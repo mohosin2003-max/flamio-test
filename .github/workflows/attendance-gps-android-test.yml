@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths: ['android-attendance-gps/**', '.github/workflows/attendance-gps-android-test.yml']
   push:
-    branches: [feature/attendance-native-gps-apk]
+    branches: [main, feature/attendance-native-gps-apk, 'fix/**']
     paths: ['android-attendance-gps/**', '.github/workflows/attendance-gps-android-test.yml']
   workflow_dispatch:
 permissions:
