@@ -96,6 +96,7 @@ class GpsQueueTest {
         assertTrue(classifyGpsReply(401, "invalid_session") is SendOutcome.AuthRequired)
         assertTrue(classifyGpsReply(403, "staff_only") is SendOutcome.Forbidden)
         assertTrue(classifyGpsReply(400, "stale_gps_reading") is SendOutcome.Rejected)
+        assertTrue(classifyGpsReply(400, "no_matching_attendance_session") is SendOutcome.Rejected)
         assertTrue(classifyGpsReply(500, "event_save_failed") is SendOutcome.Transient)
         assertTrue(classifyGpsReply(429, "") is SendOutcome.Transient)
     }
