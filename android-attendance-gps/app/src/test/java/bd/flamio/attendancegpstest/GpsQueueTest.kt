@@ -99,5 +99,10 @@ class GpsQueueTest {
         assertTrue(classifyGpsReply(400, "no_matching_attendance_session") is SendOutcome.Rejected)
         assertTrue(classifyGpsReply(500, "event_save_failed") is SendOutcome.Transient)
         assertTrue(classifyGpsReply(429, "") is SendOutcome.Transient)
+        assertTrue(classifyGpsTransitionResponse(true, "geofence_exit") is SendOutcome.Confirmed)
+        assertTrue(classifyGpsTransitionResponse(false, "no_transition") is SendOutcome.Confirmed)
+        assertTrue(classifyGpsTransitionResponse(false, "out_of_order_reading") is SendOutcome.Confirmed)
+        assertTrue(classifyGpsTransitionResponse(false, "geofence_disabled") is SendOutcome.Rejected)
+        assertTrue(classifyGpsTransitionResponse(false, "no_active_shift") is SendOutcome.Rejected)
     }
 }
