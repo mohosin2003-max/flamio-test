@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ownerGetAttendanceReport, ownerDryRunMonthlyRetention } from "@/lib/attendance-extras.functions";
+import { ownerGetGpsMovementReport } from "@/lib/attendance-location-report.functions";
 import { reportToCsv, type ReportPeriod, type ReportRow } from "@/lib/attendance-rules";
 import { formatMinutes } from "@/lib/attendance-logic";
 import { dhakaDateKey } from "@/lib/dates";
@@ -28,9 +29,11 @@ function AttendanceReports() {
   const monthAgo = dhakaDateKey(new Date(Date.now() - 30 * 86400000));
   const getReport = useServerFn(ownerGetAttendanceReport);
   const dryRunMonthly = useServerFn(ownerDryRunMonthlyRetention);
+  const getGpsReport = useServerFn(ownerGetGpsMovementReport);
   const [range, setRange] = useState({ from: monthAgo, to: today, period: "daily" as ReportPeriod });
   const report = useQuery({ queryKey: ["att-report", range], queryFn: () => getReport({ data: { fromDate: range.from, toDate: range.to, period: range.period } }) });
   const monthly = useQuery({ queryKey: ["att-retention-monthly"], queryFn: () => dryRunMonthly() });
+  const gpsReport = useQuery({ queryKey: ["att-gps-movement-report", range.from, range.to], queryFn: () => getGpsReport({ data: { fromDate: range.from, toDate: range.to } }) });
   const downloadCsv = (rows: ReportRow[]) => {
     const blob = new Blob([reportToCsv(rows)], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -57,6 +60,24 @@ function AttendanceReports() {
             <tbody>{report.data.rows.map((r) => <tr key={`${r.period}-${r.userId}`} className="border-t"><td className="p-1">{r.period}</td><td className="p-1">{r.staffName}{r.openSessions ? ` (${r.openSessions} open)` : ""}</td><td className="p-1">{formatMinutes(r.workedMinutes)}</td><td className="p-1">{formatMinutes(r.breakMinutes)}</td><td className="p-1">{r.lateCount}× / {formatMinutes(r.lateMinutes)}</td><td className="p-1">{formatMinutes(r.scheduledMinutes)}</td><td className="p-1">{formatMinutes(r.overtimeMinutes)}</td><td className="p-1">{r.selfieCaptured > 0 ? <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">Captured {r.selfieCaptured}/{r.sessions}</span> : <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">None</span>}</td></tr>)}</tbody></table>
             <p className="mt-2 text-xs text-muted-foreground">Open sessions are excluded from worked time. Overtime is counted only for sessions linked to a scheduled shift.{report.data.truncated ? " Showing the first 5,000 sessions — narrow the dates." : ""}</p></div>
         ) : <p className="text-sm text-muted-foreground">No sessions in this range.</p>}
+      </CardContent></Card>
+
+      <Card><CardContent className="space-y-3 p-4">
+        <h3 className="font-display font-bold">GPS movement report</h3>
+        <p className="text-xs text-muted-foreground">Owner only · Bangladesh time · distance values are recorded by verified app events; no raw GPS coordinates are shown.</p>
+        {gpsReport.isLoading ? <p className="text-sm text-muted-foreground">Loading GPS events…</p> : gpsReport.error ? <p className="text-sm text-destructive">{errMsg(gpsReport.error)}</p> : (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Exit events</p><p className="text-xl font-bold">{gpsReport.data?.summary.reduce((n, r) => n + r.exits, 0) ?? 0}</p></div>
+              <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Completed trips</p><p className="text-xl font-bold">{gpsReport.data?.summary.reduce((n, r) => n + r.completedTrips, 0) ?? 0}</p></div>
+              <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Total outside</p><p className="text-xl font-bold">{formatMinutes(gpsReport.data?.summary.reduce((n, r) => n + r.outsideMinutes, 0) ?? 0)}</p></div>
+              <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Unreturned exits</p><p className="text-xl font-bold">{gpsReport.data?.summary.reduce((n, r) => n + r.currentlyOutside, 0) ?? 0}</p></div>
+            </div>
+            {gpsReport.data?.summary.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-2">Staff</th><th className="p-2">Exits</th><th className="p-2">Returned</th><th className="p-2">Outside total</th><th className="p-2">Unreturned</th></tr></thead><tbody>{gpsReport.data.summary.map((r) => <tr key={r.staffName} className="border-t"><td className="p-2">{r.staffName}</td><td className="p-2">{r.exits}</td><td className="p-2">{r.completedTrips}</td><td className="p-2">{formatMinutes(r.outsideMinutes)}</td><td className="p-2">{r.currentlyOutside}</td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No GPS movement events recorded for this date range yet.</p>}
+            {gpsReport.data?.rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-2">Time (Dhaka)</th><th className="p-2">Staff</th><th className="p-2">Event</th><th className="p-2">Station</th><th className="p-2">Distance</th><th className="p-2">Accuracy</th><th className="p-2">Outside duration</th></tr></thead><tbody>{gpsReport.data.rows.map((r) => <tr key={r.id} className="border-t"><td className="p-2">{dt(r.occurredAt)}</td><td className="p-2">{r.staffName}</td><td className="p-2">{r.eventType === "geofence_exit" ? "Left area" : r.eventType === "reentry" ? "Returned" : "Entered area"}</td><td className="p-2">{r.stationName}</td><td className="p-2">{Math.round(r.distanceMeters)} m</td><td className="p-2">±{Math.round(r.accuracyMeters)} m</td><td className="p-2">{r.eventType !== "geofence_exit" ? "—" : r.outsideMinutes == null ? "Not returned / no return event" : formatMinutes(r.outsideMinutes)}</td></tr>)}</tbody></table></div> : null}
+            {gpsReport.data?.truncated ? <p className="text-xs text-muted-foreground">Showing the first 10,000 events. Narrow the date range.</p> : null}
+          </>
+        )}
       </CardContent></Card>
 
       <Card><CardContent className="space-y-2 p-4">
