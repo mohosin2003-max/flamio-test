@@ -224,7 +224,7 @@ export const ownerListStoreChecklists = createServerFn({ method: "GET" })
     }));
   });
 
-/* ------------------------- Task edit / disable ------------------------- */
+/* ------------------------- Task edit / cancel -------------------------- */
 
 export const ownerListEditableTasks = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -287,7 +287,7 @@ export const ownerUpdateAttendanceTask = createServerFn({ method: "POST" })
     return { ok: true, addedItems: fresh.length };
   });
 
-/** Disable = mark cancelled. Rows and ticked items stay for history; nothing is deleted. */
+/** Cancel an open task without deleting it. Task and checklist rows remain for history. */
 export const ownerDisableAttendanceTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({ taskId: z.string().uuid(), reason: z.string().trim().max(500).nullable().optional() }).parse(input))
@@ -295,11 +295,12 @@ export const ownerDisableAttendanceTask = createServerFn({ method: "POST" })
     const db = await ownerDb(context.userId);
     const { data: task } = await db.from("attendance_tasks").select("id, assigned_to, status").eq("id", data.taskId).maybeSingle();
     if (!task) throw new Error("Task not found.");
-    if (!canEditTask(task.status)) throw new Error("Only open tasks can be disabled.");
-    const { error } = await db.from("attendance_tasks").update({ status: "cancelled", review_note: data.reason ?? "Disabled by Owner" })
-      .eq("id", task.id).in("status", ["pending", "in_progress", "rejected"]);
-    if (error) throw new Error("Could not disable the task.");
-    await auditOwner(db, context.userId, "task_disabled", { taskId: task.id, previousStatus: task.status, reason: data.reason ?? null }, task.assigned_to);
+    if (!canEditTask(task.status)) throw new Error("Only open tasks can be cancelled.");
+    const { data: updated, error } = await db.from("attendance_tasks").update({ status: "cancelled", review_note: data.reason ?? "Cancelled by Owner" })
+      .eq("id", task.id).in("status", ["pending", "in_progress", "rejected"]).select("id").maybeSingle();
+    if (error) throw new Error("Could not cancel the task.");
+    if (!updated) throw new Error("The task changed before cancellation. Refresh the list and try again.");
+    await auditOwner(db, context.userId, "task_cancelled", { taskId: task.id, previousStatus: task.status, reason: data.reason ?? "Cancelled by Owner" }, task.assigned_to);
     return { ok: true };
   });
 

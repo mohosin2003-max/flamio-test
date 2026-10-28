@@ -210,8 +210,8 @@ export function OpenTasksEditCard() {
   const keys = [["att-open-tasks"], ["att-checklists"], ["owner-attendance-management"]];
   return (
     <Card><CardContent className="space-y-3 p-4">
-      <h3 className="font-display font-bold">Open tasks — edit or disable</h3>
-      <p className="text-xs text-muted-foreground">Finished tasks can't be changed. Disabling keeps the task and ticked items in history. Automatic incomplete-task notifications are <b>not active yet</b> — the badges below are on-screen only.</p>
+      <h3 className="font-display font-bold">Open tasks — edit or cancel</h3>
+      <p className="text-xs text-muted-foreground">Completed tasks can't be changed. Cancelling removes an open task from staff's active list but preserves the task and checklist history; it is not a permanent delete. Automatic incomplete-task notifications are <b>not active yet</b> — the badges below are on-screen only.</p>
       {openTasks.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : openTasks.error ? <p className="text-sm text-destructive">{errMsg(openTasks.error)}</p> : openTasks.data?.tasks.length ? openTasks.data.tasks.map((t: OpenTask) => (
         <div key={t.id} className="space-y-2 rounded border p-2 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -220,7 +220,7 @@ export function OpenTasksEditCard() {
               {t.alert === "overdue" ? <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-xs text-destructive">Overdue</span> : t.alert === "due_today" ? <span className="rounded-full bg-accent px-2 py-0.5 text-xs">Due today</span> : null}
               <span className="text-xs text-muted-foreground">{t.status}</span>
               <Button size="sm" variant="outline" disabled={busy} onClick={() => setEdit({ id: t.id, title: t.title, description: t.description ?? "", dueDate: t.dueDate, priority: t.priority as "low", addItems: "" })}>Edit</Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm("Disable this task? It stays in history.")) void act(() => disableTask({ data: { taskId: t.id } }), "Task disabled", keys); }}>Disable</Button>
+              <Button size="sm" variant="destructive" disabled={busy} onClick={() => { if (window.confirm("Cancel task: " + t.title + "? It will be removed from the staff member’s open task list, but its task and checklist history will be kept. This cannot be undone here.")) void act(() => disableTask({ data: { taskId: t.id, reason: "Cancelled by Owner" } }), "Task cancelled; history preserved", keys); }}>Cancel task</Button>
             </span>
           </div>
           {edit?.id === t.id ? (
