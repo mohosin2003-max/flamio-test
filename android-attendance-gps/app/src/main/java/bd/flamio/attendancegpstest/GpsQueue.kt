@@ -136,7 +136,7 @@ fun classifyGpsReply(status: Int, error: String): SendOutcome = when {
     status in 200..299 -> SendOutcome.Confirmed
     status == 401 -> SendOutcome.AuthRequired(error.ifBlank { "unauthorized" })
     status == 403 -> SendOutcome.Forbidden(error.ifBlank { "forbidden" })
-    status == 400 && error in setOf("stale_gps_reading", "invalid_gps_reading") -> SendOutcome.Rejected(error)
+    status == 400 && error in setOf("stale_gps_reading", "invalid_gps_reading", "no_matching_attendance_session") -> SendOutcome.Rejected(error)
     status == 408 || status == 429 || status >= 500 -> SendOutcome.Transient("http_$status:" + error)
     status == 400 -> SendOutcome.Transient("http_400:" + error)
     else -> SendOutcome.Rejected("http_$status:" + error)
