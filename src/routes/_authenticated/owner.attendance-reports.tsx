@@ -34,6 +34,17 @@ function AttendanceReports() {
   const report = useQuery({ queryKey: ["att-report", range], queryFn: () => getReport({ data: { fromDate: range.from, toDate: range.to, period: range.period } }) });
   const monthly = useQuery({ queryKey: ["att-retention-monthly"], queryFn: () => dryRunMonthly() });
   const gpsReport = useQuery({ queryKey: ["att-gps-movement-report", range.from, range.to], queryFn: () => getGpsReport({ data: { fromDate: range.from, toDate: range.to } }) });
+  const downloadGpsCsv = () => {
+    const rows = gpsReport.data?.rows ?? [];
+    if (!rows.length) return;
+    const columns = ["Staff", "Duty date", "Role", "Station", "Exit time (Dhaka)", "Return time (Dhaka)", "Outside minutes", "Status", "Distance from site (m)", "GPS accuracy (m)", "Clock in", "Clock out"] as const;
+    const cell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '\"\"')}"`;
+    const lines = [columns.map(cell).join(","), ...rows.map((r) => [r.staffName, r.dutyDate, r.shiftRole, r.stationName, dt(r.exitAt), r.returnAt ? dt(r.returnAt) : "", r.outsideMinutes, r.status, r.distanceMeters, r.accuracyMeters, r.clockInAt ? dt(r.clockInAt) : "", r.clockOutAt ? dt(r.clockOutAt) : ""].map(cell).join(","))];
+    const blob = new Blob(["\\uFEFF", lines.join("\\r\\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `gps-exit-return-${range.from}-to-${range.to}.csv`; a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const downloadCsv = (rows: ReportRow[]) => {
     const blob = new Blob([reportToCsv(rows)], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -63,8 +74,8 @@ function AttendanceReports() {
       </CardContent></Card>
 
       <Card><CardContent className="space-y-3 p-4">
-        <h3 className="font-display font-bold">GPS movement report</h3>
-        <p className="text-xs text-muted-foreground">Owner only · Bangladesh time · distance values are recorded by verified app events; no raw GPS coordinates are shown.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-display font-bold">GPS exit/return report</h3><Button variant="outline" size="sm" disabled={!gpsReport.data?.rows.length} onClick={downloadGpsCsv}><Download className="mr-2 h-4 w-4" />Export GPS CSV</Button></div>
+        <p className="text-xs text-muted-foreground">Owner only · Bangladesh time · one row per exit; later return events are matched across the same duty session. No raw GPS coordinates are stored or shown.</p>
         {gpsReport.isLoading ? <p className="text-sm text-muted-foreground">Loading GPS events…</p> : gpsReport.error ? <p className="text-sm text-destructive">{errMsg(gpsReport.error)}</p> : (
           <>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -73,8 +84,8 @@ function AttendanceReports() {
               <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Total outside</p><p className="text-xl font-bold">{formatMinutes(gpsReport.data?.summary.reduce((n, r) => n + r.outsideMinutes, 0) ?? 0)}</p></div>
               <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Unreturned exits</p><p className="text-xl font-bold">{gpsReport.data?.summary.reduce((n, r) => n + r.currentlyOutside, 0) ?? 0}</p></div>
             </div>
-            {gpsReport.data?.summary.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-2">Staff</th><th className="p-2">Exits</th><th className="p-2">Returned</th><th className="p-2">Outside total</th><th className="p-2">Unreturned</th></tr></thead><tbody>{gpsReport.data.summary.map((r) => <tr key={r.staffName} className="border-t"><td className="p-2">{r.staffName}</td><td className="p-2">{r.exits}</td><td className="p-2">{r.completedTrips}</td><td className="p-2">{formatMinutes(r.outsideMinutes)}</td><td className="p-2">{r.currentlyOutside}</td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No GPS movement events recorded for this date range yet.</p>}
-            {gpsReport.data?.rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-2">Time (Dhaka)</th><th className="p-2">Staff</th><th className="p-2">Event</th><th className="p-2">Station</th><th className="p-2">Distance</th><th className="p-2">Accuracy</th><th className="p-2">Outside duration</th></tr></thead><tbody>{gpsReport.data.rows.map((r) => <tr key={r.id} className="border-t"><td className="p-2">{dt(r.occurredAt)}</td><td className="p-2">{r.staffName}</td><td className="p-2">{r.eventType === "geofence_exit" ? "Left area" : r.eventType === "reentry" ? "Returned" : "Entered area"}</td><td className="p-2">{r.stationName}</td><td className="p-2">{Math.round(r.distanceMeters)} m</td><td className="p-2">±{Math.round(r.accuracyMeters)} m</td><td className="p-2">{r.eventType !== "geofence_exit" ? "—" : r.outsideMinutes == null ? "Not returned / no return event" : formatMinutes(r.outsideMinutes)}</td></tr>)}</tbody></table></div> : null}
+            {gpsReport.data?.summary.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-2">Staff</th><th className="p-2">Exits</th><th className="p-2">Returned</th><th className="p-2">Outside total</th><th className="p-2">Still out</th></tr></thead><tbody>{gpsReport.data.summary.map((r) => <tr key={r.userId} className="border-t"><td className="p-2">{r.staffName}</td><td className="p-2">{r.exits}</td><td className="p-2">{r.completedTrips}</td><td className="p-2">{formatMinutes(r.outsideMinutes)}</td><td className="p-2">{r.currentlyOutside}</td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No staff exits were recorded in this date range.</p>}
+            {gpsReport.data?.rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="p-2">Exit time (Dhaka)</th><th className="p-2">Staff</th><th className="p-2">Duty / role</th><th className="p-2">Station</th><th className="p-2">Return time (Dhaka)</th><th className="p-2">Outside duration</th><th className="p-2">Exit distance</th><th className="p-2">GPS accuracy</th><th className="p-2">Status</th></tr></thead><tbody>{gpsReport.data.rows.map((r) => <tr key={r.id} className="border-t"><td className="p-2 whitespace-nowrap">{dt(r.exitAt)}</td><td className="p-2">{r.staffName}</td><td className="p-2">{r.shiftRole || "—"}{r.dutyDate ? <span className="block text-xs text-muted-foreground">{r.dutyDate}</span> : null}</td><td className="p-2">{r.stationName}</td><td className="p-2 whitespace-nowrap">{r.returnAt ? dt(r.returnAt) : "—"}</td><td className="p-2">{r.outsideMinutes == null ? "—" : formatMinutes(r.outsideMinutes)}</td><td className="p-2">{Math.round(r.distanceMeters)} m</td><td className="p-2">±{Math.round(r.accuracyMeters)} m</td><td className="p-2">{r.status}</td></tr>)}</tbody></table></div> : null}
             {gpsReport.data?.truncated ? <p className="text-xs text-muted-foreground">Showing the first 10,000 events. Narrow the date range.</p> : null}
           </>
         )}
