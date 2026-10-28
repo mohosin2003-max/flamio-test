@@ -60,7 +60,7 @@ export const staffRecordGpsTransition = createServerFn({ method: "POST" })
     if (previousError) throw new Error("Could not check the previous GPS event.");
 
     let eventType: "geofence_enter" | "geofence_exit" | "reentry" | null = null;
-    if (!previous) eventType = inside ? "geofence_enter" : "geofence_exit";
+    if (!previous) eventType = inside ? "geofence_enter" : null;
     else if (inside && previous.event_type === "geofence_exit") eventType = "reentry";
     else if (!inside && previous.event_type !== "geofence_exit") eventType = "geofence_exit";
     if (!eventType) return { recorded: false, reason: "no_transition" as const, inside };
