@@ -29,6 +29,7 @@ import { EXCEPTION_REASON_MAX, EXCEPTION_REASON_MIN, parseExceptionRequired } fr
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { isChimeMuted, playChime, setChimeMuted, type ChimeKind } from "@/lib/attendance-chimes";
+import { staffRecordGpsTransition } from "@/lib/attendance-location-events.functions";
 
 const QUEUE_LABEL: Record<QueueKind, string> = { clock_in: "Clock in", clock_out: "Clock out", break_start: "Break start", break_end: "Break end", task_item_toggle: "Checklist tick", task_complete: "Task completion" };
 
@@ -67,6 +68,7 @@ function MyAttendance() {
   const getWorkspace = useServerFn(staffGetAttendanceWorkspace);
   const clockIn = useServerFn(staffClockIn);
   const clockOut = useServerFn(staffClockOut);
+  const recordGpsTransition = useServerFn(staffRecordGpsTransition);
   const startBreak = useServerFn(staffStartBreak);
   const endBreak = useServerFn(staffEndBreak);
   const completeTask = useServerFn(staffCompleteAttendanceTask);
@@ -199,6 +201,43 @@ function MyAttendance() {
     }, d, reason ? "Clocked out — sent for Owner review" : "Clocked out");
   };
   const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000, enabled: staffDuty });
+  // Foreground-only geofence sampling. Android/browser background execution is not guaranteed.
+  useEffect(() => {
+    if (!staffDuty || !query.data?.settings?.geofence_enabled || !navigator.geolocation) return;
+    let active = true;
+    let inFlight = false;
+    const sample = async () => {
+      if (!active || inFlight || !navigator.onLine || document.visibilityState !== "visible") return;
+      inFlight = true;
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true, timeout: 12000, maximumAge: 0,
+          });
+        });
+        if (!active || position.coords.accuracy > 50) return;
+        await recordGpsTransition({ data: {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+          capturedAt: Math.round(position.timestamp),
+        } });
+      } catch {
+        // GPS permission, network, and transient failures must not block attendance actions.
+      } finally {
+        inFlight = false;
+      }
+    };
+    void sample();
+    const timer = window.setInterval(() => { void sample(); }, 60000);
+    const onVisible = () => { if (document.visibilityState === "visible") void sample(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [staffDuty, query.data?.settings?.geofence_enabled, recordGpsTransition]);
   const refresh = async () => qc.invalidateQueries({ queryKey: ["my-attendance-workspace"] });
   const run = async (operation: () => Promise<unknown>, success: string) => {
     setBusy(true);
