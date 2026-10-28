@@ -203,7 +203,7 @@ function MyAttendance() {
   const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000, enabled: staffDuty });
   // Foreground-only geofence sampling. Android/browser background execution is not guaranteed.
   useEffect(() => {
-    if (!staffDuty || !query.data?.settings?.geofence_enabled || !navigator.geolocation) return;
+    if (!staffDuty || !query.data?.settings?.geofence_enabled || !query.data.sessions.some((session) => !session.clock_out_at) || !navigator.geolocation) return;
     let active = true;
     let inFlight = false;
     const sample = async () => {
@@ -237,7 +237,7 @@ function MyAttendance() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [staffDuty, query.data?.settings?.geofence_enabled, recordGpsTransition]);
+  }, [staffDuty, query.data?.settings?.geofence_enabled, query.data?.sessions, recordGpsTransition]);
   const refresh = async () => qc.invalidateQueries({ queryKey: ["my-attendance-workspace"] });
   const run = async (operation: () => Promise<unknown>, success: string) => {
     setBusy(true);
