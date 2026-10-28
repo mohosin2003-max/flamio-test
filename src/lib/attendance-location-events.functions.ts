@@ -28,7 +28,7 @@ export const staffRecordGpsTransition = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => gpsInput.parse(input))
   .handler(async ({ data, context }) => {
     const access = await getAccessProfile(context.userId);
-    if (!access.isStaff || access.isOwner) throw new Error("Only staff accounts can record duty GPS events.");
+    if (!access.isStaff || access.isOwner || access.isManager) throw new Error("Only staff accounts can record duty GPS events.");
     const now = Date.now();
     if (data.capturedAt > now + 30_000 || now - data.capturedAt > 120_000) {
       throw new Error("GPS reading is stale. Refresh your location.");
