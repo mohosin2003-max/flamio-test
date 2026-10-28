@@ -52,10 +52,12 @@ class GpsQueue(private val store: QueueStore, private val clock: () -> Long = Sy
         const val MAX_BACKOFF_MS = 5 * 60_000L
         private const val PENDING_KEY = "gps_queue_pending"
         private const val HELD_KEY = "gps_queue_held"
+        private const val HELD_OVERFLOW_KEY = "gps_queue_held_overflow"
     }
 
     fun pending(): List<QueuedFix> = decode(store.read(PENDING_KEY))
     fun held(): List<QueuedFix> = decode(store.read(HELD_KEY))
+    fun heldOverflowCount(): Long = store.read(HELD_OVERFLOW_KEY)?.toLongOrNull() ?: 0L
 
     /** Returns false when the reading is a duplicate or the queue is full (caller must log it). */
     fun enqueue(fix: QueuedFix): Boolean {
@@ -109,8 +111,15 @@ class GpsQueue(private val store: QueueStore, private val clock: () -> Long = Sy
 
     private fun hold(fix: QueuedFix, reason: String) {
         // Keep the reason and time; drop coordinates since they will never be sent again.
-        val list = (held() + fix.copy(latitude = 0.0, longitude = 0.0, heldReason = reason)).takeLast(MAX_HELD)
-        save(HELD_KEY, list)
+        val all = held() + fix.copy(latitude = 0.0, longitude = 0.0, heldReason = reason)
+        val overflow = (all.size - MAX_HELD).coerceAtLeast(0)
+        if (overflow > 0) {
+            val previous = heldOverflowCount()
+            store.write(HELD_OVERFLOW_KEY, (previous + overflow).toString())
+        }
+        // Keep the most recent held items for diagnosis, but persist a counter
+        // so older held records trimmed by the storage cap are never hidden.
+        save(HELD_KEY, all.takeLast(MAX_HELD))
     }
 
     private fun save(key: String, list: List<QueuedFix>) = store.write(key, encode(list))
