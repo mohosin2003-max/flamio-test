@@ -67,7 +67,12 @@ Deno.serve(async (req: Request) => {
     ) return reply(400, { error: "invalid_gps_reading" });
 
     const now = Date.now();
-    if (ts > now + 30000 || now - ts > 120000) {
+    // Accept delayed readings for up to 24 hours, but only when the timestamp
+    // belongs to this staff member's actual attendance session (validated below).
+    // This bounded window supports offline queue recovery without accepting
+    // arbitrarily old client timestamps.
+    const MAX_QUEUED_AGE_MS = 24 * 60 * 60 * 1000;
+    if (ts > now + 30000 || now - ts > MAX_QUEUED_AGE_MS) {
       return reply(400, { error: "stale_gps_reading" });
     }
 
@@ -84,16 +89,27 @@ Deno.serve(async (req: Request) => {
       return reply(200, { recorded: false, reason: "geofence_disabled" });
     }
 
-    const { data: session, error: sessionError } = await db
+    const capturedAt = new Date(ts).toISOString();
+    // Queued GPS fixes may arrive after clock-out. Match the captured timestamp
+    // to the staff member's real session window instead of requiring a currently
+    // open session, so valid delayed exit/return events are not discarded.
+    const { data: sessions, error: sessionError } = await db
       .from("attendance_sessions")
-      .select("id,shift_id")
+      .select("id,shift_id,clock_in_at,clock_out_at")
       .eq("user_id", uid)
-      .is("clock_out_at", null)
+      .lte("clock_in_at", capturedAt)
       .order("clock_in_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(20);
     if (sessionError) return reply(500, { error: "active_duty_check_failed" });
-    if (!session?.shift_id) return reply(200, { recorded: false, reason: "no_active_shift" });
+    const session = (sessions ?? []).find((candidate: {
+      id: string;
+      shift_id: string | null;
+      clock_in_at: string;
+      clock_out_at: string | null;
+    }) => !candidate.clock_out_at || Date.parse(candidate.clock_out_at) >= ts);
+    if (!session?.shift_id) {
+      return reply(400, { error: "no_matching_attendance_session" });
+    }
 
     const { data: shift, error: shiftError } = await db
       .from("attendance_shifts")
