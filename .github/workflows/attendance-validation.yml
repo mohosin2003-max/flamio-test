@@ -53,6 +53,8 @@ jobs:
           src/lib/attendance-task-photo.ts
           src/lib/attendance-task-photo.functions.ts
           src/lib/attendance-task-photo.test.mjs
+          src/lib/attendance-photo-sweep-handler.test.mjs
+          supabase/functions/attendance-task-photo-orphan-sweep/handler.ts
           src/lib/attendance-location-events.functions.ts
           src/lib/attendance-location-report.functions.ts
           src/lib/attendance-clockout.ts
@@ -66,7 +68,7 @@ jobs:
       - name: TypeScript check with native preview compiler
         run: bunx --package @typescript/native-preview tsgo --noEmit
       - name: Test attendance photo and task-photo validation
-        run: bun test src/lib/attendance-selfie.test.mjs src/lib/attendance-selfie-scan.test.mjs src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs src/lib/attendance-photo-sweep.test.mjs
+        run: bun test src/lib/attendance-selfie.test.mjs src/lib/attendance-selfie-scan.test.mjs src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs src/lib/attendance-photo-sweep.test.mjs src/lib/attendance-photo-sweep-handler.test.mjs
       - name: Setup Deno for Edge Function validation
         uses: denoland/setup-deno@v2
         with:
