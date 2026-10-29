@@ -17,8 +17,17 @@ Deno.serve(async (req: Request) => {
   const auth = await admin.rpc("attendance_verify_task_photo_cleanup_secret", { _provided_secret: supplied });
   if (auth.error || auth.data !== true) return json({ error: "Unauthorized" }, 401);
 
-  let dryRun = false;
-  try { dryRun = (await req.json())?.dryRun === true; } catch { /* scheduled request may have empty body */ }
+  // Fail closed: malformed or missing mode must never trigger deletion.
+  let body: { dryRun?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Valid JSON body required; set dryRun to true or false" }, 400);
+  }
+  if (body?.dryRun !== true && body?.dryRun !== false) {
+    return json({ error: "dryRun must be explicitly true or false" }, 400);
+  }
+  const dryRun = body.dryRun;
 
   const [orphans, expired] = await Promise.all([
     admin.rpc("attendance_list_orphan_task_photo_paths", { _limit: 500 }),
