@@ -79,4 +79,22 @@ describe("evidence sweep HTTP handler safety", () => {
     expect(r.status).toBe(200); expect(await r.json()).toMatchObject({ candidates: 0, removed: 0, failed: 0 });
     expect(s.calls.sweep).toBe(0);
   });
+  test("retry after partial response re-runs sweep and can recover", async () => {
+    let attempts = 0;
+    const s = setup({
+      async sweep() {
+        attempts++;
+        if (attempts === 1) return { ...resultOk, removed: 1, failed: 1, partial: true };
+        return resultOk;
+      },
+    });
+    const first = await s.handler(s.request(JSON.stringify({ dryRun: false })));
+    expect(first.status).toBe(207);
+    expect(await first.json()).toMatchObject({ removed: 1, failed: 1 });
+    const retry = await s.handler(s.request(JSON.stringify({ dryRun: false })));
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({ removed: 2, failed: 0, refsCleared: 1 });
+    expect(attempts).toBe(2);
+  });
+
 });
