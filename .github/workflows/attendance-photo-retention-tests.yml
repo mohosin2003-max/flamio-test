@@ -23,4 +23,4 @@ jobs:
       - name: Type-check pure sweep helper
         run: deno check supabase/functions/attendance-task-photo-orphan-sweep/sweep.ts
       - name: Run mock-only safety tests
-        run: deno test --allow-none supabase/functions/attendance-task-photo-orphan-sweep/sweep.test.ts
+        run: deno test --no-check supabase/functions/attendance-task-photo-orphan-sweep/sweep.test.ts
