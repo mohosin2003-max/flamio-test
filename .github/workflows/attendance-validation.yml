@@ -63,6 +63,8 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: TypeScript check with native preview compiler
+        run: bunx --package @typescript/native-preview tsgo --noEmit
       - name: Test attendance photo and task-photo validation
         run: bun test src/lib/attendance-selfie.test.mjs src/lib/attendance-selfie-scan.test.mjs src/lib/attendance-task-photo.test.mjs src/lib/attendance-clockout.test.mjs src/lib/attendance-photo-sweep.test.mjs
       - name: Setup Deno for Edge Function validation
