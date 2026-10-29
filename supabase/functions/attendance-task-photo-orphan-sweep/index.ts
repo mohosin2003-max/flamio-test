@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { runEvidenceSweep } from "./sweep.ts";
 
 type ObjectPath = { object_name: string };
 const url = Deno.env.get("SUPABASE_URL");
@@ -32,18 +33,23 @@ Deno.serve(async (req: Request) => {
   const paths = [...new Set([...orphanPaths, ...expiredPaths])];
   if (dryRun || paths.length === 0) return json({ dryRun, orphanCandidates: orphanPaths.length, expiredEvidenceCandidates: expiredPaths.length, candidates: paths.length, removed: 0, failed: 0 }, 200);
 
-  if (expiredPaths.length) {
-    const cleared = await admin.rpc("attendance_clear_expired_evidence_refs", { _paths: [...new Set(expiredPaths)] });
-    if (cleared.error) return json({ error: "Could not clear expired evidence references" }, 500);
-  }
-  let removed = 0, failed = 0;
-  for (let i = 0; i < paths.length; i += 100) {
-    const batch = paths.slice(i, i + 100);
-    const result = await admin.storage.from("attendance-evidence").remove(batch);
-    if (result.error) { failed += batch.length; console.error("Storage removal failed", result.error.message); }
-    else removed += batch.length;
-  }
-  return json({ dryRun: false, orphanCandidates: orphanPaths.length, expiredEvidenceCandidates: expiredPaths.length, candidates: paths.length, removed, failed }, failed ? 207 : 200);
+  // Storage first; references are cleared only for batches Storage confirmed.
+  const r = await runEvidenceSweep(orphanPaths, expiredPaths, {
+    async removeFiles(batch) {
+      const res = await admin.storage.from("attendance-evidence").remove(batch);
+      if (res.error) console.error("Storage removal failed", res.error.message);
+      return { error: res.error?.message ?? null };
+    },
+    async clearExpiredRefs(batch) {
+      const res = await admin.rpc("attendance_clear_expired_evidence_refs", { _paths: batch });
+      if (res.error) console.error("Clearing expired evidence references failed", res.error.message);
+      return { error: res.error?.message ?? null };
+    },
+  });
+  return json({
+    dryRun: false, orphanCandidates: orphanPaths.length, expiredEvidenceCandidates: expiredPaths.length,
+    candidates: r.candidates, removed: r.removed, failed: r.failed, refsCleared: r.refsCleared, refClearFailed: r.refClearFailed,
+  }, r.partial ? 207 : 200);
 });
 
 function json(value: unknown, status: number) {
