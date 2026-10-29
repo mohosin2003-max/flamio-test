@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { createEvidenceSweepHandler, type EvidenceSweepDependencies } from "../../supabase/functions/attendance-task-photo-orphan-sweep/handler.ts";
+import { createEvidenceSweepHandler } from "../../supabase/functions/attendance-task-photo-orphan-sweep/handler.ts";
 const secret = "test-secret";
 const orphanPaths = ["u/tasks/task/photo.jpg"];
 const expiredPaths = ["u/selfie/old.jpg"];
 const resultOk = { candidates: 2, removed: 2, failed: 0, refsCleared: 1, refClearFailed: 0, partial: false };
-function setup(overrides: Partial<EvidenceSweepDependencies> = {}) {
+function setup(overrides = {}) {
   const calls = { authorize: 0, list: 0, sweep: 0 };
-  const deps: EvidenceSweepDependencies = {
+  const deps = {
     async authorize(value) { calls.authorize++; return value === secret; },
     async listCandidates() { calls.list++; return { orphanPaths, expiredPaths }; },
     async sweep() { calls.sweep++; return resultOk; },
