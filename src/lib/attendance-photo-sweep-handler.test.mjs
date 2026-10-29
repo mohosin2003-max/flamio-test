@@ -13,7 +13,7 @@ function setup(overrides = {}) {
     ...overrides,
   };
   const handler = createEvidenceSweepHandler(deps);
-  const request = (body: string, method = "POST", withSecret = true) => new Request("https://test.invalid/sweep", {
+  const request = (body, method = "POST", withSecret = true) => new Request("https://test.invalid/sweep", {
     method, headers: { ...(withSecret ? { "x-attendance-cleanup-secret": secret } : {}), "content-type": "application/json" },
     ...(method === "GET" ? {} : { body }),
   });
