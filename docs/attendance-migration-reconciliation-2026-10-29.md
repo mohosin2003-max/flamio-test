@@ -16,20 +16,20 @@ The TEST migration ledger returned 21 records. The repository had 40 migration S
 
 | TEST ledger version | TEST ledger name | Source file / disposition |
 |---|---|---|
-| 20261016074823 | attendance_security_verification_extension_20261016 | `20261016120000_attendance_security_verification_extension.sql` — version/name drift; semantic source match |
-| 20261016075244 | attendance_helper_acl_hardening_20261016 | `20261016130000_attendance_helper_acl_hardening.sql` — version/name drift; semantic source match |
-| 20261016080435 | attendance_qr_station_binding_20261016 | `20261016140000_attendance_qr_station_binding.sql` — version/name drift; semantic source match |
-| 20261016081103 | attendance_request_review_service_bridge_20261016 | `20261016150000_attendance_request_review_service_bridge.sql` — version/name drift; semantic source match |
+| 20261016074823 | attendance_security_verification_extension_20261016 | `20261016074823_attendance_security_verification_extension_20261016.sql` — version/name drift; semantic source match |
+| 20261016075244 | attendance_helper_acl_hardening_20261016 | `20261016075244_attendance_helper_acl_hardening_20261016.sql` — version/name drift; semantic source match |
+| 20261016080435 | attendance_qr_station_binding_20261016 | `20261016080435_attendance_qr_station_binding_20261016.sql` — version/name drift; semantic source match |
+| 20261016081103 | attendance_request_review_service_bridge_20261016 | `20261016081103_attendance_request_review_service_bridge_20261016.sql` — version/name drift; semantic source match |
 | 20261016134805 | create_staff_permissions_and_owner_invites | Related schema source is present across the legacy baseline files `20260914214536_63e4cfc8-3207-45ed-9bad-722002357bd8.sql` and `20260915033358_6ed0d102-d855-42f3-bf5a-1f50f2f58b2e.sql`; the original combined ledger body was not recovered byte-for-byte |
-| 20261016153910 | attendance_rpc_acl_hardening | `20261016160000_attendance_rpc_acl_hardening.sql` — version drift; name/source match |
+| 20261016153910 | attendance_rpc_acl_hardening | `20261016153910_attendance_rpc_acl_hardening.sql` — version drift; name/source match |
 | 20261017170155 | attendance_stale_session_recovery | `20261017170155_attendance_stale_session_recovery.sql` |
 | 20261019191216 | attendance_feature_toggles | `20261019191216_attendance_feature_toggles.sql` — recovered from checked-in docs and TEST schema |
 | 20261020075908 | attendance_selfie_evidence | `20261020075908_attendance_selfie_evidence.sql` — recovered from checked-in docs and TEST schema |
 | 20261020080029 | create_private_attendance_evidence_bucket | `20261020080029_create_private_attendance_evidence_bucket.sql` — recovered from verified TEST bucket settings |
 | 20261023173648 | attendance_phase_b_task_photo_atomic_completion | `20261023173648_attendance_phase_b_task_photo_atomic_completion.sql` |
 | 20261023174220 | attendance_phase_b_photo_freshness_guard | `20261023174220_attendance_phase_b_photo_freshness_guard.sql` |
-| 20261023180554 | attendance_task_photo_orphan_sweep | `20261023180500_attendance_task_photo_orphan_sweep.sql` — version drift; name/source match |
-| 20261028043142 | attendance_location_report | `20261028120000_attendance_location_report.sql` — version drift; name/source match |
+| 20261023180554 | attendance_task_photo_orphan_sweep | `20261023180554_attendance_task_photo_orphan_sweep.sql` — version drift; name/source match |
+| 20261028043142 | attendance_location_report | `20261028043142_attendance_location_report.sql` — version drift; name/source match |
 | 20261028153511 | attendance_owner_alert_notifications | `20261028153511_attendance_owner_alert_notifications.sql` — reconstructed from verified TEST setting column |
 | 20261028193223 | attendance_evidence_retention_helpers_20261029 | `20261028193223_attendance_evidence_retention_helpers_20261029.sql` — reconstructed from current TEST function definitions |
 | 20261028193237 | attendance_90_day_record_retention_20261029 | `20261028193237_attendance_90_day_record_retention_20261029.sql` — staged reconstruction |
@@ -48,6 +48,6 @@ The TEST migration ledger returned 21 records. The repository had 40 migration S
 
 ## Remaining historical limitation
 
-The four early TEST ledger versions and three later version/name mismatches above do not match repository filenames exactly. They are mapped to corresponding checked-in SQL sources where possible. The ledger row `create_staff_permissions_and_owner_invites` maps to legacy baseline source files rather than a single byte-identical source. Do not rename or re-run already-applied migrations merely to cosmetically align timestamps; that could cause duplicate execution in other environments.
+The eight historical filename/version mismatches were aligned to the exact TEST ledger prefixes in this TEST-only repository. For `20261016134805_create_staff_permissions_and_owner_invites.sql`, a documented no-op compatibility marker is used because the clean-room baseline sources already create those objects; the original combined historical SQL was not recovered byte-for-byte. Do not apply reconstructed sources to Production. No database migration history was edited.
 
-This document completes the source-to-ledger audit and records every TEST ledger row, while preserving the distinction between exact checked-in source, semantic mapping, and reconstructed source. For a future clean-room database build, first validate the migration sequence in a disposable TEST project; do not apply these reconstructed sources blindly to Production.
+The source-to-ledger audit now has a filename for every one of the 21 TEST ledger versions. This aligns the TEST repository's migration versions without altering the TEST database. The distinction between exact checked-in source, recovered source snapshot, and no-op compatibility marker remains explicit. For a future clean-room database build, validate the sequence in a disposable TEST project before use; never apply reconstructed sources blindly to Production.

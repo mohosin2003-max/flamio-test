@@ -1,0 +1,8 @@
+-- TEST ledger compatibility marker for version 20261016134805.
+-- The TEST ledger labels this step "create_staff_permissions_and_owner_invites".
+-- In the checked-in clean-room migration sequence, owner_invites is created by
+-- 20260914214536_63e4cfc8-3207-45ed-9bad-722002357bd8.sql and staff_permissions
+-- is created by 20260915033358_6ed0d102-d855-42f3-bf5a-1f50f2f58b2e.sql.
+-- This intentionally no-op file aligns the TEST ledger version without
+-- recreating existing tables or pretending to recover the original SQL body.
+-- TEST only; no database mutation is performed by adding this file to Git.
