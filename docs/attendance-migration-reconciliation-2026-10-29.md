@@ -8,7 +8,7 @@ Production is strictly out of scope.
 
 This reconciliation compares the migration ledger exposed by Supabase with SQL sources in GitHub. It does not apply migrations, alter `supabase_migrations.schema_migrations`, delete attendance records, remove Storage objects, or deploy Edge Functions.
 
-The TEST migration ledger returned 21 records. The repository had 40 migration SQL files before this recovery work. Eight applied TEST migration records had no same-version source file: four retention migrations, two retention hardening/retry migrations, feature toggles, selfie evidence, private bucket, and Owner alerts (the last four are listed separately; total recovered sources are 8). Their source files have now been restored under the exact TEST ledger version prefixes.
+The TEST migration ledger returned 21 records. The repository had 40 migration SQL files before this recovery work. Ten applied TEST migration records had no same-version source file: four retention migrations, two retention hardening/retry migrations, feature toggles, selfie evidence, private bucket, and Owner alerts. Ten source files have been restored or reconstructed under the TEST ledger version prefixes. Their source files have now been restored under the exact TEST ledger version prefixes.
 
 **Recovery limitation:** some recovered SQL files are idempotent source reconstructions from the current TEST database and checked-in documentation, not byte-for-byte copies of the original SQL that was executed. Do not treat a source reconstruction as proof of the exact historical migration body. No reconstructed migration was applied to any database.
 
