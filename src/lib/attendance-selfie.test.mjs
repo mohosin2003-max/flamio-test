@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes, validateSelfieCaptureTime } from "./attendance-selfie.ts";
+import { SELFIE_MAX_AGE_MS, buildSelfiePath, isSelfieVerificationEnabled, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes, validateSelfieCaptureTime } from "./attendance-selfie.ts";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -56,4 +56,13 @@ describe("mandatory check-in photo and safe clock-out", () => {
     expect(selfieRequiredFor("break_start")).toBe(false);
     expect(selfieRequiredFor("break_end")).toBe(false);
   });
+});
+
+describe("selfie verification flag", () => {
+  test("false, null and undefined do not require a selfie", () => {
+    expect(isSelfieVerificationEnabled(false)).toBe(false);
+    expect(isSelfieVerificationEnabled(null)).toBe(false);
+    expect(isSelfieVerificationEnabled(undefined)).toBe(false);
+  });
+  test("true requires a selfie", () => expect(isSelfieVerificationEnabled(true)).toBe(true));
 });
