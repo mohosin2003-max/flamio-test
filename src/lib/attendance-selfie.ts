@@ -64,6 +64,11 @@ export function selfieGate(input: { columnsPresent: boolean }): SelfieGate {
 }
 
 /** Clock-out and break-end are never gated by a selfie, so staff can't be trapped on duty. */
+/** The client must enforce photo capture only when the Owner explicitly enables it. */
+export function isSelfieVerificationEnabled(value: boolean | null | undefined): boolean {
+  return value === true;
+}
+
 export function selfieRequiredFor(kind: "clock_in" | "clock_out" | "break_start" | "break_end"): boolean {
   return kind === "clock_in";
 }
