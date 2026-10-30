@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, selfieGate, selfieRequiredFor, validateSelfieBytes, validateSelfieCaptureTime } from "./attendance-selfie.ts";
+import { SELFIE_MAX_AGE_MS, buildSelfiePath, checkSelfiePath, isSelfieVerificationEnabled, selfieGate, selfieRequiredFor, validateSelfieBytes, validateSelfieCaptureTime } from "./attendance-selfie.ts";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -44,6 +44,17 @@ describe("selfie bytes", () => {
     expect(validateSelfieBytes(png).ok).toBe(false);
     expect(validateSelfieBytes(jpeg(100)).ok).toBe(false);
     expect(validateSelfieBytes(jpeg(1_500_001)).ok).toBe(false);
+  });
+});
+
+describe("selfie verification feature flag", () => {
+  test("disabled or unavailable setting does not require a photo", () => {
+    expect(isSelfieVerificationEnabled(false)).toBe(false);
+    expect(isSelfieVerificationEnabled(null)).toBe(false);
+    expect(isSelfieVerificationEnabled(undefined)).toBe(false);
+  });
+  test("only an explicitly enabled setting requires a photo", () => {
+    expect(isSelfieVerificationEnabled(true)).toBe(true);
   });
 });
 
