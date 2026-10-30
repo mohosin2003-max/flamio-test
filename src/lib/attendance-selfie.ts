@@ -74,3 +74,12 @@ export function decodeBase64(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
   return out;
 }
+
+/**
+ * Selfie verification is opt-in: only an explicit `true` from Owner settings requires a check-in photo.
+ * false, null or undefined (flag off or settings not loaded) never block clock-in on the client.
+ * Keeps the client in step with the server, which only enforces selfies when the flag is true.
+ */
+export function isSelfieVerificationEnabled(value: boolean | null | undefined): boolean {
+  return value === true;
+}
