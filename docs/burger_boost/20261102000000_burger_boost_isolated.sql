@@ -25,6 +25,13 @@
 -- OWNERSHIP MODEL: Provisional Model A (STEP 06K/06L) — dedicated
 --   NOLOGIN role "burger_boost_owner". Provisional only; NOT implementation
 --   approval. This draft NEVER creates, alters, or grants any role.
+--   Strategy (STEP 13B):
+--     * CREATE SCHEMA burger_boost AUTHORIZATION burger_boost_owner;
+--     * Runner (CURRENT_USER) needs database CREATE privilege.
+--     * Runner needs SET ROLE capability to burger_boost_owner.
+--     * Tables/sequence are created directly AS burger_boost_owner
+--       (SET LOCAL ROLE), so no ALTER ... OWNER TO is used.
+--     * No temporary database grant or ownership transfer is used.
 --   Owner is never substituted with postgres, supabase_admin or service_role.
 --   burger_boost_owner must hold NO privileges on public, auth, storage,
 --   attendance, finance, customer, or any other existing Flamio schema.
