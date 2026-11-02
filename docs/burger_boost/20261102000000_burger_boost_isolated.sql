@@ -298,9 +298,9 @@ COMMIT;
 --   Expect: 0 rows.
 --
 -- SAFETY CHECK 4 — Preserve existing burger_boost ownership/permissions
---   Enforced by the fail-closed preflight DO block above: an existing schema
---   is accepted only if owned by burger_boost_owner and free of all five
---   target table names; otherwise the transaction aborts. Before any future
+--   Enforced by the fail-closed preflight DO block above: ANY pre-existing
+--   burger_boost schema is rejected (STEP 06L), as are default ACL rows for
+--   burger_boost_owner; the transaction aborts. Before any future
 --   run, capture: SELECT nspname, nspowner::regrole, nspacl
 --   FROM pg_catalog.pg_namespace WHERE nspname = 'burger_boost';  (TODO-3)
 --
