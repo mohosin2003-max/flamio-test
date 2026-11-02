@@ -32,13 +32,21 @@
 -- EXTERNAL PREREQUISITES — NOT EXECUTED, NOT VERIFIED:
 --   P-1: CREATE ROLE burger_boost_owner WITH NOLOGIN NOSUPERUSER NOCREATEDB
 --          NOCREATEROLE NOREPLICATION NOBYPASSRLS;
---   P-2: GRANT burger_boost_owner TO postgres WITH INHERIT TRUE, SET TRUE;
---        - "WITH INHERIT/SET" option syntax is PostgreSQL 16+ only; on
---          PG<16 the equivalent is plain "GRANT burger_boost_owner TO postgres;".
+--   P-2: GRANT burger_boost_owner TO postgres
+--          WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
+--        - PostgreSQL 16+ syntax (TEST is PG 17.11 per STEP 08D). This draft
+--          refuses to run on PG<16.
+--        - INHERIT FALSE: the runner never silently uses owner privileges;
+--          it must explicitly SET LOCAL ROLE burger_boost_owner (below).
 --        - Grantee "postgres" is an ASSUMPTION. The real executing role of
 --          each runner (Dashboard SQL Editor, Supabase CLI, CI) is
 --          unverified; grant only to the role actually used.
 --        - Compatibility with managed Supabase role restrictions unverified.
+--   No database-level CREATE privilege is needed by burger_boost_owner:
+--   the schema is created with CREATE SCHEMA ... AUTHORIZATION, which
+--   (PG 17 docs) requires only the INVOKER's database CREATE privilege
+--   plus SET ROLE capability to the owner. ALTER SCHEMA ... OWNER TO is
+--   not used, so no temporary database GRANT/REVOKE is required.
 --   Never grant in the reverse direction (postgres TO burger_boost_owner).
 --
 -- UNRESOLVED BLOCKERS (execution stays BLOCKED until all are closed):
@@ -93,8 +101,9 @@ SET LOCAL search_path = '';
 DO $preflight$
 DECLARE
   r              pg_catalog.pg_roles%ROWTYPE;
-  exec_role      pg_catalog.name := pg_catalog."current_user"();
+  exec_role      pg_catalog.name := CURRENT_USER;
   can_set        pg_catalog.bool;
+  can_create_db  pg_catalog.bool;
   default_acls   pg_catalog.int8;
 BEGIN
   -- (A) Role existence and attributes ---------------------------------
@@ -107,25 +116,21 @@ BEGIN
     RAISE EXCEPTION 'burger_boost preflight: role burger_boost_owner has unsafe attributes (must be NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS)';
   END IF;
 
-  -- (B) Executing-role membership -------------------------------------
-  -- The executing role is whatever current_user is at run time; it is NOT
-  -- assumed to be postgres. ALTER ... OWNER TO requires that role to be
-  -- able to SET ROLE to burger_boost_owner.
-  -- PG16+: privilege 'SET' exists in pg_has_role and matches the exact
-  --        ALTER OWNER requirement.
-  -- PG<16: 'SET' is not a valid privilege name; 'MEMBER' is the closest
-  --        documented equivalent (member of, directly or indirectly).
-  -- TODO-B (BLOCKING): target PostgreSQL major version on TEST is
-  --        unverified; both branches are statically plausible but neither
-  --        has been executed.
-  IF pg_catalog.current_setting('server_version_num')::pg_catalog.int4 >= 160000 THEN
-    EXECUTE 'SELECT pg_catalog.pg_has_role($1, $2, $3)'
-      INTO can_set USING exec_role, 'burger_boost_owner'::pg_catalog.name, 'SET'::pg_catalog.text;
-  ELSE
-    can_set := pg_catalog.pg_has_role(exec_role, 'burger_boost_owner', 'MEMBER');
+  -- (B) Executing-role SET capability (PG16+ only) ---------------------
+  -- Membership is INHERIT FALSE, so 'SET' (not 'USAGE'/'MEMBER') is the
+  -- exact capability required for SET ROLE and CREATE SCHEMA AUTHORIZATION.
+  IF pg_catalog.current_setting('server_version_num')::pg_catalog.int4 < 160000 THEN
+    RAISE EXCEPTION 'burger_boost preflight: PostgreSQL 16+ required (membership SET option semantics)';
   END IF;
+  can_set := pg_catalog.pg_has_role(exec_role, 'burger_boost_owner'::pg_catalog.name, 'SET');
   IF NOT can_set THEN
     RAISE EXCEPTION 'burger_boost preflight: executing role % cannot SET ROLE burger_boost_owner (external prerequisite P-2)', exec_role;
+  END IF;
+
+  -- (B2) Invoker must hold database CREATE (needed for CREATE SCHEMA) --
+  can_create_db := pg_catalog.has_database_privilege(exec_role, pg_catalog.current_database(), 'CREATE');
+  IF NOT can_create_db THEN
+    RAISE EXCEPTION 'burger_boost preflight: executing role % lacks CREATE on current database', exec_role;
   END IF;
 
   -- (C)(D)(E) Pre-existing schema: always fail closed ------------------
@@ -134,23 +139,28 @@ BEGIN
   END IF;
 
   -- (E) Default ACLs that would apply to objects created by the owner ---
+  -- Tables and the identity sequence are created while acting AS
+  -- burger_boost_owner, so only defaults FOR ROLE burger_boost_owner
+  -- (global or schema-scoped) can apply. Any such row aborts the run.
+  -- Global defaults of the executing role (e.g. postgres) do not apply.
   SELECT pg_catalog.count(*) INTO default_acls
   FROM pg_catalog.pg_default_acl d
   WHERE d.defaclrole = r.oid;
   IF default_acls > 0 THEN
     RAISE EXCEPTION 'burger_boost preflight: % default ACL row(s) exist for burger_boost_owner — would leak privileges onto new tables', default_acls;
   END IF;
-  -- NOTE: default ACLs defined FOR ROLE <executing role> apply to objects
-  -- that role creates. Tables below are created by the executing role and
-  -- then re-owned; any such grants are explicitly revoked further down,
-  -- but this is a residual review item (TODO-E2).
 END
 $preflight$;
 
--- Schema is guaranteed new here (preflight rejects any existing one), so
--- the REVOKE/GRANT below cannot overwrite pre-existing custom ACLs.
-CREATE SCHEMA burger_boost;
-ALTER SCHEMA burger_boost OWNER TO burger_boost_owner;
+-- Schema is guaranteed new here (preflight rejects any existing one).
+-- Created directly owned by burger_boost_owner: no ALTER SCHEMA OWNER and
+-- no database CREATE privilege for the owner role.
+CREATE SCHEMA burger_boost AUTHORIZATION burger_boost_owner;
+
+-- Act explicitly as the owner (INHERIT FALSE membership). SET LOCAL is
+-- reverted automatically at COMMIT or ROLLBACK, so a failure cannot leave
+-- the session acting as burger_boost_owner.
+SET LOCAL ROLE burger_boost_owner;
 
 REVOKE ALL ON SCHEMA burger_boost FROM PUBLIC, anon, authenticated;
 GRANT USAGE ON SCHEMA burger_boost TO service_role;
