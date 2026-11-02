@@ -292,14 +292,20 @@ COMMIT;
 -- =====================================================================
 --
 -- SAFETY CHECK 1 — Dedicated non-superuser owner verification
+--   Strategy: CREATE SCHEMA ... AUTHORIZATION burger_boost_owner; runner
+--   needs database CREATE + SET ROLE capability; objects created directly
+--   AS burger_boost_owner; no temporary database grant, no OWNER TO.
 --   SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
 --          rolreplication, rolbypassrls
 --   FROM pg_catalog.pg_roles WHERE rolname = 'burger_boost_owner';
 --   Expect: one row, all flags false.
---   SELECT n.nspname, c.relname, pg_catalog.pg_get_userbyid(c.relowner)
+--   SELECT n.nspname, c.relname, c.relkind, pg_catalog.pg_get_userbyid(c.relowner)
 --   FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
---   WHERE n.nspname = 'burger_boost' AND c.relkind = 'r';
---   Expect: five rows, owner burger_boost_owner.
+--   WHERE n.nspname = 'burger_boost' AND c.relkind IN ('r','S');
+--   Expect: five tables + audit_log_id_seq, owner burger_boost_owner.
+--   SELECT nspname, pg_catalog.pg_get_userbyid(nspowner)
+--   FROM pg_catalog.pg_namespace WHERE nspname = 'burger_boost';
+--   Expect: owner burger_boost_owner.
 --
 -- SAFETY CHECK 2 — NOT NULL checks
 --   SELECT table_name, column_name, is_nullable, column_default
