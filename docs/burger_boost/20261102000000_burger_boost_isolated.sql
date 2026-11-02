@@ -22,22 +22,44 @@
 --   sessions.idempotency_key          NOT NULL, UNIQUE bb_sessions_idempotency_key_key
 --   coupons                           CHECK (false) — no row can be inserted
 --
--- OWNER ROLE PREREQUISITE (NOT DONE HERE):
---   Role name "burger_boost_owner" is the name given in the owner-authorized
---   Prompt 1 instruction. This draft NEVER creates or alters any role.
---   Provisioning it (NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
---   NOREPLICATION NOBYPASSRLS) is a separate, owner-approved prerequisite.
+-- OWNERSHIP MODEL: Provisional Model A (STEP 06K/06L) — dedicated
+--   NOLOGIN role "burger_boost_owner". Provisional only; NOT implementation
+--   approval. This draft NEVER creates, alters, or grants any role.
 --   Owner is never substituted with postgres, supabase_admin or service_role.
+--   burger_boost_owner must hold NO privileges on public, auth, storage,
+--   attendance, finance, customer, or any other existing Flamio schema.
 --
--- UNRESOLVED PREFLIGHT ITEMS (must be closed before any future execution):
---   TODO-1: Confirm burger_boost_owner exists in TEST with the safe attributes.
---   TODO-2: Confirm the executing migration role is allowed to
---           ALTER ... OWNER TO burger_boost_owner (membership requirement).
---   TODO-3: Existing ACLs on a pre-existing burger_boost schema cannot be
---           proven statically; the preflight below fails closed instead of
---           overwriting an unknown owner.
+-- EXTERNAL PREREQUISITES — NOT EXECUTED, NOT VERIFIED:
+--   P-1: CREATE ROLE burger_boost_owner WITH NOLOGIN NOSUPERUSER NOCREATEDB
+--          NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+--   P-2: GRANT burger_boost_owner TO postgres WITH INHERIT TRUE, SET TRUE;
+--        - "WITH INHERIT/SET" option syntax is PostgreSQL 16+ only; on
+--          PG<16 the equivalent is plain "GRANT burger_boost_owner TO postgres;".
+--        - Grantee "postgres" is an ASSUMPTION. The real executing role of
+--          each runner (Dashboard SQL Editor, Supabase CLI, CI) is
+--          unverified; grant only to the role actually used.
+--        - Compatibility with managed Supabase role restrictions unverified.
+--   Never grant in the reverse direction (postgres TO burger_boost_owner).
+--
+-- UNRESOLVED BLOCKERS (execution stays BLOCKED until all are closed):
+--   TODO-1: Live TEST catalog: does burger_boost_owner exist, safe flags?
+--   TODO-B: TEST PostgreSQL major version (selects SET vs MEMBER check).
+--   TODO-R: Actual executing role per migration runner.
+--   TODO-E2: Default ACLs FOR ROLE <executing role> IN SCHEMA burger_boost
+--            cannot exist for a new schema, but global defaults for the
+--            executing role on TABLES must be reviewed live (pg_default_acl).
 --   TODO-4: Grand Winner, score-to-discount formula, replay engine remain
 --           out of scope (Step 06 blockers); no columns added for them.
+--
+-- FUTURE SECURITY DEFINER RPCs — DOCUMENTATION ONLY, NONE CREATED HERE.
+--   Require separate approval and review of: dedicated function owner;
+--   SECURITY DEFINER; SET search_path = ''; fully schema-qualified refs;
+--   explicit EXECUTE grants; REVOKE from PUBLIC, anon, authenticated;
+--   service_role EXECUTE only where justified; user identity verified on
+--   the server, never client-supplied; atomic transaction + idempotency;
+--   RLS / FORCE ROW LEVEL SECURITY implications (owners bypass RLS unless
+--   forced); no privileges on existing Flamio schemas. Owning the tables
+--   does NOT grant CREATE on schema public — wrapper placement is open.
 -- =====================================================================
 
 BEGIN;
@@ -47,48 +69,87 @@ BEGIN;
 SET LOCAL search_path = '';
 
 -- =====================================================================
--- SAFETY CHECK 1 — Dedicated non-superuser owner verification
+-- SAFETY CHECK 1 — Dedicated non-superuser owner verification (A)
+-- SAFETY CHECK 1b — Executing-role membership / SET capability (B)
 -- SAFETY CHECK 4 — Preserve existing burger_boost ownership/permissions
---   (Fail-closed. Raises if role missing/unsafe, if an existing schema has
---    an unexpected owner, or if any target table name already exists.
---    No CREATE TABLE IF NOT EXISTS is used, so collisions cannot be masked.)
+--                  and existing-object collision protection (C, D, E)
+--
+-- STEP 06L decision (Model A): a PRE-EXISTING burger_boost schema is
+-- ALWAYS rejected, whatever its owner. Rationale:
+--   * Its ACL (nspacl) and any default ACLs (pg_default_acl) cannot be
+--     proven safe statically; the REVOKE/GRANT below would otherwise
+--     rewrite unknown custom grants. Failing closed preserves them.
+--   * Any object inside it (tables, views, matviews, sequences, composite
+--     types, domains, enums, routines, foreign tables) could collide.
+--     Rejecting the whole schema gives complete collision coverage
+--     without having to enumerate every catalog.
+--   * Nothing is dropped, renamed, or overwritten; an operator must
+--     investigate manually.
+-- Additionally, a schema-independent check rejects any existing
+-- pg_default_acl rows that would target the burger_boost_owner role
+-- (defaults scoped "FOR ROLE burger_boost_owner" would silently grant
+-- privileges on every table created below).
 -- =====================================================================
 DO $preflight$
 DECLARE
   r              pg_catalog.pg_roles%ROWTYPE;
-  schema_owner   pg_catalog.name;
-  conflict_count pg_catalog.int8;
+  exec_role      pg_catalog.name := pg_catalog."current_user"();
+  can_set        pg_catalog.bool;
+  default_acls   pg_catalog.int8;
 BEGIN
+  -- (A) Role existence and attributes ---------------------------------
   SELECT * INTO r FROM pg_catalog.pg_roles WHERE rolname = 'burger_boost_owner';
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'burger_boost preflight: role burger_boost_owner does not exist (separate prerequisite, TODO-1)';
+    RAISE EXCEPTION 'burger_boost preflight: role burger_boost_owner does not exist (external prerequisite P-1, NOT executed by this file)';
   END IF;
   IF r.rolcanlogin OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole
      OR r.rolreplication OR r.rolbypassrls THEN
-    RAISE EXCEPTION 'burger_boost preflight: role burger_boost_owner has unsafe attributes';
+    RAISE EXCEPTION 'burger_boost preflight: role burger_boost_owner has unsafe attributes (must be NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS)';
   END IF;
 
-  SELECT pg_catalog.pg_get_userbyid(n.nspowner) INTO schema_owner
-  FROM pg_catalog.pg_namespace n WHERE n.nspname = 'burger_boost';
-
-  IF FOUND THEN
-    IF schema_owner IS DISTINCT FROM 'burger_boost_owner' THEN
-      RAISE EXCEPTION 'burger_boost preflight: existing schema owned by unexpected role % — not overwriting', schema_owner;
-    END IF;
-    SELECT pg_catalog.count(*) INTO conflict_count
-    FROM pg_catalog.pg_class c
-    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'burger_boost'
-      AND c.relname IN ('settings','sessions','coupons','redemptions','audit_log');
-    IF conflict_count > 0 THEN
-      RAISE EXCEPTION 'burger_boost preflight: % conflicting target relation(s) already exist', conflict_count;
-    END IF;
+  -- (B) Executing-role membership -------------------------------------
+  -- The executing role is whatever current_user is at run time; it is NOT
+  -- assumed to be postgres. ALTER ... OWNER TO requires that role to be
+  -- able to SET ROLE to burger_boost_owner.
+  -- PG16+: privilege 'SET' exists in pg_has_role and matches the exact
+  --        ALTER OWNER requirement.
+  -- PG<16: 'SET' is not a valid privilege name; 'MEMBER' is the closest
+  --        documented equivalent (member of, directly or indirectly).
+  -- TODO-B (BLOCKING): target PostgreSQL major version on TEST is
+  --        unverified; both branches are statically plausible but neither
+  --        has been executed.
+  IF pg_catalog.current_setting('server_version_num')::pg_catalog.int4 >= 160000 THEN
+    EXECUTE 'SELECT pg_catalog.pg_has_role($1, $2, $3)'
+      INTO can_set USING exec_role, 'burger_boost_owner'::pg_catalog.name, 'SET'::pg_catalog.text;
+  ELSE
+    can_set := pg_catalog.pg_has_role(exec_role, 'burger_boost_owner', 'MEMBER');
   END IF;
+  IF NOT can_set THEN
+    RAISE EXCEPTION 'burger_boost preflight: executing role % cannot SET ROLE burger_boost_owner (external prerequisite P-2)', exec_role;
+  END IF;
+
+  -- (C)(D)(E) Pre-existing schema: always fail closed ------------------
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'burger_boost') THEN
+    RAISE EXCEPTION 'burger_boost preflight: schema burger_boost already exists — refusing to touch its ownership, ACLs, default ACLs or objects; investigate manually';
+  END IF;
+
+  -- (E) Default ACLs that would apply to objects created by the owner ---
+  SELECT pg_catalog.count(*) INTO default_acls
+  FROM pg_catalog.pg_default_acl d
+  WHERE d.defaclrole = r.oid;
+  IF default_acls > 0 THEN
+    RAISE EXCEPTION 'burger_boost preflight: % default ACL row(s) exist for burger_boost_owner — would leak privileges onto new tables', default_acls;
+  END IF;
+  -- NOTE: default ACLs defined FOR ROLE <executing role> apply to objects
+  -- that role creates. Tables below are created by the executing role and
+  -- then re-owned; any such grants are explicitly revoked further down,
+  -- but this is a residual review item (TODO-E2).
 END
 $preflight$;
 
-CREATE SCHEMA IF NOT EXISTS burger_boost;
--- No-op when the preflight accepted an existing schema (already this owner).
+-- Schema is guaranteed new here (preflight rejects any existing one), so
+-- the REVOKE/GRANT below cannot overwrite pre-existing custom ACLs.
+CREATE SCHEMA burger_boost;
 ALTER SCHEMA burger_boost OWNER TO burger_boost_owner;
 
 REVOKE ALL ON SCHEMA burger_boost FROM PUBLIC, anon, authenticated;
