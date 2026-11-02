@@ -25,6 +25,13 @@
 -- OWNERSHIP MODEL: Provisional Model A (STEP 06K/06L) — dedicated
 --   NOLOGIN role "burger_boost_owner". Provisional only; NOT implementation
 --   approval. This draft NEVER creates, alters, or grants any role.
+--   Strategy (STEP 13B):
+--     * CREATE SCHEMA burger_boost AUTHORIZATION burger_boost_owner;
+--     * Runner (CURRENT_USER) needs database CREATE privilege.
+--     * Runner needs SET ROLE capability to burger_boost_owner.
+--     * Tables/sequence are created directly AS burger_boost_owner
+--       (SET LOCAL ROLE), so no ALTER ... OWNER TO is used.
+--     * No temporary database grant or ownership transfer is used.
 --   Owner is never substituted with postgres, supabase_admin or service_role.
 --   burger_boost_owner must hold NO privileges on public, auth, storage,
 --   attendance, finance, customer, or any other existing Flamio schema.
@@ -249,12 +256,9 @@ CREATE TABLE burger_boost.audit_log (
   CONSTRAINT bb_audit_log_pkey PRIMARY KEY (id)
 );
 
--- Ownership (dedicated role only; see TODO-2)
-ALTER TABLE burger_boost.settings    OWNER TO burger_boost_owner;
-ALTER TABLE burger_boost.sessions    OWNER TO burger_boost_owner;
-ALTER TABLE burger_boost.coupons     OWNER TO burger_boost_owner;
-ALTER TABLE burger_boost.redemptions OWNER TO burger_boost_owner;
-ALTER TABLE burger_boost.audit_log   OWNER TO burger_boost_owner;
+-- Ownership: all tables and the identity sequence were created while
+-- acting AS burger_boost_owner (SET LOCAL ROLE above), so they are owned
+-- by burger_boost_owner directly. No ALTER ... OWNER TO is used.
 
 -- No direct table privileges for anyone, including service_role.
 REVOKE ALL ON TABLE burger_boost.settings    FROM PUBLIC, anon, authenticated, service_role;
@@ -263,12 +267,23 @@ REVOKE ALL ON TABLE burger_boost.coupons     FROM PUBLIC, anon, authenticated, s
 REVOKE ALL ON TABLE burger_boost.redemptions FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON TABLE burger_boost.audit_log   FROM PUBLIC, anon, authenticated, service_role;
 
+-- Identity sequence backing audit_log.id: explicit cleanup.
+REVOKE ALL ON SEQUENCE burger_boost.audit_log_id_seq FROM PUBLIC, anon, authenticated, service_role;
+
 -- Baseline RLS, zero policies (deny-all).
+-- FORCE ROW LEVEL SECURITY is intentionally NOT used: only the table owner
+-- bypasses non-forced RLS, and burger_boost_owner is NOLOGIN, NOBYPASSRLS,
+-- and is never granted to anon, authenticated, or service_role. Those roles
+-- hold no table privileges and there are zero policies, so they get no
+-- access. This holds only while application roles cannot assume the owner.
 ALTER TABLE burger_boost.settings    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE burger_boost.sessions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE burger_boost.coupons     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE burger_boost.redemptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE burger_boost.audit_log   ENABLE ROW LEVEL SECURITY;
+
+-- Return to the invoking role inside the transaction.
+RESET ROLE;
 
 COMMIT;
 
@@ -277,14 +292,20 @@ COMMIT;
 -- =====================================================================
 --
 -- SAFETY CHECK 1 — Dedicated non-superuser owner verification
+--   Strategy: CREATE SCHEMA ... AUTHORIZATION burger_boost_owner; runner
+--   needs database CREATE + SET ROLE capability; objects created directly
+--   AS burger_boost_owner; no temporary database grant, no OWNER TO.
 --   SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
 --          rolreplication, rolbypassrls
 --   FROM pg_catalog.pg_roles WHERE rolname = 'burger_boost_owner';
 --   Expect: one row, all flags false.
---   SELECT n.nspname, c.relname, pg_catalog.pg_get_userbyid(c.relowner)
+--   SELECT n.nspname, c.relname, c.relkind, pg_catalog.pg_get_userbyid(c.relowner)
 --   FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
---   WHERE n.nspname = 'burger_boost' AND c.relkind = 'r';
---   Expect: five rows, owner burger_boost_owner.
+--   WHERE n.nspname = 'burger_boost' AND c.relkind IN ('r','S');
+--   Expect: five tables + audit_log_id_seq, owner burger_boost_owner.
+--   SELECT nspname, pg_catalog.pg_get_userbyid(nspowner)
+--   FROM pg_catalog.pg_namespace WHERE nspname = 'burger_boost';
+--   Expect: owner burger_boost_owner.
 --
 -- SAFETY CHECK 2 — NOT NULL checks
 --   SELECT table_name, column_name, is_nullable, column_default
