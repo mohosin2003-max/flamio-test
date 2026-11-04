@@ -230,7 +230,7 @@ BEGIN
     RAISE EXCEPTION 'BB postflight: expected exactly 1 owned identity sequence';
   END IF;
 
-  -- 3. Only constraint-backed indexes (3 PK/UNIQUE pairs + PKs = 7).
+  -- 3. Only tables, the sequence, and PK/UNIQUE-backed indexes.
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_class
              WHERE relnamespace = ns AND relkind NOT IN ('r','S','i')) THEN
     RAISE EXCEPTION 'BB postflight: unexpected relation kind';
