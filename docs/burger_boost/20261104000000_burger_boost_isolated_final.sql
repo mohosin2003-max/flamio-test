@@ -135,9 +135,32 @@ BEGIN
   END IF;
 
   -- Superusers bypass all checks; accepted set is exactly {supabase_admin}.
+  -- STEP 22K-I: supabase_admin must exist AND be superuser (evidence-dependent).
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles
+                 WHERE rolname = 'supabase_admin' AND rolsuper) THEN
+    RAISE EXCEPTION 'BB preflight: supabase_admin absent or not superuser';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles
              WHERE rolsuper AND rolname <> 'supabase_admin') THEN
     RAISE EXCEPTION 'BB preflight: unexpected superuser role present';
+  END IF;
+
+  -- STEP 22K-I: exact observed postgres -> service_role membership (S-1):
+  -- grantor=supabase_admin ADMIN=f INHERIT=t SET=t. Exactly one row.
+  -- Kept separate from owner rows M-1/M-2. Not modified by this draft.
+  IF (SELECT count(*) FROM pg_catalog.pg_auth_members m
+      JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+      JOIN pg_catalog.pg_roles gr ON gr.oid = m.roleid
+      WHERE mb.rolname = 'postgres' AND gr.rolname = 'service_role') <> 1
+     OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members m
+      JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+      JOIN pg_catalog.pg_roles gr ON gr.oid = m.roleid
+      JOIN pg_catalog.pg_roles gt ON gt.oid = m.grantor
+      WHERE mb.rolname = 'postgres' AND gr.rolname = 'service_role'
+        AND gt.rolname = 'supabase_admin'
+        AND NOT m.admin_option AND m.inherit_option AND m.set_option) THEN
+    RAISE EXCEPTION 'BB preflight: postgres->service_role membership S-1 missing, duplicated or changed';
   END IF;
 
   -- Complete role graph (direct AND indirect, all roles incl. custom and
@@ -385,7 +408,9 @@ BEGIN
       RAISE EXCEPTION 'BB postflight: % has effective schema USAGE', cr.rolname;
     END IF;
 
-    IF cr.rolname <> 'authenticator' THEN
+    -- STEP 22K-I: authenticator is no longer exempt. It is a login role
+    -- that must reach data only via SET ROLE anon/authenticated, so it
+    -- must hold zero effective table/sequence privileges itself.
       FOR rel IN SELECT oid, relname, relkind FROM pg_catalog.pg_class
                  WHERE relnamespace = ns AND relkind IN ('r','S')
       LOOP
@@ -403,7 +428,6 @@ BEGIN
           END LOOP;
         END IF;
       END LOOP;
-    END IF;
   END LOOP;
 
   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'anon')
@@ -444,9 +468,30 @@ BEGIN
                     OR o.rolreplication OR o.rolbypassrls)) THEN
     RAISE EXCEPTION 'BB postflight: burger_boost_owner attributes no longer restrictive';
   END IF;
+  -- STEP 22K-I: supabase_admin must exist AND be superuser (evidence-dependent).
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles
+                 WHERE rolname = 'supabase_admin' AND rolsuper) THEN
+    RAISE EXCEPTION 'BB postflight: supabase_admin absent or not superuser';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles
              WHERE rolsuper AND rolname <> 'supabase_admin') THEN
     RAISE EXCEPTION 'BB postflight: unexpected superuser role present';
+  END IF;
+
+  -- STEP 22K-I: exact observed postgres -> service_role membership (S-1).
+  IF (SELECT count(*) FROM pg_catalog.pg_auth_members m
+      JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+      JOIN pg_catalog.pg_roles gr ON gr.oid = m.roleid
+      WHERE mb.rolname = 'postgres' AND gr.rolname = 'service_role') <> 1
+     OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members m
+      JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+      JOIN pg_catalog.pg_roles gr ON gr.oid = m.roleid
+      JOIN pg_catalog.pg_roles gt ON gt.oid = m.grantor
+      WHERE mb.rolname = 'postgres' AND gr.rolname = 'service_role'
+        AND gt.rolname = 'supabase_admin'
+        AND NOT m.admin_option AND m.inherit_option AND m.set_option) THEN
+    RAISE EXCEPTION 'BB postflight: postgres->service_role membership S-1 missing, duplicated or changed';
   END IF;
 
   -- 9. All-role effective SET/USAGE sweep against the owner (every row
