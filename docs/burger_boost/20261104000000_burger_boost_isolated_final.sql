@@ -70,14 +70,66 @@ BEGIN
     RAISE EXCEPTION 'BB preflight: % cannot SET ROLE burger_boost_owner', exec_role;
   END IF;
 
-  -- Client/gateway roles must not be able to assume or inherit the owner.
+  -- STEP 22K-G: explicit accepted owner-membership model.
+  -- pg_has_role() does NOT evaluate ADMIN OPTION, so pg_auth_members is
+  -- inspected row by row. Accepted rows (each evaluated individually):
+  --   M-1 member=postgres grantor=supabase_admin ADMIN=t INHERIT=f SET=f
+  --       (observed platform-issued grant; accepted, not modified)
+  --   M-2 member=postgres grantor=postgres       ADMIN=f INHERIT=f SET=t
+  --       (runner SET path required for SET LOCAL ROLE)
+  -- Any other row, any differing flag, or a missing row aborts.
+  IF exec_role <> 'postgres' THEN
+    RAISE EXCEPTION 'BB preflight: runner must be postgres (got %)', exec_role;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_auth_members m
+    JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+    JOIN pg_catalog.pg_roles gr ON gr.oid = m.grantor
+    WHERE m.roleid = r.oid
+      AND NOT (
+        (mb.rolname = 'postgres' AND gr.rolname = 'supabase_admin'
+         AND m.admin_option AND NOT m.inherit_option AND NOT m.set_option)
+        OR
+        (mb.rolname = 'postgres' AND gr.rolname = 'postgres'
+         AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option)
+      )
+  ) THEN
+    RAISE EXCEPTION 'BB preflight: unexpected burger_boost_owner membership row/flags';
+  END IF;
+  IF (SELECT count(*) FROM pg_catalog.pg_auth_members m
+      JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+      JOIN pg_catalog.pg_roles gr ON gr.oid = m.grantor
+      WHERE m.roleid = r.oid AND mb.rolname = 'postgres'
+        AND gr.rolname IN ('supabase_admin','postgres')) <> 2 THEN
+    RAISE EXCEPTION 'BB preflight: accepted owner membership rows M-1/M-2 not both present';
+  END IF;
+
+  -- Owner must not itself be a member of any role (no inherited extras).
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = r.oid) THEN
+    RAISE EXCEPTION 'BB preflight: burger_boost_owner is a member of another role';
+  END IF;
+
+  -- Superusers bypass all checks; accepted set is exactly {supabase_admin}.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles
+             WHERE rolsuper AND rolname <> 'supabase_admin') THEN
+    RAISE EXCEPTION 'BB preflight: unexpected superuser role present';
+  END IF;
+
+  -- Complete role graph (direct AND indirect, all roles incl. custom and
+  -- platform): only the owner, postgres (SET via M-2) and the accepted
+  -- superuser may reach burger_boost_owner via SET or USAGE.
   IF EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles c
-    WHERE c.rolname IN ('anon','authenticated','service_role','authenticator')
+    WHERE c.oid <> r.oid
+      AND c.rolname NOT IN ('postgres','supabase_admin')
       AND (pg_catalog.pg_has_role(c.oid, r.oid, 'USAGE')
            OR pg_catalog.pg_has_role(c.oid, r.oid, 'SET'))
   ) THEN
-    RAISE EXCEPTION 'BB preflight: client role can assume burger_boost_owner';
+    RAISE EXCEPTION 'BB preflight: unapproved role can assume/inherit burger_boost_owner';
+  END IF;
+  -- postgres must reach owner by SET only, never by inheritance.
+  IF pg_catalog.pg_has_role('postgres', r.oid, 'USAGE') THEN
+    RAISE EXCEPTION 'BB preflight: postgres inherits burger_boost_owner';
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'burger_boost') THEN
