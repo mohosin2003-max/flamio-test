@@ -37,6 +37,31 @@
 --       NOCREATEROLE NOREPLICATION NOBYPASSRLS
 --   P-2 GRANT burger_boost_owner TO <runner> WITH SET TRUE (PG16+)
 --
+-- SECURITY NOTES (STEP 22K-H; based on observed TEST catalog evidence,
+-- re-asserted where enforceable by the pre/postflight blocks):
+--   * postgres is a member of service_role with INHERIT enabled, so
+--     service_role's schema USAGE is also effectively available to
+--     postgres. This draft does not change that membership.
+--   * postgres and service_role both have BYPASSRLS=true in TEST.
+--     RLS (enabled, zero policies) is NOT a protective boundary against
+--     them; it only fails closed for non-bypass roles.
+--   * Table/sequence ACL revocation (REVOKE ALL ... FROM service_role
+--     etc.) is the primary DML access boundary. Postflight verifies it
+--     with has_table_privilege()/has_sequence_privilege(), which include
+--     inherited memberships and PUBLIC. postgres is NOT covered by those
+--     checks: it can SET ROLE burger_boost_owner (M-2) by design.
+--   * CHECK constraints (phase locks) are data-integrity controls, not
+--     authorization controls.
+--   * burger_boost_owner must remain NOLOGIN, NOSUPERUSER, NOCREATEDB,
+--     NOCREATEROLE, NOREPLICATION, NOBYPASSRLS (asserted pre and post).
+--   * Superuser set {supabase_admin} is an EVIDENCE-DEPENDENT assertion
+--     (historical TEST evidence only, not freshly verified). Any other
+--     superuser aborts the transaction (fail closed).
+--   * postgres and supabase_admin are exempt only from the general
+--     role-graph sweep; postgres is separately asserted SET=true,
+--     USAGE=false, and both appear only in the exact M-1/M-2 rows.
+--   * No broad grants; no implicit trust in platform roles.
+--
 -- Scope: exactly 5 tables + 1 identity sequence. No functions, RPCs,
 -- triggers, views, policies, seed rows, extra indexes, or FKs.
 -- No DROP, no CASCADE. Existing roles/memberships untouched.
@@ -384,6 +409,75 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'anon')
      OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'authenticated') THEN
     RAISE EXCEPTION 'BB postflight: expected client roles anon/authenticated missing';
+  END IF;
+
+  -- 8. STEP 22K-H: independent owner-membership re-verification.
+  --    ADMIN OPTION is read directly from pg_auth_members because
+  --    pg_has_role(..., 'SET'|'USAGE') does not evaluate it.
+  IF (SELECT count(*) FROM pg_catalog.pg_auth_members m WHERE m.roleid = own) <> 2 THEN
+    RAISE EXCEPTION 'BB postflight: owner membership row count is not exactly 2';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_auth_members m
+    JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+    JOIN pg_catalog.pg_roles gr ON gr.oid = m.grantor
+    WHERE m.roleid = own AND mb.rolname = 'postgres' AND gr.rolname = 'supabase_admin'
+      AND m.admin_option AND NOT m.inherit_option AND NOT m.set_option
+  ) THEN
+    RAISE EXCEPTION 'BB postflight: membership M-1 missing or flags changed';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_auth_members m
+    JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
+    JOIN pg_catalog.pg_roles gr ON gr.oid = m.grantor
+    WHERE m.roleid = own AND mb.rolname = 'postgres' AND gr.rolname = 'postgres'
+      AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option
+  ) THEN
+    RAISE EXCEPTION 'BB postflight: membership M-2 missing or flags changed';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = own) THEN
+    RAISE EXCEPTION 'BB postflight: burger_boost_owner became a member of another role';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles o
+             WHERE o.oid = own
+               AND (o.rolcanlogin OR o.rolsuper OR o.rolcreatedb OR o.rolcreaterole
+                    OR o.rolreplication OR o.rolbypassrls)) THEN
+    RAISE EXCEPTION 'BB postflight: burger_boost_owner attributes no longer restrictive';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles
+             WHERE rolsuper AND rolname <> 'supabase_admin') THEN
+    RAISE EXCEPTION 'BB postflight: unexpected superuser role present';
+  END IF;
+
+  -- 9. All-role effective SET/USAGE sweep against the owner (every row
+  --    of pg_roles, incl. custom and platform roles). Only exceptions:
+  --    the owner itself, supabase_admin (superuser, evidence-dependent),
+  --    and postgres (SET only; asserted separately below).
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles c
+    WHERE c.oid <> own
+      AND c.rolname NOT IN ('postgres','supabase_admin')
+      AND (pg_catalog.pg_has_role(c.oid, own, 'USAGE')
+           OR pg_catalog.pg_has_role(c.oid, own, 'SET'))
+  ) THEN
+    RAISE EXCEPTION 'BB postflight: unapproved role can assume/inherit burger_boost_owner';
+  END IF;
+  IF NOT pg_catalog.pg_has_role('postgres', own, 'SET') THEN
+    RAISE EXCEPTION 'BB postflight: postgres lost SET access to burger_boost_owner';
+  END IF;
+  IF pg_catalog.pg_has_role('postgres', own, 'USAGE') THEN
+    RAISE EXCEPTION 'BB postflight: postgres inherits burger_boost_owner';
+  END IF;
+  FOR cr IN SELECT oid, rolname FROM pg_catalog.pg_roles
+            WHERE rolname IN ('service_role','anon','authenticated')
+  LOOP
+    IF pg_catalog.pg_has_role(cr.oid, own, 'SET')
+       OR pg_catalog.pg_has_role(cr.oid, own, 'USAGE') THEN
+      RAISE EXCEPTION 'BB postflight: % has SET/USAGE path to burger_boost_owner', cr.rolname;
+    END IF;
+  END LOOP;
+  IF (SELECT count(*) FROM pg_catalog.pg_roles WHERE rolname = 'service_role') <> 1 THEN
+    RAISE EXCEPTION 'BB postflight: service_role missing';
   END IF;
 END
 $postflight$;
