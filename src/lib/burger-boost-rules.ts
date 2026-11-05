@@ -80,8 +80,14 @@ function toSeed(seed: bigint | number | string): bigint {
 }
 
 // ---------- Deterministic track ----------
+function pick<T>(arr: readonly T[], i: number): T {
+  const v = arr[i];
+  if (v === undefined) throw new Error("index out of range");
+  return v;
+}
+
 function mathGate(r: ReturnType<typeof createPrng>): MathGate {
-  const op = MATH_OPERATIONS[r.int(4)];
+  const op = pick(MATH_OPERATIONS, r.int(4));
   let a: number, b: number, ans: number;
   switch (op) {
     case "+": a = 1 + r.int(20); b = 1 + r.int(20); ans = a + b; break;
@@ -106,8 +112,8 @@ export function generateTrack(seed: bigint | number | string, rulesVersion: numb
     if (k < 5) track.push(mathGate(r));
     else if (k < 8) {
       const x = r.int(8); const y = (x + 1 + r.int(7)) % 8; // two distinct ingredients
-      track.push({ kind: "ingredient", lanes: [BURGER_INGREDIENTS[x], BURGER_INGREDIENTS[y]] });
-    } else track.push({ kind: "negative", spoiled: BURGER_INGREDIENTS[r.int(8)], spoiledLane: r.int(2) as Lane });
+      track.push({ kind: "ingredient", lanes: [pick(BURGER_INGREDIENTS, x), pick(BURGER_INGREDIENTS, y)] });
+    } else track.push({ kind: "negative", spoiled: pick(BURGER_INGREDIENTS, r.int(8)), spoiledLane: r.int(2) as Lane });
   }
   return track;
 }
@@ -142,7 +148,7 @@ export function simulateBurgerBoostReplay(
     if (a.lane !== 0 && a.lane !== 1) return fail("invalid lane");
     if (!Number.isInteger(a.t) || a.t < 0 || a.t > HARD_CUTOFF_MS || a.t < lastT) return fail("malformed timing");
     lastT = a.t;
-    const g = track[i];
+    const g = pick(track, i);
     if (g.kind === "math") { if (a.lane === g.correctLane) mathCorrect++; else mathWrong++; }
     else if (g.kind === "ingredient") ingredients.push(g.lanes[a.lane]);
     else if (a.lane === g.spoiledLane) spoiledHits++;
