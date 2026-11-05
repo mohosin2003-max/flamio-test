@@ -11,6 +11,17 @@
  */
 import { simulateBurgerBoostReplay } from "./burger-boost-rules";
 
+/**
+ * Runtime server-only guard. NOTE: this is NOT compile-time enforcement
+ * (no `.server.ts` naming); it only fails closed if evaluated in a browser.
+ */
+export function assertServerEnvironment(): void {
+  if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
+    throw new Error("burger-boost-session-core is server-only and must not run in a browser");
+  }
+}
+assertServerEnvironment();
+
 export const RULES_VERSION = 1;
 export const GATE_COUNT = 30;
 export const GAMEPLAY_WINDOW_MS = 60_000;
@@ -42,7 +53,8 @@ export interface BurgerBoostSessionRepository {
   insert(record: SessionRecord): Promise<void>;
   findForUser(id: string, userId: string): Promise<SessionRecord | null>;
   completeIfInProgress(id: string, userId: string, update: CompletionUpdate): Promise<boolean>;
-  transitionIfInProgress(id: string, userId: string, status: "expired" | "rejected", at: number): Promise<boolean>;
+  /** Sets status only. MUST NOT set completedAt, verifiedScore or telemetryHash. */
+  transitionIfInProgress(id: string, userId: string, status: "expired" | "rejected"): Promise<boolean>;
 }
 
 /** Client-safe view: no seed, track, answers, verified score or discount. */
@@ -121,20 +133,27 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       if (!r) return { ok: false, status: "not_found", error: "session not found" };
       if (r.status !== "in_progress") return { ok: false, status: r.status, error: "session not in progress" };
 
+      if (!Number.isFinite(r.startedAt) || !Number.isFinite(r.expiresAt) || r.expiresAt !== r.startedAt + HARD_CUTOFF_MS) {
+        return { ok: false, status: "clock_anomaly", error: "inconsistent session timestamps" };
+      }
       const now = deps.now();
+      if (!Number.isFinite(now)) return { ok: false, status: "clock_anomaly", error: "invalid server clock" };
+      if (now < r.startedAt) return { ok: false, status: "clock_anomaly", error: "session start is in the future" };
       const elapsed = now - r.startedAt;
-      if (!Number.isFinite(elapsed) || elapsed < 0) return { ok: false, status: "clock_anomaly", error: "session start is in the future" };
-      if (elapsed > HARD_CUTOFF_MS) {
-        await deps.repo.transitionIfInProgress(id, userId, "expired", now);
+      if (now > r.expiresAt || elapsed > HARD_CUTOFF_MS) {
+        await deps.repo.transitionIfInProgress(id, userId, "expired");
         return { ok: false, status: "expired", error: "hard cutoff exceeded" };
       }
       // elapsed <= 60s: normal gameplay; 60s < elapsed <= 75s: grace submission. Both accepted.
 
       const actions = payload && typeof payload === "object" ? (payload as { playerActions?: unknown }).playerActions : undefined;
+      if (!Array.isArray(actions) || actions.length !== GATE_COUNT) {
+        return reject(`exactly ${GATE_COUNT} actions required`);
+      }
       let seed: bigint;
       try { seed = int8StringToUnsigned(r.seed); } catch { return reject(); }
       const result = simulateBurgerBoostReplay(seed, GATE_COUNT, actions, r.rulesVersion);
-      if (!result.valid) return reject(result.error);
+      if (!result.valid || result.gatesPassed !== GATE_COUNT) return reject(result.valid ? "incomplete replay" : result.error);
 
       const hash = await sha256Hex(canonicalTelemetry(actions as { gateIndex: number; lane: number; t: number }[]));
       const won = await deps.repo.completeIfInProgress(id, userId, { verifiedScore: result.score, telemetryHash: hash, completedAt: now });
@@ -142,7 +161,7 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       return { ok: true, status: "completed" };
 
       async function reject(error = "invalid replay"): Promise<SubmitResult> {
-        await deps.repo.transitionIfInProgress(id, userId, "rejected", now);
+        await deps.repo.transitionIfInProgress(id, userId, "rejected");
         return { ok: false, status: "rejected", error };
       }
     },
