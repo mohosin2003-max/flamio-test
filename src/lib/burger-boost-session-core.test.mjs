@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { generateTrack } from "./burger-boost-rules.ts";
 import {
-  createBurgerBoostSessionService, generateSeed, unsignedToInt8String, int8StringToUnsigned,
+  createBurgerBoostSessionService, generateSeed, assertServerEnvironment, unsignedToInt8String, int8StringToUnsigned,
   canonicalTelemetry, sha256Hex, RULES_VERSION, GATE_COUNT, GAMEPLAY_WINDOW_MS, GRACE_PERIOD_MS, HARD_CUTOFF_MS,
 } from "./burger-boost-session-core.ts";
 
@@ -17,10 +17,10 @@ function memRepo() {
       if (!r || r.userId !== userId || r.status !== "in_progress") return false;
       Object.assign(r, u, { status: "completed" }); writes++; return true;
     },
-    async transitionIfInProgress(id, userId, status, at) {
+    async transitionIfInProgress(id, userId, status) {
       const r = rows.get(id);
       if (!r || r.userId !== userId || r.status !== "in_progress") return false;
-      Object.assign(r, { status, completedAt: at }); writes++; return true;
+      r.status = status; writes++; return true;
     },
   };
 }
@@ -33,7 +33,7 @@ function setup() {
   return { repo, svc, at: (ms) => { clock = ms; }, get clock() { return clock; } };
 }
 const track = generateTrack(int8StringToUnsigned(SEED), RULES_VERSION, GATE_COUNT);
-const validActions = (k = 10) => track.slice(0, k).map((g, i) => ({ gateIndex: i, lane: g.kind === "negative" ? 1 - g.spoiledLane : 0, t: i * 1000 }));
+const validActions = (k = GATE_COUNT) => track.slice(0, k).map((g, i) => ({ gateIndex: i, lane: g.kind === "negative" ? 1 - g.spoiledLane : 0, t: i * 1000 }));
 
 describe("burger boost session core", () => {
   test("constants", () => {
@@ -180,5 +180,83 @@ describe("burger boost session core", () => {
     const dto = await svc.get(sessionId, "u1");
     expect(dto.status).toBe("in_progress");
     expect(JSON.stringify(dto)).not.toMatch(/seed|score|discount|track/i);
+  });
+
+  // ---------- STEP 04C-B ----------
+  const nulls = (row) => [row.verifiedScore, row.telemetryHash, row.completedAt];
+
+  for (const [label, patch] of [
+    ["inconsistent expiresAt", (r) => { r.expiresAt = r.startedAt + 999_999; }],
+    ["NaN startedAt", (r) => { r.startedAt = NaN; }],
+    ["Infinity expiresAt", (r) => { r.expiresAt = Infinity; }],
+  ]) {
+    test(`18. clock_anomaly on ${label}, zero mutation`, async () => {
+      const { svc, repo } = setup(); const { sessionId } = await svc.start("u1");
+      patch(repo.rows.get(sessionId));
+      const before = JSON.stringify(repo.rows.get(sessionId));
+      const res = await svc.submit(sessionId, "u1", { playerActions: validActions() });
+      expect(res).toEqual({ ok: false, status: "clock_anomaly", error: "inconsistent session timestamps" });
+      expect(repo.writes).toBe(0);
+      expect(JSON.stringify(repo.rows.get(sessionId))).toBe(before);
+    });
+  }
+
+  for (const [n, expected] of [[0, "rejected"], [1, "rejected"], [29, "rejected"], [30, "completed"], [31, "rejected"]]) {
+    test(`19. ${n} actions -> ${expected}`, async () => {
+      const { svc, repo } = setup(); const { sessionId } = await svc.start("u1");
+      let a = validActions(Math.min(n, GATE_COUNT));
+      if (n === 31) a = [...a, { gateIndex: 30, lane: 0, t: 30000 }];
+      const res = await svc.submit(sessionId, "u1", { playerActions: a });
+      const row = repo.rows.get(sessionId);
+      expect(res.status).toBe(expected);
+      expect(row.status).toBe(expected);
+      if (expected === "completed") {
+        expect(typeof row.verifiedScore).toBe("number");
+        expect(row.telemetryHash).toMatch(/^[0-9a-f]{64}$/);
+      } else expect(nulls(row)).toEqual([null, null, null]);
+    });
+  }
+
+  test("20. completedAt set on success only (server clock)", async () => {
+    const { svc, repo, at, clock } = setup(); const { sessionId } = await svc.start("u1");
+    at(clock + 42000);
+    await svc.submit(sessionId, "u1", { playerActions: validActions() });
+    expect(repo.rows.get(sessionId).completedAt).toBe(clock + 42000);
+  });
+
+  test("21. expired and rejected keep completedAt/score/hash null", async () => {
+    const e = setup(); const s1 = (await e.svc.start("u1")).sessionId;
+    e.at(e.clock + 75001); await e.svc.submit(s1, "u1", { playerActions: validActions() });
+    expect([e.repo.rows.get(s1).status, ...nulls(e.repo.rows.get(s1))]).toEqual(["expired", null, null, null]);
+    const r = setup(); const s2 = (await r.svc.start("u1")).sessionId;
+    await r.svc.submit(s2, "u1", { playerActions: validActions(5) });
+    expect([r.repo.rows.get(s2).status, ...nulls(r.repo.rows.get(s2))]).toEqual(["rejected", null, null, null]);
+  });
+
+  test("22. invalid full-length replay cannot pollute score/hash/completion", async () => {
+    const { svc, repo } = setup(); const { sessionId } = await svc.start("u1");
+    const a = validActions(); a[29] = { ...a[29], lane: 5 };
+    await svc.submit(sessionId, "u1", { playerActions: a, score: 1e6 });
+    expect(nulls(repo.rows.get(sessionId))).toEqual([null, null, null]);
+  });
+
+  test("23. wrong-user on every path: zero writes", async () => {
+    const { svc, repo, at, clock } = setup(); const { sessionId } = await svc.start("victim");
+    for (const t of [clock, clock + 75001]) {
+      at(t);
+      for (const p of [{ playerActions: validActions() }, { playerActions: [] }, "x"]) {
+        expect((await svc.submit(sessionId, "attacker", p)).status).toBe("not_found");
+      }
+    }
+    expect(repo.writes).toBe(0);
+    expect(repo.rows.get(sessionId).status).toBe("in_progress");
+  });
+
+  test("24. server guard: passes on server, throws with window", () => {
+    expect(() => assertServerEnvironment()).not.toThrow();
+    globalThis.window = {};
+    try { expect(() => assertServerEnvironment()).toThrow(/server-only/); }
+    finally { delete globalThis.window; }
+    expect(() => assertServerEnvironment()).not.toThrow();
   });
 });
