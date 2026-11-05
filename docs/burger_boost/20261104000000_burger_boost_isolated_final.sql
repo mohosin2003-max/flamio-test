@@ -39,9 +39,10 @@
 --
 -- SECURITY NOTES (STEP 22K-H; based on observed TEST catalog evidence,
 -- re-asserted where enforceable by the pre/postflight blocks):
---   * postgres is a member of service_role with INHERIT enabled, so
---     service_role's schema USAGE is also effectively available to
---     postgres. This draft does not change that membership.
+--   * postgres is a member of service_role (S-1; verified TEST catalog
+--     state: grantor=supabase_admin, ADMIN=t, INHERIT=t, SET=t). Because
+--     INHERIT is enabled, service_role's schema USAGE is also effectively
+--     available to postgres. This draft does not change that membership.
 --   * postgres and service_role both have BYPASSRLS=true in TEST.
 --     RLS (enabled, zero policies) is NOT a protective boundary against
 --     them; it only fails closed for non-bypass roles.
@@ -145,8 +146,9 @@ BEGIN
     RAISE EXCEPTION 'BB preflight: unexpected superuser role present';
   END IF;
 
-  -- STEP 22K-I: exact observed postgres -> service_role membership (S-1):
-  -- grantor=supabase_admin ADMIN=f INHERIT=t SET=t. Exactly one row.
+  -- STEP 22K-I / STEP 02C: verified TEST catalog state of the
+  -- postgres -> service_role membership (S-1):
+  -- grantor=supabase_admin ADMIN=t INHERIT=t SET=t. Exactly one row.
   -- Kept separate from owner rows M-1/M-2. Not modified by this draft.
   IF (SELECT count(*) FROM pg_catalog.pg_auth_members m
       JOIN pg_catalog.pg_roles mb ON mb.oid = m.member
@@ -159,7 +161,7 @@ BEGIN
       JOIN pg_catalog.pg_roles gt ON gt.oid = m.grantor
       WHERE mb.rolname = 'postgres' AND gr.rolname = 'service_role'
         AND gt.rolname = 'supabase_admin'
-        AND NOT m.admin_option AND m.inherit_option AND m.set_option) THEN
+        AND m.admin_option AND m.inherit_option AND m.set_option) THEN
     RAISE EXCEPTION 'BB preflight: postgres->service_role membership S-1 missing, duplicated or changed';
   END IF;
 
@@ -490,7 +492,7 @@ BEGIN
       JOIN pg_catalog.pg_roles gt ON gt.oid = m.grantor
       WHERE mb.rolname = 'postgres' AND gr.rolname = 'service_role'
         AND gt.rolname = 'supabase_admin'
-        AND NOT m.admin_option AND m.inherit_option AND m.set_option) THEN
+        AND m.admin_option AND m.inherit_option AND m.set_option) THEN
     RAISE EXCEPTION 'BB postflight: postgres->service_role membership S-1 missing, duplicated or changed';
   END IF;
 
