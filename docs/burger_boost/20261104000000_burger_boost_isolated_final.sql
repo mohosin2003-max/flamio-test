@@ -328,7 +328,8 @@ ALTER TABLE burger_boost.audit_log   ENABLE ROW LEVEL SECURITY;
 -- ---------------------------------------------------------------------
 
 -- RPC 1. Idempotent create.
---   Same user + same key + identical (seed, rules_version, started_at,
+--   STEP 04G-FIX: p_id is the caller-supplied (core-generated) primary key.
+--   Same user + same key + identical (id, seed, rules_version, started_at,
 --   expires_at) -> returns the existing id (no second row).
 --   Same user + same key + any differing field -> rejects (22023/P0001).
 --   Different user's key -> rejects with the SAME generic message; no
