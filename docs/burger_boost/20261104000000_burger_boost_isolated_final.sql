@@ -335,6 +335,7 @@ ALTER TABLE burger_boost.audit_log   ENABLE ROW LEVEL SECURITY;
 --   id, status or field of the other session is returned.
 --   Race-safe: INSERT ... ON CONFLICT DO NOTHING, then re-read.
 CREATE FUNCTION burger_boost.create_session(
+  p_id              pg_catalog.uuid,
   p_user_id         pg_catalog.uuid,
   p_seed            pg_catalog.int8,
   p_rules_version   pg_catalog.int2,
@@ -350,7 +351,7 @@ DECLARE
   v_id pg_catalog.uuid;
   e    record;
 BEGIN
-  IF p_user_id IS NULL OR p_seed IS NULL OR p_rules_version IS NULL
+  IF p_id IS NULL OR p_user_id IS NULL OR p_seed IS NULL OR p_rules_version IS NULL
      OR p_rules_version <= 0
      OR p_idempotency_key IS NULL OR pg_catalog.length(p_idempotency_key) = 0
      OR p_started_at IS NULL OR p_expires_at IS NULL
@@ -360,10 +361,10 @@ BEGIN
   END IF;
 
   INSERT INTO burger_boost.sessions
-    (user_id, idempotency_key, status, seed, started_at, expires_at,
+    (id, user_id, idempotency_key, status, seed, started_at, expires_at,
      completed_at, telemetry_hash, verified_score, awarded_discount_percent, rules_version)
   VALUES
-    (p_user_id, p_idempotency_key, 'in_progress', p_seed, p_started_at, p_expires_at,
+    (p_id, p_user_id, p_idempotency_key, 'in_progress', p_seed, p_started_at, p_expires_at,
      NULL, NULL, NULL, 0, p_rules_version)
   ON CONFLICT (idempotency_key) DO NOTHING
   RETURNING burger_boost.sessions.id INTO v_id;
@@ -378,6 +379,7 @@ BEGIN
    WHERE s.idempotency_key = p_idempotency_key;
 
   IF e.id IS NOT NULL
+     AND e.id = p_id
      AND e.user_id = p_user_id
      AND e.seed = p_seed
      AND e.rules_version = p_rules_version
@@ -492,11 +494,11 @@ END
 $fn$;
 
 -- Function ACLs: EXECUTE for service_role only.
-REVOKE ALL ON FUNCTION burger_boost.create_session(pg_catalog.uuid, pg_catalog.int8, pg_catalog.int2, pg_catalog.text, pg_catalog.timestamptz, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION burger_boost.create_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int8, pg_catalog.int2, pg_catalog.text, pg_catalog.timestamptz, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION burger_boost.get_session_for_user(pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION burger_boost.complete_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int4, pg_catalog.text, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION burger_boost.transition_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION burger_boost.create_session(pg_catalog.uuid, pg_catalog.int8, pg_catalog.int2, pg_catalog.text, pg_catalog.timestamptz, pg_catalog.timestamptz) TO service_role;
+GRANT EXECUTE ON FUNCTION burger_boost.create_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int8, pg_catalog.int2, pg_catalog.text, pg_catalog.timestamptz, pg_catalog.timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION burger_boost.get_session_for_user(pg_catalog.uuid, pg_catalog.uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION burger_boost.complete_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int4, pg_catalog.text, pg_catalog.timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION burger_boost.transition_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) TO service_role;
