@@ -37,7 +37,7 @@ describe("create_session mapping", () => {
     const { t, calls } = mock();
     await createBurgerBoostSessionRepository({ transport: t }).insert(rec());
     expect(calls).toEqual([["create_session", {
-      p_user_id: U, p_seed: "-9223372036854775808", p_rules_version: 1, p_idempotency_key: S,
+      p_id: S, p_user_id: U, p_seed: "-9223372036854775808", p_rules_version: 1, p_idempotency_key: S,
       p_started_at: new Date(T0).toISOString(), p_expires_at: new Date(T0 + 75_000).toISOString(),
     }]]);
     expect(typeof calls[0][1].p_seed).toBe("string");
@@ -45,6 +45,11 @@ describe("create_session mapping", () => {
   test("returned id mismatch fails closed", async () => {
     const { t } = mock({ async create_session() { return U2; } });
     await expect(createBurgerBoostSessionRepository({ transport: t }).insert(rec())).rejects.toMatchObject({ code: "conflict" });
+  });
+  test("non-uuid session id rejected before transport", async () => {
+    const { t, calls } = mock();
+    await expect(createBurgerBoostSessionRepository({ transport: t }).insert(rec({ id: "not-a-uuid" }))).rejects.toMatchObject({ code: "invalid_input" });
+    expect(calls.length).toBe(0);
   });
   test("non-uuid user rejected before transport", async () => {
     const { t, calls } = mock();

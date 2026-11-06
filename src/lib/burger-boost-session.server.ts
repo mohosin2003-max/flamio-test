@@ -40,7 +40,7 @@ export type RpcSessionRow = {
 /** Transport for the four approved RPCs. Implementations must pass int8 as string. */
 export interface BurgerBoostRpcTransport {
   create_session(p: {
-    p_user_id: string; p_seed: string; p_rules_version: number;
+    p_id: string; p_user_id: string; p_seed: string; p_rules_version: number;
     p_idempotency_key: string; p_started_at: string; p_expires_at: string;
   }): Promise<string>;
   get_session_for_user(p: { p_id: string; p_user_id: string }): Promise<RpcSessionRow[]>;
@@ -130,8 +130,8 @@ export function rowToRecord(row: RpcSessionRow): SessionRecord {
 
 /**
  * Repository over the RPC transport. `idempotencyKey` defaults to the record id.
- * KNOWN BLOCKER: the SQL `create_session` generates its own id; the core assigns
- * `record.id`. Until reconciled, a mismatching returned id fails closed.
+ * The core-generated `record.id` is authoritative: it is sent as `p_id` and the
+ * returned id must match exactly, otherwise the insert fails closed.
  */
 export function createBurgerBoostSessionRepository(deps: {
   transport: BurgerBoostRpcTransport;
@@ -146,6 +146,7 @@ export function createBurgerBoostSessionRepository(deps: {
     async insert(record) {
       requireUuid(record.userId); requireUuid(record.id);
       const params = {
+        p_id: record.id,
         p_user_id: record.userId,
         p_seed: normalizeInt8(record.seed),
         p_rules_version: record.rulesVersion,
