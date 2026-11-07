@@ -158,19 +158,16 @@ export function createBurgerBoostApi(deps: ApiDeps) {
 
 let apiPromise: Promise<ReturnType<typeof createBurgerBoostApi>> | null = null;
 
-/** Builds the real API once, server-side only. Transport is not integrated: fails closed. */
+/** Builds the real API once, server-side only. Init failure fails closed and is retried next call. */
 function serverApi() {
   apiPromise ??= (async () => {
     const core = await import("@/lib/burger-boost-session-core");
     const adapter = await import("@/lib/burger-boost-session.server");
     const rl = await import("@/lib/rate-limit.server");
-    const unavailable = async (): Promise<never> => { throw new adapter.BurgerBoostPersistenceError("persistence_unavailable"); };
-    const repo = adapter.createBurgerBoostSessionRepository({
-      transport: {
-        create_session: unavailable, get_session_for_user: unavailable,
-        complete_session: unavailable, transition_session: unavailable,
-      },
-    });
+    // Server-only admin client, loaded lazily so it never enters the client graph.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const transport = adapter.createSupabaseBurgerBoostTransport(supabaseAdmin);
+    const repo = adapter.createBurgerBoostSessionRepository({ transport });
     const service = core.createBurgerBoostSessionService({
       repo, now: () => Date.now(), newId: () => globalThis.crypto.randomUUID(),
     });
@@ -181,6 +178,7 @@ function serverApi() {
       callerKey: rl.callerKey,
     });
   })();
+  apiPromise.catch(() => { apiPromise = null; });
   return apiPromise;
 }
 

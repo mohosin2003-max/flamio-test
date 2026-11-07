@@ -219,7 +219,22 @@ describe("burger boost server API (STEP 04H)", () => {
     const src = readFileSync(new URL("./burger-boost.functions.ts", import.meta.url), "utf8");
     const staticImports = src.split("\n").filter((l) => /^import /.test(l)).join("\n");
     expect(staticImports).not.toMatch(/session-core|session\.server|rate-limit\.server|client\.server/);
-    expect(src).not.toContain("supabaseAdmin");
+    // supabaseAdmin only via dynamic import inside serverApi()
+    const body = src.slice(src.indexOf("function serverApi()"), src.indexOf("/* --------------------------- server functions"));
+    expect(body).toContain('await import("@/integrations/supabase/client.server")');
+    expect(body).toContain("createSupabaseBurgerBoostTransport(supabaseAdmin)");
+    const outside = src.replace(body, "");
+    expect(outside).not.toContain("supabaseAdmin");
+    expect(outside).not.toContain("client.server");
+    expect(src).not.toMatch(/SERVICE_ROLE|service_role/);
+    // no base/unqualified RPC calls here; RPCs live in the schema-scoped transport
     expect(src).not.toMatch(/\.rpc\(/);
+    const adapterSrc = readFileSync(new URL("./burger-boost-session.server.ts", import.meta.url), "utf8");
+    expect(adapterSrc.match(/\.rpc\(/g)?.length).toBe(1);
+    expect(adapterSrc).toContain("supabase.schema(BB_SCHEMA).rpc(fn, args)");
+    expect(adapterSrc).toContain('const BB_SCHEMA = "burger_boost"');
+    for (const fn of ["create_session", "get_session_for_user", "complete_session", "transition_session"]) {
+      expect(adapterSrc).toContain(`rpc("${fn}", p)`);
+    }
   });
 });
