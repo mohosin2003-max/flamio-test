@@ -127,6 +127,20 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       return r ? toDTO(r) : null;
     },
 
+    /**
+     * STEP 04H: server-clock expiry. Only `in_progress -> expired`, only once the
+     * 75 s hard cutoff has passed by SERVER time. Ownership via the repository.
+     */
+    async expire(id: string, userId: string): Promise<{ ok: boolean; status: SessionStatus | "not_found" | "not_due" }> {
+      const r = await deps.repo.findForUser(id, userId);
+      if (!r) return { ok: false, status: "not_found" };
+      if (r.status !== "in_progress") return { ok: false, status: r.status };
+      const now = deps.now();
+      if (!Number.isFinite(now) || now <= r.expiresAt) return { ok: false, status: "not_due" };
+      const done = await deps.repo.transitionIfInProgress(id, userId, "expired");
+      return done ? { ok: true, status: "expired" } : { ok: false, status: "completed" };
+    },
+
     /** `payload` is untrusted. Only `playerActions` is read; score/seed/discount/telemetryHash are ignored. */
     async submit(id: string, userId: string, payload: unknown): Promise<SubmitResult> {
       const r = await deps.repo.findForUser(id, userId);
