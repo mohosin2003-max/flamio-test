@@ -188,20 +188,20 @@ function serverApi() {
 
 export const createBurgerBoostSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => input ?? {})
+  .inputValidator((input: unknown) => createSessionSchema.parse(input ?? {}))
   .handler(async ({ context, data }) => (await serverApi()).create(context.userId, data));
 
 export const getBurgerBoostSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => input)
+  .inputValidator((input: unknown) => sessionIdSchema.parse(input))
   .handler(async ({ context, data }) => (await serverApi()).get(context.userId, data));
 
 export const submitBurgerBoostGameplay = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => input)
+  .inputValidator((input: unknown) => submitSchema.parse(input))
   .handler(async ({ context, data }) => (await serverApi()).submit(context.userId, data));
 
 export const expireBurgerBoostSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => input)
+  .inputValidator((input: unknown) => sessionIdSchema.parse(input))
   .handler(async ({ context, data }) => (await serverApi()).expire(context.userId, data));
