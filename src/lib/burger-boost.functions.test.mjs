@@ -230,7 +230,8 @@ describe("burger boost server API (STEP 04H)", () => {
     // no base/unqualified RPC calls here; RPCs live in the schema-scoped transport
     expect(src).not.toMatch(/\.rpc\(/);
     const adapterSrc = readFileSync(new URL("./burger-boost-session.server.ts", import.meta.url), "utf8");
-    expect(adapterSrc.match(/\.rpc\(/g)?.length).toBe(1);
+    const adapterCode = adapterSrc.split("\n").filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join("\n");
+    expect(adapterCode.match(/\.rpc\(/g)?.length).toBe(1);
     expect(adapterSrc).toContain("supabase.schema(BB_SCHEMA).rpc(fn, args)");
     expect(adapterSrc).toContain('const BB_SCHEMA = "burger_boost"');
     for (const fn of ["create_session", "get_session_for_user", "complete_session", "transition_session"]) {
