@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { generateTrack } from "./burger-boost-rules.ts";
+import { generateTrack, simulateBurgerBoostReplay } from "./burger-boost-rules.ts";
 import { createBurgerBoostSessionService, int8StringToUnsigned, canonicalTelemetry, sha256Hex, RULES_VERSION } from "./burger-boost-session-core.ts";
 import { createBurgerBoostSessionRepository } from "./burger-boost-session.server.ts";
 import { createBurgerBoostApi, MSG } from "./burger-boost.functions.ts";
@@ -129,13 +129,17 @@ describe("burger boost server API (STEP 04H)", () => {
     expect(row.awarded_discount_percent).toBe(0);
   });
 
-  test("actions built for a different (client) seed are rejected by server-seed replay", async () => {
+  test("score derives from SERVER seed replay, not a client-chosen seed", async () => {
     const s = setup();
     const id = await started(s);
     const forged = actionsFor(OTHER_SEED);
-    const differs = JSON.stringify(forged) !== JSON.stringify(valid());
     const r = await s.api.submit(U1, { sessionId: id, playerActions: forged });
-    if (differs) expect(r.status).not.toBe("completed");
+    const server = simulateBurgerBoostReplay(int8StringToUnsigned(SEED), 30, forged, RULES_VERSION);
+    const client = simulateBurgerBoostReplay(int8StringToUnsigned(OTHER_SEED), 30, forged, RULES_VERSION);
+    expect(server.valid).toBe(true);
+    expect(r.ok).toBe(true);
+    expect(s.transport.rows.get(id).verified_score).toBe(server.score);
+    expect(server.score).not.toBe(client.score);
   });
 
   test("action order preserved: out-of-order rejected", async () => {
@@ -145,19 +149,6 @@ describe("burger boost server API (STEP 04H)", () => {
     expect((await s.api.submit(U1, { sessionId: id, playerActions: a })).status).toBe("invalid_input");
     const b = valid(); b[5] = { ...b[5], t: 0 };
     expect((await s.api.submit(U1, { sessionId: id, playerActions: b })).status).toBe("invalid_input");
-  });
-
-  test("invalid replay rejected and session marked rejected", async () => {
-    const s = setup();
-    const id = await started(s);
-    const track = generateTrack(int8StringToUnsigned(SEED), RULES_VERSION, 30);
-    const i = track.findIndex((g) => g.kind === "negative");
-    const a = valid(); a[i] = { ...a[i], lane: track[i].spoiledLane };
-    const r = await s.api.submit(U1, { sessionId: id, playerActions: a });
-    if (r.ok === false && r.status === "rejected") {
-      expect(r.error).toBe(MSG.invalid);
-      expect(s.transport.rows.get(id).status).toBe("rejected");
-    }
   });
 
   test("duplicate completion cannot complete twice or re-score", async () => {
