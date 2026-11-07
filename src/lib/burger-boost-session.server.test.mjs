@@ -156,3 +156,97 @@ describe("safe error mapping", () => {
     catch (err) { expect(err).toBeInstanceOf(BurgerBoostPersistenceError); expect(String(err.message)).not.toMatch(/relation|sessions/); }
   });
 });
+
+import { createSupabaseBurgerBoostTransport } from "./burger-boost-session.server.ts";
+
+function fakeClient(results = {}) {
+  const log = [];
+  const client = {
+    schema(name) {
+      log.push(["schema", name]);
+      return {
+        rpc(fn, args) {
+          log.push(["rpc", fn, args]);
+          const r = results[fn] ?? { data: null, error: null };
+          return { then: (res, rej) => Promise.resolve(r).then(res, rej) }; // PostgREST-style thenable
+        },
+      };
+    },
+    rpc() { log.push(["BASE_RPC"]); throw new Error("base rpc must never be used"); },
+  };
+  return { client, log };
+}
+const okResults = () => ({
+  create_session: { data: S, error: null },
+  get_session_for_user: { data: [row()], error: null },
+  complete_session: { data: true, error: null },
+  transition_session: { data: false, error: null },
+});
+
+describe("Supabase transport (STEP 04K)", () => {
+  test("every RPC uses schema('burger_boost') before rpc; base rpc never used; exact params", async () => {
+    const { client, log } = fakeClient(okResults());
+    const repo = createBurgerBoostSessionRepository({ transport: createSupabaseBurgerBoostTransport(client) });
+    await repo.insert(rec());
+    await repo.findForUser(S, U);
+    expect(await repo.completeIfInProgress(S, U, { verifiedScore: 7, telemetryHash: H, completedAt: T0 + 60_000 })).toBe(true);
+    expect(await repo.transitionIfInProgress(S, U, "expired")).toBe(false);
+    expect(log.some((l) => l[0] === "BASE_RPC")).toBe(false);
+    const rpcs = log.filter((l) => l[0] === "rpc");
+    expect(rpcs.map((l) => l[1])).toEqual(["create_session", "get_session_for_user", "complete_session", "transition_session"]);
+    log.forEach((l, i) => { if (l[0] === "rpc") expect(log[i - 1]).toEqual(["schema", "burger_boost"]); });
+    expect(rpcs[0][2]).toEqual({
+      p_id: S, p_user_id: U, p_seed: "-9223372036854775808", p_rules_version: 1, p_idempotency_key: S,
+      p_started_at: new Date(T0).toISOString(), p_expires_at: new Date(T0 + 75_000).toISOString(),
+    });
+    expect(rpcs[1][2]).toEqual({ p_id: S, p_user_id: U });
+    expect(rpcs[2][2]).toEqual({ p_id: S, p_user_id: U, p_verified_score: 7, p_telemetry_hash: H, p_completed_at: new Date(T0 + 60_000).toISOString() });
+    expect(rpcs[3][2]).toEqual({ p_id: S, p_user_id: U, p_target_status: "expired" });
+  });
+
+  test("client without schema() fails closed", () => {
+    expect(() => createSupabaseBurgerBoostTransport({})).toThrow(BurgerBoostPersistenceError);
+  });
+
+  test("strict boolean: only true/false accepted", async () => {
+    for (const bad of ["false", "true", 0, 1, null, undefined, {}]) {
+      const { client } = fakeClient({ complete_session: { data: bad, error: null }, transition_session: { data: bad, error: null } });
+      const repo = createBurgerBoostSessionRepository({ transport: createSupabaseBurgerBoostTransport(client) });
+      await expect(repo.completeIfInProgress(S, U, { verifiedScore: 1, telemetryHash: H, completedAt: T0 })).rejects.toMatchObject({ code: "persistence_unavailable" });
+      await expect(repo.transitionIfInProgress(S, U, "rejected")).rejects.toMatchObject({ code: "persistence_unavailable" });
+    }
+  });
+
+  test("int8 boundaries preserved exactly through repository path", async () => {
+    for (const seed of ["-9223372036854775808", "9223372036854775807"]) {
+      const { client, log } = fakeClient(okResults());
+      await createBurgerBoostSessionRepository({ transport: createSupabaseBurgerBoostTransport(client) }).insert(rec({ seed }));
+      const p = log.find((l) => l[0] === "rpc")[2];
+      expect(p.p_seed).toBe(seed); expect(typeof p.p_seed).toBe("string");
+    }
+  });
+
+  test("overflow, underflow, JS Number seeds rejected before any dispatch", async () => {
+    for (const seed of ["9223372036854775808", "-9223372036854775809", 12345678, 9007199254740993]) {
+      const { client, log } = fakeClient(okResults());
+      await expect(createBurgerBoostSessionRepository({ transport: createSupabaseBurgerBoostTransport(client) }).insert(rec({ seed })))
+        .rejects.toBeInstanceOf(BurgerBoostPersistenceError);
+      expect(log.length).toBe(0);
+    }
+  });
+
+  test("returned rows round-trip int8 exactly", async () => {
+    const { client } = fakeClient({ get_session_for_user: { data: [row({ seed: "-9223372036854775808" })], error: null } });
+    const r = await createBurgerBoostSessionRepository({ transport: createSupabaseBurgerBoostTransport(client) }).findForUser(S, U);
+    expect(r.seed).toBe("-9223372036854775808");
+  });
+
+  test("PostgREST errors sanitized", async () => {
+    const err = { code: "42P01", message: 'relation "burger_boost.sessions" does not exist', details: "SELECT", hint: "pg" };
+    const { client } = fakeClient({ create_session: { data: null, error: err }, get_session_for_user: { data: null, error: { code: "P0001", message: "BB conflict" } } });
+    const repo = createBurgerBoostSessionRepository({ transport: createSupabaseBurgerBoostTransport(client) });
+    try { await repo.insert(rec()); throw new Error("no"); }
+    catch (e) { expect(e.code).toBe("persistence_unavailable"); expect(JSON.stringify({ m: e.message, ...e })).not.toMatch(/relation|sessions|SELECT/); }
+    await expect(repo.findForUser(S, U)).rejects.toMatchObject({ code: "conflict" });
+  });
+});
