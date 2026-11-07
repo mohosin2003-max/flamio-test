@@ -187,3 +187,53 @@ export function createBurgerBoostSessionRepository(deps: {
     },
   };
 }
+
+/* -------------------- Supabase RPC transport (STEP 04K) -------------------- */
+
+export type SupabaseRpcResponse<T> = {
+  data: T | null;
+  error: { code?: string; message?: string; details?: string; hint?: string } | null;
+};
+
+/** Minimal structural client: only `.schema(...)` is required. */
+export interface SupabaseSchemaClient {
+  schema(name: string): {
+    rpc(fn: string, args?: Record<string, unknown>): PromiseLike<SupabaseRpcResponse<unknown>>;
+  };
+}
+
+const BB_SCHEMA = "burger_boost";
+
+/**
+ * Real transport. Every RPC is dispatched via `supabase.schema("burger_boost").rpc(...)`;
+ * there is no base-schema fallback. Errors are rethrown for `mapPersistenceError`.
+ */
+export function createSupabaseBurgerBoostTransport(supabase: SupabaseSchemaClient): BurgerBoostRpcTransport {
+  if (!supabase || typeof supabase.schema !== "function") {
+    throw new BurgerBoostPersistenceError("persistence_unavailable");
+  }
+  async function rpc(fn: string, args: Record<string, unknown>): Promise<unknown> {
+    const { data, error } = await supabase.schema(BB_SCHEMA).rpc(fn, args);
+    if (error) throw error;
+    return data;
+  }
+  function strictBool(v: unknown): boolean {
+    if (typeof v !== "boolean") throw new BurgerBoostPersistenceError("persistence_unavailable");
+    return v;
+  }
+  return {
+    async create_session(p) {
+      const d = await rpc("create_session", p);
+      if (typeof d !== "string") throw new BurgerBoostPersistenceError("persistence_unavailable");
+      return d;
+    },
+    async get_session_for_user(p) {
+      const d = await rpc("get_session_for_user", p);
+      if (d === null) return [];
+      if (!Array.isArray(d)) throw new BurgerBoostPersistenceError("invalid_row");
+      return d as RpcSessionRow[];
+    },
+    async complete_session(p) { return strictBool(await rpc("complete_session", p)); },
+    async transition_session(p) { return strictBool(await rpc("transition_session", p)); },
+  };
+}
