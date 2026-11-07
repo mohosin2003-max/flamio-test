@@ -138,7 +138,9 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       const now = deps.now();
       if (!Number.isFinite(now) || now <= r.expiresAt) return { ok: false, status: "not_due" };
       const done = await deps.repo.transitionIfInProgress(id, userId, "expired");
-      return done ? { ok: true, status: "expired" } : { ok: false, status: "completed" };
+      if (done) return { ok: true, status: "expired" };
+      const after = await deps.repo.findForUser(id, userId);
+      return { ok: false, status: after ? after.status : "not_found" };
     },
 
     /** `payload` is untrusted. Only `playerActions` is read; score/seed/discount/telemetryHash are ignored. */
