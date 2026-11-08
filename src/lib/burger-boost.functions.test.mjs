@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { generateTrack, simulateBurgerBoostReplay } from "./burger-boost-rules.ts";
 import { createBurgerBoostSessionService, int8StringToUnsigned, canonicalTelemetry, sha256Hex, RULES_VERSION } from "./burger-boost-session-core.ts";
 import { createBurgerBoostSessionRepository } from "./burger-boost-session.server.ts";
-import { createBurgerBoostApi, MSG } from "./burger-boost.functions.ts";
+import { createBurgerBoostApi, createPublicGateLoader, MSG } from "./burger-boost.functions.ts";
 
 const U1 = "11111111-1111-4111-8111-111111111111";
 const U2 = "22222222-2222-4222-8222-222222222222";
@@ -29,8 +29,9 @@ function limiter(max) { const n = new Map(); return { checkAndRecord(k) { const 
 function setup({ createMax = 100, submitMax = 100 } = {}) {
   const transport = mockTransport();
   let clock = T0;
-  const service = createBurgerBoostSessionService({ repo: createBurgerBoostSessionRepository({ transport }), now: () => clock, newId: () => crypto.randomUUID(), seed: () => SEED });
-  const api = createBurgerBoostApi({ service, createLimiter: limiter(createMax), submitLimiter: limiter(submitMax), callerKey: () => "1.2.3.4" });
+  const repo = createBurgerBoostSessionRepository({ transport });
+  const service = createBurgerBoostSessionService({ repo, now: () => clock, newId: () => crypto.randomUUID(), seed: () => SEED });
+  const api = createBurgerBoostApi({ service, publicGates: createPublicGateLoader(repo), createLimiter: limiter(createMax), submitLimiter: limiter(submitMax), callerKey: () => "1.2.3.4" });
   return { api, transport, at: (d) => { clock = T0 + d; } };
 }
 const actionsFor = (seed) => generateTrack(int8StringToUnsigned(seed), RULES_VERSION, 30).map((g, i) => ({ gateIndex: i, lane: g.kind === "negative" ? 1 - g.spoiledLane : 0, t: i * 1000 }));
