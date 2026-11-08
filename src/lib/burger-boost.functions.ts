@@ -17,6 +17,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { generateTrack, sanitizeGates, type PublicGate } from "@/lib/burger-boost-rules";
 
 export const BB_GATE_COUNT = 30;
 export const BB_HARD_CUTOFF_MS = 75_000;
@@ -84,7 +85,28 @@ type Service = {
   expire(id: string, userId: string): Promise<{ ok: boolean; status: string }>;
 };
 type Limiter = { checkAndRecord(key: string): boolean };
-export type ApiDeps = { service: Service; createLimiter: Limiter; submitLimiter: Limiter; callerKey: () => string };
+/** Server-only: builds the answer-free gate view for a session the caller owns. */
+export type PublicGateLoader = (sessionId: string, userId: string) => Promise<PublicGate[] | null>;
+export type ApiDeps = {
+  service: Service; publicGates: PublicGateLoader;
+  createLimiter: Limiter; submitLimiter: Limiter; callerKey: () => string;
+};
+
+/**
+ * STEP 46C. Re-reads the persisted session (ownership-checked by the repository)
+ * and derives the authoritative track from the SERVER seed + rules version.
+ * Only `sanitizeGates` output leaves this function; seed and answers never do.
+ */
+export function createPublicGateLoader(repo: {
+  findForUser(id: string, userId: string): Promise<{ seed: string; rulesVersion: number } | null>;
+}): PublicGateLoader {
+  return async (sessionId, userId) => {
+    const rec = await repo.findForUser(sessionId, userId);
+    if (!rec) return null;
+    const gates = sanitizeGates(generateTrack(rec.seed, rec.rulesVersion, BB_GATE_COUNT));
+    return gates.length === BB_GATE_COUNT ? gates : null;
+  };
+}
 
 function logSafe(where: string, err: unknown) {
   const code = (err as { code?: unknown } | null)?.code;
@@ -104,7 +126,10 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       if (!createSessionSchema.safeParse(input ?? {}).success) return { ok: false as const, error: MSG.invalid };
       if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}`)) return { ok: false as const, error: MSG.rateLimited };
       try {
-        return { ok: true as const, session: safe(await deps.service.start(uid)) };
+        const session = safe(await deps.service.start(uid));
+        const publicGates = await deps.publicGates(session.sessionId, uid);
+        if (!publicGates || publicGates.length !== BB_GATE_COUNT) throw new Error("gate_unavailable");
+        return { ok: true as const, session, publicGates };
       } catch (e) { logSafe("create", e); return { ok: false as const, error: MSG.unavailable }; }
     },
 
@@ -173,6 +198,7 @@ function serverApi() {
     });
     return createBurgerBoostApi({
       service,
+      publicGates: createPublicGateLoader(repo),
       createLimiter: rl.createRateLimiter(CREATE_LIMIT_PER_HOUR),
       submitLimiter: rl.createRateLimiter(SUBMIT_LIMIT_PER_HOUR),
       callerKey: rl.callerKey,
