@@ -21,6 +21,7 @@ type Screen = "start" | "playing" | "over";
 
 export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<GameState | null>(null);
   const startRef = useRef(0);
   const flashRef = useRef<{ text: string; good: boolean; at: number } | null>(null);
@@ -55,7 +56,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     if (screen !== "playing") return;
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-    const css = getComputedStyle(document.documentElement);
+    const css = getComputedStyle(rootRef.current ?? document.documentElement);
     const col = (v: string, f: string) => css.getPropertyValue(v).trim() || f;
     const C = { bg: col("--background", "#1c1714"), fg: col("--foreground", "#fff"), primary: col("--primary", "#f26b1d"), muted: col("--muted", "#333"), destructive: col("--destructive", "#e33") };
     const interval = (GAMEPLAY_DURATION_MS * 0.92) / (stateRef.current?.gateCount ?? gateCount);
@@ -101,7 +102,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const graceLeft = Math.max(0, HARD_CUTOFF_MS - hud.elapsed);
 
   return (
-    <div className="relative mx-auto flex h-[calc(100dvh-4rem)] w-full max-w-md flex-col overflow-hidden bg-background text-foreground md:h-[calc(100dvh-6rem)] md:rounded-2xl md:border md:border-border">
+    <div ref={rootRef} className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground">
       {screen === "playing" && (
         <>
           <Hud score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)} />
