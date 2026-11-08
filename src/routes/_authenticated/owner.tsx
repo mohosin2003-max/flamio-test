@@ -59,6 +59,7 @@ const TABS: {
   { to: "/owner/coupons", label: "Coupons", exact: false, permission: "coupons" },
   { to: "/owner/rewards", label: "Rewards", exact: false, permission: "rewards" },
   { to: "/owner/challenges", label: "Challenges", exact: false, permission: "challenges" },
+  { to: "/owner/burger-boost", label: "Burger Boost", exact: false, permission: "challenges" },
   { to: "/owner/banners", label: "Banners", exact: false, permission: "banners" },
   { to: "/owner/reports", label: "Reports", exact: false, permission: "reports" },
   { to: "/owner/customers", label: "Customers", exact: false, permission: "customers" },

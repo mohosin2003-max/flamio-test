@@ -156,3 +156,22 @@ export function simulateBurgerBoostReplay(
   const raw = mathCorrect * PROVISIONAL_SCORE.mathCorrect + ingredients.length * PROVISIONAL_SCORE.ingredient + spoiledHits * PROVISIONAL_SCORE.spoiled;
   return { valid: true, score: Math.max(0, raw), gatesPassed: playerActions.length, mathCorrect, mathWrong, ingredients, spoiledHits, timingAuthoritative: false, error: null };
 }
+
+// ---------- Public (client-safe) gate view ----------
+/**
+ * Visual-only gate data. Answers (`correctLane`), the spoiled lane and the seed
+ * are never included. Intended for a future server response; the server must
+ * build it from its own authoritative track.
+ */
+export type PublicGate =
+  | { kind: "math"; a: number; op: MathOp; b: number; lanes: [number, number] }
+  | { kind: "ingredient"; lanes: [Ingredient, Ingredient] }
+  | { kind: "negative"; spoiled: Ingredient };
+
+export function sanitizeGates(track: readonly Gate[]): PublicGate[] {
+  return track.map((g): PublicGate => {
+    if (g.kind === "math") return { kind: "math", a: g.a, op: g.op, b: g.b, lanes: [g.lanes[0], g.lanes[1]] };
+    if (g.kind === "ingredient") return { kind: "ingredient", lanes: [g.lanes[0], g.lanes[1]] };
+    return { kind: "negative", spoiled: g.spoiled };
+  });
+}
