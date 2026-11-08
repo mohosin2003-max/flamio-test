@@ -37,8 +37,8 @@
 --     telemetry_hash, completed_at; other statuses require all three NULL.
 --   * Four SECURITY DEFINER RPCs (create_session, get_session_for_user,
 --     complete_session, transition_session), owned by burger_boost_owner,
---     search_path = pg_catalog, burger_boost, pg_temp; EXECUTE to
---     service_role only. No direct table/sequence privileges for any
+--     search_path = pg_catalog, burger_boost, pg_temp; direct EXECUTE
+--     grants to service_role only; postgres may inherit EXECUTE via S-1. No direct table/sequence privileges for any
 --     client or service role. Owner needs no grants beyond ownership.
 --   * Game, discount and coupon phase locks unchanged.
 --
@@ -47,20 +47,32 @@
 --       NOCREATEROLE NOREPLICATION NOBYPASSRLS
 --   P-2 GRANT burger_boost_owner TO <runner> WITH SET TRUE (PG16+)
 --
--- SECURITY NOTES (STEP 22K-H; based on observed TEST catalog evidence,
--- re-asserted where enforceable by the pre/postflight blocks):
---   * postgres is a member of service_role (S-1; verified TEST catalog
---     state: grantor=supabase_admin, ADMIN=t, INHERIT=t, SET=t). Because
---     INHERIT is enabled, service_role's schema USAGE is also effectively
---     available to postgres. This draft does not change that membership.
---   * postgres and service_role both have BYPASSRLS=true in TEST.
---     RLS (enabled, zero policies) is NOT a protective boundary against
---     them; it only fails closed for non-bypass roles.
---   * Table/sequence ACL revocation (REVOKE ALL ... FROM service_role
---     etc.) is the primary DML access boundary. Postflight verifies it
---     with has_table_privilege()/has_sequence_privilege(), which include
---     inherited memberships and PUBLIC. postgres is NOT covered by those
---     checks: it can SET ROLE burger_boost_owner (M-2) by design.
+-- SECURITY NOTES (STEP 22N; based on recorded TEST catalog evidence,
+-- re-asserted where enforceable by the pre/postflight blocks; not a fresh
+-- live-catalog verification):
+--   * postgres -> service_role membership S-1 is recorded as exactly one
+--     row: grantor=supabase_admin, ADMIN=true, INHERIT=true, SET=true.
+--     Because INHERIT=true, postgres effectively inherits service_role's
+--     schema USAGE AND all four RPC EXECUTE privileges, despite those
+--     being direct ACL grants to service_role. Membership is unchanged.
+--   * postgres and service_role have BYPASSRLS=true per recorded TEST
+--     evidence. burger_boost_owner has BYPASSRLS=false and owns all five
+--     tables; a table owner normally bypasses RLS on its own tables
+--     unless FORCE ROW LEVEL SECURITY is enabled.
+--   * This draft enables RLS on all five tables but does NOT enable
+--     FORCE ROW LEVEL SECURITY. Zero-policy RLS is fail-closed for
+--     ordinary non-owner, non-BYPASSRLS roles, but is NOT an authorization
+--     boundary against burger_boost_owner, service_role, or postgres.
+--   * The primary access boundary is explicit table/sequence ACL
+--     revocation, narrow SECURITY DEFINER RPCs, direct EXECUTE grants to
+--     service_role only, and mandatory server-side authentication,
+--     authorization, and validation. Client requests must go through
+--     authorized server-side operations, not directly invoke these RPCs.
+--   * Direct ACL grants, effective inherited privileges, and privileged
+--     postgres access are distinct. Postflight table/sequence privilege
+--     checks include inherited memberships and PUBLIC for the named
+--     roles; postgres is NOT covered: it can SET ROLE burger_boost_owner
+--     via M-2 by design, separately from its S-1 inherited RPC access.
 --   * CHECK constraints (phase locks) are data-integrity controls, not
 --     authorization controls.
 --   * burger_boost_owner must remain NOLOGIN, NOSUPERUSER, NOCREATEDB,
@@ -69,12 +81,16 @@
 --     (historical TEST evidence only, not freshly verified). Any other
 --     superuser aborts the transaction (fail closed).
 --   * postgres and supabase_admin are exempt only from the general
---     role-graph sweep; postgres is separately asserted SET=true,
---     USAGE=false, and both appear only in the exact M-1/M-2 rows.
+--     owner-role-graph sweep; postgres is separately asserted SET=true,
+--     USAGE=false against burger_boost_owner, not against service_role.
+--     Owner memberships remain the exact M-1/M-2 rows.
 --   * No broad grants; no implicit trust in platform roles.
 --
--- Scope: exactly 5 tables + 1 identity sequence. No functions, RPCs,
--- triggers, views, policies, seed rows, extra indexes, or FKs.
+-- Scope: exactly 5 tables + 1 identity sequence + 4 SECURITY DEFINER RPC functions.
+-- No client-role EXECUTE grants; the four RPCs are server-side functions
+-- executable by service_role only. No triggers, views, policies, seed rows,
+-- extra indexes, or FKs.
+-- This describes direct grants; postgres may inherit EXECUTE through S-1.
 -- No DROP, no CASCADE. Existing roles/memberships untouched.
 -- =====================================================================
 
@@ -494,7 +510,9 @@ BEGIN
 END
 $fn$;
 
--- Function ACLs: EXECUTE for service_role only.
+-- Function ACLs: direct EXECUTE grants to service_role only (besides owner
+-- privileges); postgres may effectively inherit EXECUTE through S-1.
+-- These four SECURITY DEFINER functions are not ordinary client-callable RPCs.
 REVOKE ALL ON FUNCTION burger_boost.create_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int8, pg_catalog.int2, pg_catalog.text, pg_catalog.timestamptz, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION burger_boost.get_session_for_user(pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION burger_boost.complete_session(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int4, pg_catalog.text, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
@@ -593,7 +611,7 @@ BEGIN
                 WHERE c.relnamespace = ns AND NOT t.tgisinternal)
      OR EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
                 WHERE connamespace = ns AND contype = 'f') THEN
-    RAISE EXCEPTION 'BB postflight: functions/triggers/FKs present';
+    RAISE EXCEPTION 'BB postflight: triggers/FKs present';
   END IF;
 
   -- 5. All-role schema ACL: every explicit entry must be the owner, or
