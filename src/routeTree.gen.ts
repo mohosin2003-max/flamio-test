@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as BoostRouteImport } from './routes/boost'
 import { Route as CartRouteImport } from './routes/cart'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as CombosRouteImport } from './routes/combos'
@@ -90,6 +91,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BoostRoute = BoostRouteImport.update({
+  id: '/boost',
+  path: '/boost',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CartRoute = CartRouteImport.update({
@@ -466,6 +472,7 @@ const ApiPublicCommunicationWebhookProviderRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/boost': typeof BoostRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/combos': typeof CombosRoute
@@ -535,6 +542,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/boost': typeof BoostRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/combos': typeof CombosRoute
@@ -604,6 +612,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/boost': typeof BoostRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/combos': typeof CombosRoute
@@ -675,6 +684,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/boost'
     | '/cart'
     | '/checkout'
     | '/combos'
@@ -744,6 +754,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/boost'
     | '/cart'
     | '/checkout'
     | '/combos'
@@ -812,6 +823,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/boost'
     | '/cart'
     | '/checkout'
     | '/combos'
@@ -883,6 +895,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  BoostRoute: typeof BoostRoute
   CartRoute: typeof CartRoute
   CheckoutRoute: typeof CheckoutRoute
   CombosRoute: typeof CombosRoute
@@ -920,6 +933,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/boost': {
+      id: '/boost'
+      path: '/boost'
+      fullPath: '/boost'
+      preLoaderRoute: typeof BoostRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cart': {
@@ -1536,6 +1556,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  BoostRoute: BoostRoute,
   CartRoute: CartRoute,
   CheckoutRoute: CheckoutRoute,
   CombosRoute: CombosRoute,
