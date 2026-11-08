@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw } from "lucide-react"
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
+import { RealGamePanel } from "@/components/burger-boost/RealGamePanel";
 import {
   createGame, passGate, switchLane, phaseAt, stackPercent, inTargetRange, practiceSeed,
   DEFAULT_GATE_COUNT, GAMEPLAY_DURATION_MS, HARD_CUTOFF_MS, STACK_TARGET_MIN, STACK_TARGET_MAX,
@@ -145,7 +146,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             <li>🎯 Keep your stack between <b className="text-foreground">{STACK_TARGET_MIN}%–{STACK_TARGET_MAX}%</b>. 60 s + 15 s grace.</li>
           </ul>
           <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">Practice only: scores are not saved and no rewards or discounts are given yet.</p>
-          <Button size="lg" className="w-full" onClick={start}><Play className="size-5" /> Start</Button>
+          <Button size="lg" className="w-full" onClick={start}><Play className="size-5" /> Start practice</Button>
+          <RealGamePanel />
           <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}

@@ -45,6 +45,7 @@ import { Route as AuthenticatedOwnerAttendanceReportsRouteImport } from './route
 import { Route as AuthenticatedOwnerAttendanceSettingsRouteImport } from './routes/_authenticated/owner.attendance-settings'
 import { Route as AuthenticatedOwnerAttendanceWorkflowRouteImport } from './routes/_authenticated/owner.attendance-workflow'
 import { Route as AuthenticatedOwnerBannersRouteImport } from './routes/_authenticated/owner.banners'
+import { Route as AuthenticatedOwnerBurgerBoostRouteImport } from './routes/_authenticated/owner.burger-boost'
 import { Route as AuthenticatedOwnerChallengesRouteImport } from './routes/_authenticated/owner.challenges'
 import { Route as AuthenticatedOwnerCombosRouteImport } from './routes/_authenticated/owner.combos'
 import { Route as AuthenticatedOwnerCouponsRouteImport } from './routes/_authenticated/owner.coupons'
@@ -276,6 +277,12 @@ const AuthenticatedOwnerBannersRoute =
     path: '/banners',
     getParentRoute: () => AuthenticatedOwnerRoute,
   } as any)
+const AuthenticatedOwnerBurgerBoostRoute =
+  AuthenticatedOwnerBurgerBoostRouteImport.update({
+    id: '/burger-boost',
+    path: '/burger-boost',
+    getParentRoute: () => AuthenticatedOwnerRoute,
+  } as any)
 const AuthenticatedOwnerChallengesRoute =
   AuthenticatedOwnerChallengesRouteImport.update({
     id: '/challenges',
@@ -503,6 +510,7 @@ export interface FileRoutesByFullPath {
   '/owner/attendance-settings': typeof AuthenticatedOwnerAttendanceSettingsRoute
   '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/banners': typeof AuthenticatedOwnerBannersRoute
+  '/owner/burger-boost': typeof AuthenticatedOwnerBurgerBoostRoute
   '/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
   '/owner/combos': typeof AuthenticatedOwnerCombosRoute
   '/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
@@ -572,6 +580,7 @@ export interface FileRoutesByTo {
   '/owner/attendance-settings': typeof AuthenticatedOwnerAttendanceSettingsRoute
   '/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/owner/banners': typeof AuthenticatedOwnerBannersRoute
+  '/owner/burger-boost': typeof AuthenticatedOwnerBurgerBoostRoute
   '/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
   '/owner/combos': typeof AuthenticatedOwnerCombosRoute
   '/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
@@ -643,6 +652,7 @@ export interface FileRoutesById {
   '/_authenticated/owner/attendance-settings': typeof AuthenticatedOwnerAttendanceSettingsRoute
   '/_authenticated/owner/attendance-workflow': typeof AuthenticatedOwnerAttendanceWorkflowRoute
   '/_authenticated/owner/banners': typeof AuthenticatedOwnerBannersRoute
+  '/_authenticated/owner/burger-boost': typeof AuthenticatedOwnerBurgerBoostRoute
   '/_authenticated/owner/challenges': typeof AuthenticatedOwnerChallengesRoute
   '/_authenticated/owner/combos': typeof AuthenticatedOwnerCombosRoute
   '/_authenticated/owner/coupons': typeof AuthenticatedOwnerCouponsRoute
@@ -715,6 +725,7 @@ export interface FileRouteTypes {
     | '/owner/attendance-settings'
     | '/owner/attendance-workflow'
     | '/owner/banners'
+    | '/owner/burger-boost'
     | '/owner/challenges'
     | '/owner/combos'
     | '/owner/coupons'
@@ -784,6 +795,7 @@ export interface FileRouteTypes {
     | '/owner/attendance-settings'
     | '/owner/attendance-workflow'
     | '/owner/banners'
+    | '/owner/burger-boost'
     | '/owner/challenges'
     | '/owner/combos'
     | '/owner/coupons'
@@ -854,6 +866,7 @@ export interface FileRouteTypes {
     | '/_authenticated/owner/attendance-settings'
     | '/_authenticated/owner/attendance-workflow'
     | '/_authenticated/owner/banners'
+    | '/_authenticated/owner/burger-boost'
     | '/_authenticated/owner/challenges'
     | '/_authenticated/owner/combos'
     | '/_authenticated/owner/coupons'
@@ -1166,6 +1179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOwnerBannersRouteImport
       parentRoute: typeof AuthenticatedOwnerRoute
     }
+    '/_authenticated/owner/burger-boost': {
+      id: '/_authenticated/owner/burger-boost'
+      path: '/burger-boost'
+      fullPath: '/owner/burger-boost'
+      preLoaderRoute: typeof AuthenticatedOwnerBurgerBoostRouteImport
+      parentRoute: typeof AuthenticatedOwnerRoute
+    }
     '/_authenticated/owner/challenges': {
       id: '/_authenticated/owner/challenges'
       path: '/challenges'
@@ -1439,6 +1459,7 @@ interface AuthenticatedOwnerRouteChildren {
   AuthenticatedOwnerAttendanceSettingsRoute: typeof AuthenticatedOwnerAttendanceSettingsRoute
   AuthenticatedOwnerAttendanceWorkflowRoute: typeof AuthenticatedOwnerAttendanceWorkflowRoute
   AuthenticatedOwnerBannersRoute: typeof AuthenticatedOwnerBannersRoute
+  AuthenticatedOwnerBurgerBoostRoute: typeof AuthenticatedOwnerBurgerBoostRoute
   AuthenticatedOwnerChallengesRoute: typeof AuthenticatedOwnerChallengesRoute
   AuthenticatedOwnerCombosRoute: typeof AuthenticatedOwnerCombosRoute
   AuthenticatedOwnerCouponsRoute: typeof AuthenticatedOwnerCouponsRoute
@@ -1479,6 +1500,7 @@ const AuthenticatedOwnerRouteChildren: AuthenticatedOwnerRouteChildren = {
   AuthenticatedOwnerAttendanceWorkflowRoute:
     AuthenticatedOwnerAttendanceWorkflowRoute,
   AuthenticatedOwnerBannersRoute: AuthenticatedOwnerBannersRoute,
+  AuthenticatedOwnerBurgerBoostRoute: AuthenticatedOwnerBurgerBoostRoute,
   AuthenticatedOwnerChallengesRoute: AuthenticatedOwnerChallengesRoute,
   AuthenticatedOwnerCombosRoute: AuthenticatedOwnerCombosRoute,
   AuthenticatedOwnerCouponsRoute: AuthenticatedOwnerCouponsRoute,
