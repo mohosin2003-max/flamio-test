@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw } from "lucide-react";
 
+import { Link } from "@tanstack/react-router";
+
 import { Button } from "@/components/ui/button";
 import {
   createGame, passGate, switchLane, phaseAt, stackPercent, inTargetRange, practiceSeed,
@@ -144,6 +146,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           </ul>
           <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">Practice only: scores are not saved and no rewards or discounts are given yet.</p>
           <Button size="lg" className="w-full" onClick={start}><Play className="size-5" /> Start</Button>
+          <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}
 
@@ -163,6 +166,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           </p>
           <p className="text-xs text-muted-foreground">Practice result — not saved. Discount: 0%.</p>
           <Button size="lg" className="w-full" onClick={start}><RotateCcw className="size-5" /> Play again</Button>
+          <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}
     </div>
