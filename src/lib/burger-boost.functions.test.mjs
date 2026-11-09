@@ -123,7 +123,7 @@ describe("burger boost server API (STEP 04H)", () => {
   test("valid submission uses server seed; score + hash computed server-side; zero discount", async () => {
     const s = setup();
     const id = await started(s); s.at(30000);
-    expect(await s.api.submit(U1, { sessionId: id, playerActions: valid() })).toEqual({ ok: true, status: "completed" });
+    expect(await s.api.submit(U1, { sessionId: id, playerActions: valid() })).toEqual({ ok: true, status: "completed", verifiedScore: expect.any(Number), awardedDiscountPercent: 0 });
     const row = s.transport.rows.get(id);
     expect(row.status).toBe("completed");
     expect(row.telemetry_hash).toBe(await sha256Hex(canonicalTelemetry(valid())));
@@ -254,13 +254,13 @@ describe("public gate delivery (STEP 46C)", () => {
     });
   });
 
-  test("no seed, correctLane, spoiledLane or replay data exposed", async () => {
+  test("no seed, correctLane or replay data exposed (spoiledLane allowed)", async () => {
     const r = await setup().api.create(U1, {});
     const json = JSON.stringify(r);
     expect(json).not.toContain(SEED);
-    expect(json).not.toMatch(/correctLane|spoiledLane|seed|score|hash|discount|idempotency/i);
+    expect(json).not.toMatch(/correctLane|seed|score|hash|discount|idempotency/i);
     for (const g of r.publicGates) {
-      expect(["a,b,kind,lanes,op", "kind,lanes", "kind,spoiled"]).toContain(Object.keys(g).sort().join(","));
+      expect(["a,b,kind,lanes,op", "kind,lanes", "kind,spoiled,spoiledLane"]).toContain(Object.keys(g).sort().join(","));
     }
   });
 

@@ -54,7 +54,7 @@ describe("burger boost session core", () => {
     const { svc, repo, at, clock } = setup();
     const { sessionId } = await svc.start("u1"); at(clock + 30000);
     const res = await svc.submit(sessionId, "u1", { playerActions: validActions() });
-    expect(res).toEqual({ ok: true, status: "completed" });
+    expect(res).toMatchObject({ ok: true, status: "completed" }); expect(typeof res.verifiedScore).toBe("number");
     expect(Object.keys(res)).not.toContain("score");
     const row = repo.rows.get(sessionId);
     expect(row.telemetryHash).toBe(await sha256Hex(canonicalTelemetry(validActions())));

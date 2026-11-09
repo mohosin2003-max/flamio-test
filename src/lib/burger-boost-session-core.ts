@@ -69,7 +69,7 @@ export type SessionDTO = {
 };
 
 export type SubmitResult =
-  | { ok: true; status: "completed" }
+  | { ok: true; status: "completed"; verifiedScore: number }
   | { ok: false; status: SessionStatus | "not_found" | "clock_anomaly"; error: string };
 
 // ---------- Seed ----------
@@ -174,7 +174,7 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       const hash = await sha256Hex(canonicalTelemetry(actions as { gateIndex: number; lane: number; t: number }[]));
       const won = await deps.repo.completeIfInProgress(id, userId, { verifiedScore: result.score, telemetryHash: hash, completedAt: now });
       if (!won) return { ok: false, status: "completed", error: "session already finalized" };
-      return { ok: true, status: "completed" };
+      return { ok: true, status: "completed", verifiedScore: result.score };
 
       async function reject(error = "invalid replay"): Promise<SubmitResult> {
         await deps.repo.transitionIfInProgress(id, userId, "rejected");

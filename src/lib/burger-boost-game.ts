@@ -13,7 +13,7 @@
 import {
   generateTrack, simulateBurgerBoostReplay, PROVISIONAL_SCORE, RULES_VERSION,
   GAMEPLAY_DURATION_MS, GRACE_PERIOD_MS, HARD_CUTOFF_MS, MIN_GATE_COUNT, MAX_GATE_COUNT,
-  type Gate, type Ingredient, type Lane, type PlayerAction,
+  type Gate, type Ingredient, type Lane, type PlayerAction, type PublicGate,
 } from "./burger-boost-rules";
 
 export const DEFAULT_GATE_COUNT = 30;
@@ -123,4 +123,49 @@ export function practiceSeed(): bigint {
   const b = new BigUint64Array(1);
   globalThis.crypto.getRandomValues(b);
   return b[0] as bigint;
+}
+
+/* ------------------------- STEP 46D: live saved session ------------------------- */
+
+/** Minimal typed handoff from createBurgerBoostSession to the game screen. */
+export type LiveSession = { sessionId: string; publicGates: PublicGate[]; expiresAt: number };
+
+/**
+ * Builds the local display track from the SERVER-supplied public gates only.
+ * Math lanes are derived from the visible operands (same info shown on screen).
+ * Returns null if any gate is malformed — live play then fails closed.
+ */
+export function trackFromPublicGates(gates: readonly PublicGate[]): Gate[] | null {
+  if (!Array.isArray(gates) || gates.length !== DEFAULT_GATE_COUNT) return null;
+  const out: Gate[] = [];
+  for (const g of gates) {
+    if (g?.kind === "math") {
+      const ans = mathAnswer(g.a, g.op, g.b);
+      const idx = ans === null ? -1 : g.lanes.indexOf(ans);
+      if (idx < 0) return null;
+      out.push({ kind: "math", a: g.a, op: g.op, b: g.b, lanes: [g.lanes[0], g.lanes[1]], correctLane: idx as Lane });
+    } else if (g?.kind === "ingredient") out.push({ kind: "ingredient", lanes: [g.lanes[0], g.lanes[1]] });
+    else if (g?.kind === "negative" && (g.spoiledLane === 0 || g.spoiledLane === 1)) out.push({ kind: "negative", spoiled: g.spoiled, spoiledLane: g.spoiledLane });
+    else return null;
+  }
+  return out;
+}
+
+/** Live game: renders exactly the server gates. Never uses a practice seed. */
+export function createLiveGame(live: LiveSession): GameState | null {
+  const track = trackFromPublicGates(live.publicGates);
+  if (!track) return null;
+  return { track, gateCount: track.length, lane: 0, nextGate: 0, actions: [], layers: [], score: 0, mathCorrect: 0, mathWrong: 0, spoiledHits: 0, phase: "running" };
+}
+
+/** Submission payload: sessionId + raw actions only. No score, seed, discount or timestamps. */
+export function buildLiveSubmission(sessionId: string, s: GameState): { sessionId: string; playerActions: PlayerAction[] } | null {
+  if (s.actions.length !== s.gateCount || s.gateCount !== DEFAULT_GATE_COUNT) return null;
+  return { sessionId, playerActions: s.actions.map((a) => ({ gateIndex: a.gateIndex, lane: a.lane, t: a.t })) };
+}
+
+/** Exactly-once finalizer: the first call runs `fn`, later calls return the same promise. */
+export function once<T>(fn: () => Promise<T>): () => Promise<T> {
+  let p: Promise<T> | null = null;
+  return () => (p ??= fn());
 }

@@ -5,13 +5,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { createBurgerBoostSession } from "@/lib/burger-boost.functions";
+import type { LiveSession } from "@/lib/burger-boost-game";
 
 /**
  * Saved (real) game entry. Never falls back to a fake session: if the server
- * can't create one, the customer sees the honest reason. Even when a session is
- * created, play stays blocked until the server sends a sanitized gate layout.
+ * can't create one, the customer sees the honest reason. On success the
+ * server session + public gates are handed to the game screen.
  */
-export function RealGamePanel() {
+export function RealGamePanel({ onLive }: { onLive: (live: LiveSession) => void }) {
   const { isAuthenticated, loading } = useAuth();
   const create = useServerFn(createBurgerBoostSession);
   const [state, setState] = useState<{ kind: "idle" | "busy" | "msg"; text?: string }>({ kind: "idle" });
@@ -20,9 +21,10 @@ export function RealGamePanel() {
     setState({ kind: "busy" });
     try {
       const r = await create({ data: {} });
-      setState({ kind: "msg", text: r.ok
-        ? "Your saved game was created, but saved play isn't switched on yet. Try practice for now."
-        : r.error });
+      if (r.ok) {
+        setState({ kind: "idle" });
+        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt });
+      } else setState({ kind: "msg", text: r.error });
     } catch {
       setState({ kind: "msg", text: "Saved games aren't available yet. Practice is open." });
     }
@@ -30,7 +32,7 @@ export function RealGamePanel() {
 
   return (
     <div className="w-full space-y-2 rounded-lg border border-border p-3 text-left text-sm">
-      <p className="font-semibold">Saved game <span className="text-xs text-muted-foreground">(coming soon)</span></p>
+      <p className="font-semibold">Saved game</p>
       {loading ? <p className="text-muted-foreground">Checking sign-in…</p>
         : !isAuthenticated ? (
           <p className="text-muted-foreground">Sign in to play saved games. <Link to="/auth" className="text-primary underline">Sign in</Link></p>

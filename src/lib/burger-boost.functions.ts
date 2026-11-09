@@ -81,7 +81,7 @@ function safe(d: SafeSession): SafeSession {
 type Service = {
   start(userId: string): Promise<SafeSession>;
   get(id: string, userId: string): Promise<SafeSession | null>;
-  submit(id: string, userId: string, payload: unknown): Promise<{ ok: boolean; status: string; error?: string }>;
+  submit(id: string, userId: string, payload: unknown): Promise<{ ok: boolean; status: string; error?: string; verifiedScore?: number }>;
   expire(id: string, userId: string): Promise<{ ok: boolean; status: string }>;
 };
 type Limiter = { checkAndRecord(key: string): boolean };
@@ -155,7 +155,11 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       try {
         // Only validated actions travel to the core; nothing else from the client.
         const r = await deps.service.submit(p.data.sessionId, uid, { playerActions: p.data.playerActions });
-        if (r.ok) return { ok: true as const, status: "completed" };
+        // verifiedScore comes only from the server replay; discount is locked at 0.
+        if (r.ok) {
+          if (typeof r.verifiedScore !== "number" || !Number.isFinite(r.verifiedScore)) throw new Error("score_missing");
+          return { ok: true as const, status: "completed" as const, verifiedScore: r.verifiedScore, awardedDiscountPercent: 0 as const };
+        }
         const error = r.status === "not_found" ? MSG.notFound
           : r.status === "expired" ? MSG.expired
           : r.status === "rejected" ? MSG.invalid

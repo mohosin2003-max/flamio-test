@@ -9,7 +9,7 @@ describe("burger boost public gates + owner overview", () => {
     expect(pub.length).toBe(30);
     const json = JSON.stringify(pub);
     expect(json).not.toContain("correctLane");
-    expect(json).not.toContain("spoiledLane");
+    // Gap 2 (owner-approved): spoiledLane is visible obstacle info.
     pub.forEach((g, i) => {
       expect(g.kind).toBe(track[i].kind);
       if (g.kind === "math") expect(g.lanes).toEqual(track[i].lanes);
