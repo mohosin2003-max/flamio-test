@@ -240,3 +240,46 @@ describe("burger boost server API (STEP 04H)", () => {
     }
   });
 });
+
+describe("public gate delivery (STEP 46C)", () => {
+  test("create returns session + exactly 30 public gates matching the server track", async () => {
+    const r = await setup().api.create(U1, {});
+    expect(r.ok).toBe(true);
+    expect(Object.keys(r).sort()).toEqual(["ok", "publicGates", "session"]);
+    expect(r.publicGates.length).toBe(30);
+    const track = generateTrack(int8StringToUnsigned(SEED), RULES_VERSION, 30);
+    r.publicGates.forEach((g, i) => {
+      expect(g.kind).toBe(track[i].kind);
+      if (g.kind === "math") expect([g.a, g.op, g.b, ...g.lanes]).toEqual([track[i].a, track[i].op, track[i].b, ...track[i].lanes]);
+    });
+  });
+
+  test("no seed, correctLane, spoiledLane or replay data exposed", async () => {
+    const r = await setup().api.create(U1, {});
+    const json = JSON.stringify(r);
+    expect(json).not.toContain(SEED);
+    expect(json).not.toMatch(/correctLane|spoiledLane|seed|score|hash|discount|idempotency/i);
+    for (const g of r.publicGates) {
+      expect(["a,b,kind,lanes,op", "kind,lanes", "kind,spoiled"]).toContain(Object.keys(g).sort().join(","));
+    }
+  });
+
+  test("invalid / unauthenticated create still rejected without gates", async () => {
+    const s = setup();
+    for (const uid of [undefined, "", "nope"]) expect(await s.api.create(uid, {})).toEqual({ ok: false, error: MSG.unauthenticated });
+    for (const bad of [{ seed: "1" }, { publicGates: [] }, { score: 9 }]) expect(await s.api.create(U1, bad)).toEqual({ ok: false, error: MSG.invalid });
+    expect(s.transport.rows.size).toBe(0);
+  });
+
+  test("gate loader is ownership-bound; missing gates fail closed", async () => {
+    const s = setup();
+    const id = await started(s);
+    const repo = createBurgerBoostSessionRepository({ transport: s.transport });
+    expect(await createPublicGateLoader(repo)(id, U2)).toBeNull();
+    const api = createBurgerBoostApi({
+      service: { start: async () => ({ sessionId: id, rulesVersion: 1, gateCount: 30, status: "in_progress", startedAt: 0, gameplayEndsAt: 60000, expiresAt: 75000 }) },
+      publicGates: async () => null, createLimiter: limiter(9), submitLimiter: limiter(9), callerKey: () => "x",
+    });
+    expect(await api.create(U1, {})).toEqual({ ok: false, error: MSG.unavailable });
+  });
+});
