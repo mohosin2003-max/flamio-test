@@ -2,14 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 
 import { Button } from "@/components/ui/button";
 import { RealGamePanel } from "@/components/burger-boost/RealGamePanel";
 import {
   createGame, passGate, switchLane, phaseAt, stackPercent, inTargetRange, practiceSeed,
   DEFAULT_GATE_COUNT, GAMEPLAY_DURATION_MS, HARD_CUTOFF_MS, STACK_TARGET_MIN, STACK_TARGET_MAX,
-  type GameState,
+  createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
+import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
 import type { Gate, Ingredient, Lane } from "@/lib/burger-boost-rules";
 
 /** Ingredient art colors (food colors, canvas only). */
@@ -32,8 +34,42 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const [paused, setPaused] = useState(false);
   const [hud, setHud] = useState({ score: 0, elapsed: 0, stack: 0, gate: 0, layers: [] as Ingredient[] });
   const [result, setResult] = useState<GameState | null>(null);
+  // Live saved session (server gates). null = practice.
+  const liveRef = useRef<LiveSession | null>(null);
+  const finalizeRef = useRef<(() => Promise<void>) | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; text?: string } | null>(null);
+  const submitFn = useServerFn(submitBurgerBoostGameplay);
+  const expireFn = useServerFn(expireBurgerBoostSession);
+
+  const startLive = useCallback((live: LiveSession) => {
+    const g = createLiveGame(live);
+    if (!g) { setVerdict({ kind: "fail", text: "This saved game couldn't be loaded." }); return; }
+    liveRef.current = live; stateRef.current = g;
+    finalizeRef.current = once(async () => {
+      const s = stateRef.current!;
+      const payload = buildLiveSubmission(live.sessionId, s);
+      try {
+        if (!payload) {
+          await expireFn({ data: { sessionId: live.sessionId } });
+          setVerdict({ kind: "fail", text: "Time ran out before all gates — this saved game wasn't counted." });
+          return;
+        }
+        const r = await submitFn({ data: payload });
+        setVerdict(r.ok && "verifiedScore" in r
+          ? { kind: "ok", score: r.verifiedScore }
+          : { kind: "fail", text: r.error ?? "This game couldn't be verified." });
+      } catch {
+        setVerdict({ kind: "fail", text: "We couldn't reach the server to verify this game." });
+      }
+    });
+    startRef.current = performance.now();
+    setIsLive(true); setVerdict({ kind: "pending" });
+    setPaused(false); setResult(null); setScreen("playing");
+  }, [submitFn, expireFn]);
 
   const start = useCallback(() => {
+    liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
     stateRef.current = createGame(practiceSeed(), gateCount);
     startRef.current = performance.now();
     setPaused(false); setResult(null); setScreen("playing");
@@ -90,7 +126,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         lastHud = now;
         setHud({ score: s.score, elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
       }
-      if (s.phase === "finished" || s.phase === "expired") { setResult(s); setScreen("over"); return; }
+      if (s.phase === "finished" || s.phase === "expired") { setResult(s); setScreen("over"); void finalizeRef.current?.(); return; }
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
@@ -108,7 +144,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     <div ref={rootRef} className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground">
       {screen === "playing" && (
         <>
-          <Hud score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)} />
+          <Hud live={isLive} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)} />
           <div
             className="relative min-h-0 flex-1 touch-none select-none"
             onTouchStart={(e) => { touchX.current = e.touches[0]?.clientX ?? null; }}
@@ -147,7 +183,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           </ul>
           <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">Practice only: scores are not saved and no rewards or discounts are given yet.</p>
           <Button size="lg" className="w-full" onClick={start}><Play className="size-5" /> Start practice</Button>
-          <RealGamePanel />
+          <RealGamePanel onLive={startLive} />
           <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}
@@ -155,8 +191,16 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       {screen === "over" && result && (
         <Overlay>
           <h2 className="font-display text-3xl font-black">{result.phase === "expired" ? "Time’s up!" : "Finished!"}</h2>
-          <p className="font-display text-6xl font-black text-primary">{result.score}</p>
-          <p className="text-sm text-muted-foreground">practice score</p>
+          {isLive ? (
+            verdict?.kind === "ok" ? (<>
+              <p className="font-display text-6xl font-black text-primary">{verdict.score}</p>
+              <p className="text-sm text-muted-foreground">verified score</p>
+            </>) : verdict?.kind === "fail" ? <p role="status" className="text-sm text-destructive">{verdict.text}</p>
+              : <p role="status" className="text-sm text-muted-foreground">Verifying your game…</p>
+          ) : (<>
+            <p className="font-display text-6xl font-black text-primary">{result.score}</p>
+            <p className="text-sm text-muted-foreground">practice score</p>
+          </>)}
           <BurgerStack layers={result.layers} />
           <dl className="grid w-full grid-cols-3 gap-2 text-sm">
             <Stat label="Correct" value={result.mathCorrect} />
@@ -166,8 +210,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           <p className={inTargetRange(stackPercent(result)) ? "text-sm font-semibold text-primary" : "text-sm text-muted-foreground"}>
             Stack {stackPercent(result)}% — {inTargetRange(stackPercent(result)) ? "in the target zone!" : `target is ${STACK_TARGET_MIN}–${STACK_TARGET_MAX}%`}
           </p>
-          <p className="text-xs text-muted-foreground">Practice result — not saved. Discount: 0%.</p>
-          <Button size="lg" className="w-full" onClick={start}><RotateCcw className="size-5" /> Play again</Button>
+          <p className="text-xs text-muted-foreground">{isLive ? "Saved game — score checked by Flamio. Discount: 0%." : "Practice result — not saved. Discount: 0%."}</p>
+          <Button size="lg" className="w-full" onClick={start}><RotateCcw className="size-5" /> {isLive ? "Play practice" : "Play again"}</Button>
           <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}
@@ -175,7 +219,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   );
 }
 
-function Hud(p: { score: number; remaining: number; grace: boolean; graceLeft: number; stack: number; gate: number; total: number; onPause: () => void }) {
+function Hud(p: { live: boolean; score: number; remaining: number; grace: boolean; graceLeft: number; stack: number; gate: number; total: number; onPause: () => void }) {
   const ok = inTargetRange(p.stack);
   return (
     <div className="space-y-2 border-b border-border bg-card/80 px-3 py-2">
@@ -183,7 +227,7 @@ function Hud(p: { score: number; remaining: number; grace: boolean; graceLeft: n
         <div aria-live="polite" className={p.grace ? "font-display text-xl font-bold text-destructive" : "font-display text-xl font-bold"}>
           {p.grace ? `Grace ${Math.ceil(p.graceLeft / 1000)}s` : `${Math.ceil(p.remaining / 1000)}s`}
         </div>
-        <div className="text-center"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Score</div><div className="font-display text-xl font-bold text-primary">{p.score}</div></div>
+        <div className="text-center"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Score</div><div className="font-display text-xl font-bold text-primary">{p.live ? "—" : p.score}</div></div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{p.gate}/{p.total}</span>
           <Button size="icon" variant="ghost" onClick={p.onPause} aria-label="Pause"><Pause className="size-5" /></Button>
