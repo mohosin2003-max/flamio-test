@@ -5,6 +5,8 @@ import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Button } from "@/components/ui/button";
+import { drawEnvironment } from "@/components/burger-boost/renderers/environment";
+import type { Colors, EnvFrame } from "@/components/burger-boost/renderers/types";
 import { RealGamePanel } from "@/components/burger-boost/RealGamePanel";
 import {
   createGame, passGate, switchLane, phaseAt, stackPercent, inTargetRange, practiceSeed,
@@ -262,17 +264,13 @@ function BurgerStack({ layers }: { layers: Ingredient[] }) {
 
 /* ------------------------------ canvas draw ------------------------------ */
 
-type Colors = { bg: string; fg: string; primary: string; muted: string; destructive: string };
+const envFrame: EnvFrame = { W: 0, H: 0, horizon: 0, playerY: 0, speed: 0, proj: () => ({ y: 0, left: 0, right: 0, scale: 0 }), C: { bg: "", fg: "", primary: "", muted: "", destructive: "" } };
 
 function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState, elapsed: number, interval: number, C: Colors, flash: { text: string; good: boolean; at: number } | null, now: number) {
   const dpr = cv.width / cv.getBoundingClientRect().width || 1;
   const W = cv.width / dpr, H = cv.height / dpr;
   const horizon = H * 0.12, playerY = H - 130;
   ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
-  // glow sky
-  const g = ctx.createLinearGradient(0, 0, 0, horizon * 3);
-  g.addColorStop(0, C.primary); g.addColorStop(1, "transparent");
-  ctx.globalAlpha = 0.25; ctx.fillStyle = g; ctx.fillRect(0, 0, W, horizon * 3); ctx.globalAlpha = 1;
 
   // perspective: depth d in [0,1] (0 = horizon, 1 = player)
   const proj = (d: number) => {
@@ -280,19 +278,10 @@ function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState
     const half = W * (0.08 + 0.38 * d * d);
     return { y, left: W / 2 - half, right: W / 2 + half, scale: 0.15 + 0.85 * d * d };
   };
-  // road
-  const top = proj(0), bot = proj(1.15);
-  ctx.fillStyle = C.muted; ctx.beginPath();
-  ctx.moveTo(top.left, top.y); ctx.lineTo(top.right, top.y); ctx.lineTo(bot.right + 40, H); ctx.lineTo(bot.left - 40, H); ctx.closePath(); ctx.fill();
-  // moving stripes
-  const speed = elapsed / interval;
-  ctx.strokeStyle = C.primary; ctx.lineWidth = 2;
-  for (let k = 0; k < 8; k++) {
-    const d = ((k / 8 + (speed % 1) / 8 * 8 / 8 + speed * 0.25) % 1);
-    const a = proj(d), b = proj(Math.min(1.1, d + 0.04));
-    ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(W / 2, a.y); ctx.lineTo(W / 2, b.y); ctx.lineWidth = 1 + 4 * a.scale; ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
+  // environment (sky, skyline, road, curbs, lamps, billboards) — same clock as gates
+  envFrame.W = W; envFrame.H = H; envFrame.horizon = horizon; envFrame.playerY = playerY;
+  envFrame.speed = elapsed / interval; envFrame.proj = proj; envFrame.C = C;
+  drawEnvironment(ctx, envFrame);
 
   // gates: gate i hits player at (i+1)*interval; visible ~4 gates ahead
   const view = interval * 4;
