@@ -13,7 +13,7 @@
 import {
   generateTrack, simulateBurgerBoostReplay, PROVISIONAL_SCORE, RULES_VERSION,
   GAMEPLAY_DURATION_MS, GRACE_PERIOD_MS, HARD_CUTOFF_MS, MIN_GATE_COUNT, MAX_GATE_COUNT,
-  type Gate, type Ingredient, type Lane, type PlayerAction,
+  type Gate, type Ingredient, type Lane, type PlayerAction, type PublicGate,
 } from "./burger-boost-rules";
 
 export const DEFAULT_GATE_COUNT = 30;
@@ -126,7 +126,6 @@ export function practiceSeed(): bigint {
 }
 
 /* ------------------------- STEP 46D: live saved session ------------------------- */
-import type { PublicGate } from "./burger-boost-rules";
 
 /** Minimal typed handoff from createBurgerBoostSession to the game screen. */
 export type LiveSession = { sessionId: string; publicGates: PublicGate[]; expiresAt: number };
