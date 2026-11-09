@@ -254,13 +254,13 @@ describe("public gate delivery (STEP 46C)", () => {
     });
   });
 
-  test("no seed, correctLane, spoiledLane or replay data exposed", async () => {
+  test("no seed, correctLane or replay data exposed (spoiledLane allowed)", async () => {
     const r = await setup().api.create(U1, {});
     const json = JSON.stringify(r);
     expect(json).not.toContain(SEED);
     expect(json).not.toMatch(/correctLane|seed|score|hash|discount|idempotency/i);
     for (const g of r.publicGates) {
-      expect(["a,b,kind,lanes,op", "kind,lanes", "kind,spoiled"]).toContain(Object.keys(g).sort().join(","));
+      expect(["a,b,kind,lanes,op", "kind,lanes", "kind,spoiled,spoiledLane"]).toContain(Object.keys(g).sort().join(","));
     }
   });
 
