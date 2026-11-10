@@ -3,14 +3,19 @@
  * Animation is driven by the caller's existing `now` timestamp and by
  * already-resolved game state (lane, layers, spoiledHits). It never decides
  * lanes, outcomes, score or timing.
+ *
+ * Everything is drawn in a fixed "unit space" (ctx.scale), so gradients are
+ * created once per canvas context and reused every frame.
  */
 import type { Ingredient, Lane } from "@/lib/burger-boost-rules";
-import { LAYER_COLOR } from "./gates";
 
 type Ctx = CanvasRenderingContext2D;
 
-const FUR = "#f28a2e", FUR_DARK = "#c95f12", CREAM = "#fbefd6", SUIT = "#2a2624", SUIT_HI = "#3a3532";
-const SEAM = "#f26b1d", CAPE = "#e8590c", CAPE_IN = "#b8430a", MASK = "#16a34a", GOLD = "#e8b23a";
+/* palette */
+const FUR = "#f7902f", FUR_DARK = "#cf5f10", FUR_LIGHT = "#ffb766", CREAM = "#fff1d8", PINK = "#ffb3a7";
+const SUIT = "#0f7c80", SUIT_DARK = "#08565a", SUIT_LIGHT = "#2bb5b0";
+const ACCENT = "#ff7a1a", GOLD = "#f4c14a", MASK = "#10b981", MASK_DARK = "#047857";
+const CAPE = "#ff6a13", CAPE_DARK = "#c2410c";
 
 export const RUN_CYCLE_MS = 320;
 export const SWITCH_MS = 180;
@@ -46,159 +51,368 @@ export function updateMascot(a: MascotAnim, lane: Lane, laneX: number, layers: n
   return a.fromX + (a.toX - a.fromX) * ease((now - a.switchAt) / SWITCH_MS);
 }
 
-/* ------------------------------ parts ------------------------------------ */
+/* --------------------------- cached gradients ------------------------------ */
 
-function burger(ctx: Ctx, x: number, y: number, w: number, layers: readonly Ingredient[]) {
-  // golden platter
-  ctx.fillStyle = GOLD; ctx.beginPath(); ctx.ellipse(x, y, w * 0.72, w * 0.14, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#fff1b8"; ctx.beginPath(); ctx.ellipse(x - w * 0.2, y - w * 0.03, w * 0.22, w * 0.04, 0, 0, Math.PI * 2); ctx.fill();
-  let cy = y - w * 0.08;
-  ctx.fillStyle = "#c9832f"; ctx.beginPath(); ctx.roundRect(x - w * 0.45, cy - w * 0.12, w * 0.9, w * 0.12, w * 0.06); ctx.fill();
-  cy -= w * 0.12;
-  const lh = Math.max(2, w * 0.075);
-  for (let i = 0; i < layers.length; i++) {
-    ctx.fillStyle = LAYER_COLOR[layers[i]!] ?? "#999";
-    ctx.beginPath(); ctx.roundRect(x - w * 0.47, cy - lh, w * 0.94, lh, lh / 2); ctx.fill(); cy -= lh * 0.92;
-  }
-  ctx.fillStyle = "#e09a3e"; ctx.beginPath(); ctx.ellipse(x, cy, w * 0.47, w * 0.28, 0, Math.PI, 0); ctx.fill();
-  ctx.fillStyle = "#fff3d6";
-  for (const [dx, dy] of [[-0.2, -0.12], [0.05, -0.2], [0.22, -0.1], [-0.05, -0.08]] as const) {
-    ctx.beginPath(); ctx.ellipse(x + dx * w, cy + dy * w, w * 0.03, w * 0.018, 0.4, 0, Math.PI * 2); ctx.fill();
+type Grads = {
+  suit: CanvasGradient; suitRim: CanvasGradient; head: CanvasGradient; leg: CanvasGradient;
+  cape: CanvasGradient; letters: CanvasGradient; mask: CanvasGradient;
+  bunTop: CanvasGradient; bunGloss: CanvasGradient; bunBottom: CanvasGradient; patty: CanvasGradient;
+  cheese: CanvasGradient; tomato: CanvasGradient; plate: CanvasGradient;
+  vSuit: CanvasGradient; vHead: CanvasGradient;
+};
+const gradCache = new WeakMap<Ctx, Grads>();
+
+function lin(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, stops: ReadonlyArray<readonly [number, string]>) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, c);
+  return g;
+}
+function rad(ctx: Ctx, x0: number, y0: number, r0: number, x1: number, y1: number, r1: number, stops: ReadonlyArray<readonly [number, string]>) {
+  const g = ctx.createRadialGradient(x0, y0, r0, x1, y1, r1);
+  for (const [o, c] of stops) g.addColorStop(o, c);
+  return g;
+}
+
+function grads(ctx: Ctx): Grads {
+  let g = gradCache.get(ctx);
+  if (g) return g;
+  g = {
+    // running cat (unit space: feet at y=0, head ≈ y=-100)
+    suit: lin(ctx, -26, 0, 26, 0, [[0, SUIT_DARK], [0.45, SUIT], [0.75, SUIT_LIGHT], [1, SUIT_DARK]]),
+    suitRim: lin(ctx, 0, -80, 0, -30, [[0, "rgba(160,255,245,0.55)"], [0.3, "rgba(160,255,245,0)"]]),
+    head: rad(ctx, 6, -104, 2, 0, -96, 24, [[0, FUR_LIGHT], [0.6, FUR], [1, FUR_DARK]]),
+    leg: lin(ctx, -8, 0, 8, 0, [[0, SUIT_DARK], [0.5, SUIT], [1, SUIT_DARK]]),
+    cape: lin(ctx, 0, -78, 0, -20, [[0, CAPE], [1, CAPE_DARK]]),
+    letters: lin(ctx, 0, -70, 0, -55, [[0, "#fff6c2"], [0.45, GOLD], [1, ACCENT]]),
+    mask: lin(ctx, 0, -100, 0, -92, [[0, "#34d399"], [1, MASK_DARK]]),
+    // burger (unit space: width 100, bottom at y=0)
+    bunTop: rad(ctx, -14, -30, 4, 0, -12, 56, [[0, "#ffd08a"], [0.45, "#e59a3c"], [0.85, "#b8661f"], [1, "#8a4513"]]),
+    bunGloss: lin(ctx, 0, -40, 0, -16, [[0, "rgba(255,255,255,0.55)"], [1, "rgba(255,255,255,0)"]]),
+    bunBottom: lin(ctx, 0, -12, 0, 0, [[0, "#f0b25e"], [0.6, "#c97b2c"], [1, "#8a4a16"]]),
+    patty: lin(ctx, 0, -10, 0, 0, [[0, "#7a3b1a"], [0.5, "#5a2a12"], [1, "#3a1a0a"]]),
+    cheese: lin(ctx, 0, -4, 0, 6, [[0, "#ffe27a"], [0.5, "#f7b928"], [1, "#e09412"]]),
+    tomato: lin(ctx, 0, -5, 0, 0, [[0, "#ff6b55"], [1, "#b8231a"]]),
+    plate: rad(ctx, -20, -4, 2, 0, 0, 70, [[0, "#fff6d0"], [0.5, GOLD], [1, "#a8781c"]]),
+    // victory (front view)
+    vSuit: rad(ctx, -8, -50, 4, 0, -36, 40, [[0, SUIT_LIGHT], [0.6, SUIT], [1, SUIT_DARK]]),
+    vHead: rad(ctx, -8, -96, 4, 0, -88, 30, [[0, FUR_LIGHT], [0.6, FUR], [1, FUR_DARK]]),
+  };
+  gradCache.set(ctx, g);
+  return g;
+}
+
+/* ------------------------------- burger ----------------------------------- */
+
+const GREEN = ["#2f9e44", "#69db7c", "#b2f2bb"] as const;
+
+/** One ingredient layer in burger unit space; returns its height. Top of layer at y. */
+function layer(ctx: Ctx, G: Grads, kind: Ingredient, y: number, i: number): number {
+  const wob = (i % 2 ? 1 : -1) * 1.5;
+  switch (kind) {
+    case "cheese": {
+      ctx.fillStyle = G.cheese;
+      ctx.save(); ctx.translate(0, y);
+      ctx.beginPath(); ctx.moveTo(-47, 0); ctx.lineTo(47, 0); ctx.lineTo(47, 3);
+      // melted drips
+      ctx.quadraticCurveTo(40, 3, 38, 10); ctx.quadraticCurveTo(35, 14, 32, 4);
+      ctx.lineTo(8, 4); ctx.quadraticCurveTo(4, 4, 3, 12); ctx.quadraticCurveTo(0, 16, -3, 5);
+      ctx.lineTo(-26, 5); ctx.quadraticCurveTo(-30, 5, -31, 11); ctx.quadraticCurveTo(-34, 14, -37, 4);
+      ctx.lineTo(-47, 3); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fillRect(-30, 0.6, 22, 1.2);
+      ctx.restore();
+      return 4;
+    }
+    case "lettuce": {
+      ctx.save(); ctx.translate(wob, y);
+      for (let k = 0; k < 3; k++) {
+        ctx.fillStyle = GREEN[k]!;
+        const w = 52 - k * 4, dy = k * 1.2;
+        ctx.beginPath(); ctx.moveTo(-w, dy + 3);
+        for (let j = 0; j <= 10; j++) { const x = -w + (2 * w * j) / 10; ctx.quadraticCurveTo(x - w / 10, dy + (j % 2 ? 7 : -1), x, dy + 3); }
+        ctx.lineTo(w - 4, dy + 6); ctx.lineTo(-w + 4, dy + 6); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+      return 6;
+    }
+    case "tomato": {
+      ctx.save(); ctx.translate(0, y);
+      for (const cx of [-22, 22]) {
+        ctx.fillStyle = G.tomato; ctx.beginPath(); ctx.ellipse(cx, 2.5, 25, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffd36a";
+        for (const sx of [-12, -4, 4, 12]) { ctx.beginPath(); ctx.ellipse(cx + sx, 2, 1.6, 0.9, 0, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.beginPath(); ctx.ellipse(cx - 10, 0.8, 7, 0.8, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      return 5;
+    }
+    case "cucumber": {
+      ctx.save(); ctx.translate(0, y);
+      for (const cx of [-30, -10, 10, 30]) {
+        ctx.fillStyle = "#1f6f3a"; ctx.beginPath(); ctx.ellipse(cx, 2, 11, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#b9e4a0"; ctx.beginPath(); ctx.ellipse(cx, 1.6, 9, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#e9f7dc"; ctx.beginPath(); ctx.ellipse(cx, 1.6, 3, 0.8, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      return 4;
+    }
+    case "sausage": {
+      ctx.save(); ctx.translate(0, y);
+      ctx.fillStyle = G.patty; ctx.beginPath(); ctx.roundRect(-46, 0, 92, 8, 4); ctx.fill();
+      ctx.strokeStyle = "#2a1006"; ctx.lineWidth = 1.4;
+      for (const gx of [-30, -14, 2, 18, 34]) { ctx.beginPath(); ctx.moveTo(gx - 4, 1.5); ctx.lineTo(gx + 4, 6.5); ctx.stroke(); }
+      ctx.fillStyle = "rgba(255,190,140,0.35)"; ctx.fillRect(-38, 1, 60, 1);
+      ctx.restore();
+      return 8;
+    }
+    case "sauce": {
+      ctx.save(); ctx.translate(0, y);
+      ctx.fillStyle = "#c81e1e";
+      ctx.beginPath(); ctx.moveTo(-46, 0); ctx.lineTo(46, 0); ctx.lineTo(46, 2);
+      ctx.quadraticCurveTo(22, 2, 20, 7); ctx.quadraticCurveTo(18, 9, 16, 3);
+      ctx.lineTo(-14, 3); ctx.quadraticCurveTo(-16, 8, -19, 3); ctx.lineTo(-46, 2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.beginPath(); ctx.ellipse(-20, 1, 10, 0.7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      return 3;
+    }
+    case "mayo": {
+      ctx.save(); ctx.translate(0, y);
+      ctx.strokeStyle = "#fffaf0"; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-44, 2);
+      for (let j = 1; j <= 8; j++) ctx.quadraticCurveTo(-44 + j * 11 - 5.5, j % 2 ? -1 : 5, -44 + j * 11, 2);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(220,205,170,0.8)"; ctx.lineWidth = 0.8; ctx.stroke();
+      ctx.lineCap = "butt";
+      ctx.restore();
+      return 3;
+    }
+    case "carrot": {
+      ctx.save(); ctx.translate(0, y);
+      for (const cx of [-32, -11, 11, 32]) {
+        ctx.fillStyle = "#e8590c"; ctx.beginPath(); ctx.ellipse(cx, 2, 10, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffa94d"; ctx.beginPath(); ctx.ellipse(cx, 1.6, 6, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      return 4;
+    }
+    default: return 0;
   }
 }
 
-function capeShape(ctx: Ctx, sx: number, sy: number, len: number, flap: number, wide: number) {
-  ctx.beginPath();
-  ctx.moveTo(sx - wide * 0.5, sy);
-  ctx.quadraticCurveTo(sx - wide * 0.85 - flap, sy + len * 0.55, sx - wide * 0.7 - flap * 1.4, sy + len);
-  ctx.quadraticCurveTo(sx, sy + len * (0.9 + 0.06 * Math.sin(flap)), sx + wide * 0.7 + flap * 1.2, sy + len);
-  ctx.quadraticCurveTo(sx + wide * 0.85 + flap, sy + len * 0.55, sx + wide * 0.5, sy);
-  ctx.closePath();
+/**
+ * Juicy burger centred at (x, bottomY) with `w` px width. Always has a grilled
+ * patty; collected `layers` stack above it in order (verified game state only).
+ */
+function burger(ctx: Ctx, x: number, bottomY: number, w: number, layers: readonly Ingredient[], plate: boolean) {
+  const G = grads(ctx);
+  ctx.save();
+  ctx.translate(x, bottomY); ctx.scale(w / 100, w / 100);
+  if (plate) {
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.ellipse(0, 4, 64, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = G.plate; ctx.beginPath(); ctx.ellipse(0, 0, 62, 8, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  // bottom bun
+  ctx.fillStyle = G.bunBottom; ctx.beginPath(); ctx.roundRect(-46, -12, 92, 12, [3, 3, 10, 10]); ctx.fill();
+  ctx.fillStyle = "rgba(255,230,180,0.35)"; ctx.fillRect(-42, -11, 84, 1.5);
+  let y = -12;
+  // grilled beef patty (always present)
+  y -= 10;
+  ctx.fillStyle = G.patty; ctx.beginPath();
+  ctx.moveTo(-48, y + 3); ctx.quadraticCurveTo(-50, y + 10, -44, y + 10.5); ctx.lineTo(44, y + 10.5);
+  ctx.quadraticCurveTo(50, y + 10, 48, y + 3); ctx.quadraticCurveTo(46, y - 0.5, 38, y); ctx.lineTo(-38, y);
+  ctx.quadraticCurveTo(-46, y - 0.5, -48, y + 3); ctx.fill();
+  ctx.strokeStyle = "#241005"; ctx.lineWidth = 1.6;
+  for (const gx of [-32, -16, 0, 16, 32]) { ctx.beginPath(); ctx.moveTo(gx - 5, y + 2); ctx.lineTo(gx + 5, y + 8); ctx.stroke(); }
+  ctx.fillStyle = "rgba(170,90,50,0.6)";
+  for (const [dx, dy] of [[-22, 4], [10, 6], [28, 3], [-4, 7]] as const) { ctx.beginPath(); ctx.arc(dx, y + dy, 1, 0, Math.PI * 2); ctx.fill(); }
+  // collected layers (latest on top)
+  for (let i = 0; i < layers.length; i++) {
+    const h = layer(ctx, G, layers[i]!, y - 4, i);
+    y -= Math.max(3, h * 0.8);
+  }
+  // top bun
+  ctx.fillStyle = G.bunTop; ctx.beginPath();
+  ctx.moveTo(-48, y); ctx.bezierCurveTo(-48, y - 34, 48, y - 34, 48, y);
+  ctx.quadraticCurveTo(0, y + 4, -48, y); ctx.fill();
+  ctx.save(); ctx.translate(0, y + 12);
+  ctx.fillStyle = G.bunGloss; ctx.beginPath(); ctx.ellipse(-12, -32, 22, 6, -0.15, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // sesame seeds with shadow
+  for (const [dx, dy, r] of [[-26, 10, 0.5], [-12, 18, -0.4], [4, 21, 0.3], [20, 16, -0.6], [32, 8, 0.4], [-34, 4, -0.3], [-2, 11, 0.7], [14, 6, -0.2], [-18, 6, 0.2]] as const) {
+    ctx.fillStyle = "rgba(110,55,15,0.45)"; ctx.beginPath(); ctx.ellipse(dx + 0.6, y - dy + 0.8, 2.6, 1.3, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff4d6"; ctx.beginPath(); ctx.ellipse(dx, y - dy, 2.6, 1.3, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 /* ----------------------------- running cat -------------------------------- */
 
+function arcText(ctx: Ctx, word: string, cx: number, cy: number, radius: number, spread: number) {
+  const n = word.length;
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (i - (n - 1) / 2) * spread;
+    ctx.save();
+    ctx.translate(cx + Math.cos(a) * radius, cy + radius + Math.sin(a) * radius);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.strokeText(word[i]!, 0, 0);
+    ctx.fillText(word[i]!, 0, 0);
+    ctx.restore();
+  }
+}
+
 /** Rear three-quarter running cat at (x, footY). `size` ≈ body height in px. */
 export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, size: number, layers: readonly Ingredient[], now: number) {
+  const G = grads(ctx);
   ctx.save();
   try {
     const phase = (now % RUN_CYCLE_MS) / RUN_CYCLE_MS; // 0..1
     const frame = Math.floor(phase * 4); // 4-phase cycle
     const stride = Math.sin(phase * Math.PI * 2);
-    let bob = Math.abs(Math.cos(phase * Math.PI * 2)) * size * 0.035;
+    let bob = Math.abs(Math.cos(phase * Math.PI * 2)) * 3.5;
 
     const sw = (now - a.switchAt) / SWITCH_MS;
     const dir = Math.sign(a.toX - a.fromX);
     const bank = sw < 1 ? dir * MAX_BANK * Math.sin(Math.PI * Math.min(1, Math.max(0, sw))) : 0;
 
     const ct = (now - a.collectAt) / COLLECT_MS;
-    if (ct >= 0 && ct < 1) bob += Math.sin(ct * Math.PI) * size * 0.12;
+    if (ct >= 0 && ct < 1) bob += Math.sin(ct * Math.PI) * 12;
     const ft = (now - a.flinchAt) / FLINCH_MS;
     const flinching = ft >= 0 && ft < 1;
-    const recoil = flinching ? Math.sin(ft * Math.PI) * size * 0.08 : 0;
-    const shake = flinching ? Math.sin(ft * 40) * size * 0.02 : 0;
+    const recoil = flinching ? Math.sin(ft * Math.PI) * 8 : 0;
+    const shake = flinching ? Math.sin(ft * 40) * 2 : 0;
 
-    ctx.translate(x + shake, footY - bob + recoil);
-    ctx.rotate(bank);
     const u = size / 100;
+    ctx.translate(x, footY);
+    ctx.scale(u, u);
+    ctx.translate(shake, -bob + recoil);
+    ctx.rotate(bank);
 
     // ground shadow
     ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.beginPath(); ctx.ellipse(0, bob - recoil + 2 * u, 30 * u, 7 * u, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, bob - recoil + 2, 32, 7, 0, 0, Math.PI * 2); ctx.fill();
 
-    // legs (alternating)
+    // tail (behind legs, swishes with stride)
+    ctx.lineCap = "round";
+    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(-4, -32);
+    ctx.bezierCurveTo(-28, -30, -34 + stride * 6, -54, -22 + stride * 9, -70); ctx.stroke();
+    ctx.strokeStyle = FUR; ctx.lineWidth = 6.5; ctx.stroke();
+    ctx.strokeStyle = CREAM; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(-23 + stride * 9, -66); ctx.lineTo(-22 + stride * 9, -70); ctx.stroke();
+
+    // legs: teal tights + orange boots with paw pads
     for (const side of [-1, 1] as const) {
-      const lift = Math.max(0, stride * side) * 14 * u;
-      const lx = side * 12 * u;
-      ctx.fillStyle = SUIT; ctx.beginPath(); ctx.roundRect(lx - 7 * u, -30 * u, 14 * u, 26 * u - lift, 7 * u); ctx.fill();
-      ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(lx, -4 * u - lift, 9 * u, 6 * u, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#ffc8a8"; ctx.beginPath(); ctx.ellipse(lx, -2 * u - lift, 5 * u, 3 * u, 0, 0, Math.PI * 2); ctx.fill(); // paw pad (rear view)
+      const lift = Math.max(0, stride * side) * 13;
+      const lx = side * 11;
+      ctx.fillStyle = G.leg;
+      ctx.beginPath(); ctx.moveTo(lx - 7, -34); ctx.quadraticCurveTo(lx - 9, -18 - lift, lx - 6, -8 - lift);
+      ctx.lineTo(lx + 6, -8 - lift); ctx.quadraticCurveTo(lx + 9, -18 - lift, lx + 7, -34); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = ACCENT; ctx.beginPath(); ctx.roundRect(lx - 7, -12 - lift, 14, 6, 3); ctx.fill();
+      ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(lx, -4 - lift, 8.5, 5.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(lx, -2.5 - lift, 4.5, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      for (const tx of [-4.5, 0, 4.5]) { ctx.beginPath(); ctx.arc(lx + tx, -6 - lift, 1.5, 0, Math.PI * 2); ctx.fill(); }
     }
 
-    // tail
-    ctx.strokeStyle = FUR; ctx.lineWidth = 7 * u; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(4 * u, -34 * u);
-    ctx.bezierCurveTo(26 * u, -36 * u, 30 * u + stride * 6 * u, -58 * u, 22 * u + stride * 8 * u, -70 * u); ctx.stroke();
-    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 3 * u;
-    ctx.beginPath(); ctx.moveTo(24 * u, -50 * u); ctx.lineTo(28 * u, -54 * u); ctx.stroke();
-    ctx.lineCap = "butt";
+    // cape: split flaps hanging from shoulders on both sides — the back stays visible
+    const flap = stride * 3 + (flinching ? Math.sin(ft * 30) * 7 : 0);
+    ctx.fillStyle = G.cape;
+    for (const side of [-1, 1] as const) {
+      const f = flap * side;
+      ctx.beginPath();
+      ctx.moveTo(side * 14, -80);
+      ctx.quadraticCurveTo(side * 34 + f, -60, side * 32 + f * 1.6, -26);
+      ctx.lineTo(side * 22 + f, -30);
+      ctx.quadraticCurveTo(side * 22, -56, side * 10, -76);
+      ctx.closePath(); ctx.fill();
+    }
 
-    // torso (suit)
-    ctx.fillStyle = SUIT;
-    ctx.beginPath(); ctx.moveTo(-20 * u, -30 * u);
-    ctx.bezierCurveTo(-26 * u, -50 * u, -22 * u, -70 * u, -14 * u, -76 * u);
-    ctx.lineTo(14 * u, -76 * u);
-    ctx.bezierCurveTo(22 * u, -70 * u, 26 * u, -50 * u, 20 * u, -30 * u);
+    // torso (athletic, tapered)
+    ctx.fillStyle = G.suit;
+    ctx.beginPath(); ctx.moveTo(-17, -32);
+    ctx.bezierCurveTo(-25, -46, -27, -70, -18, -80);
+    ctx.quadraticCurveTo(0, -85, 18, -80);
+    ctx.bezierCurveTo(27, -70, 25, -46, 17, -32);
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = SEAM; ctx.lineWidth = 2 * u;
-    ctx.beginPath(); ctx.moveTo(0, -76 * u); ctx.lineTo(0, -32 * u); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-20 * u, -36 * u); ctx.lineTo(20 * u, -36 * u); ctx.stroke(); // belt
+    ctx.fillStyle = G.suitRim; ctx.fill();
+    // orange side panels + gold belt
+    ctx.strokeStyle = ACCENT; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-22, -70); ctx.quadraticCurveTo(-23, -50, -17, -36); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(22, -70); ctx.quadraticCurveTo(23, -50, 17, -36); ctx.stroke();
+    ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-18, -38, 36, 4.5, 2); ctx.fill();
+    ctx.fillStyle = ACCENT; ctx.beginPath(); ctx.roundRect(-4, -38.5, 8, 5.5, 1.5); ctx.fill();
 
-    // cape (synced with run cycle, flutters on flinch)
-    const flap = stride * 4 * u + (flinching ? Math.sin(ft * 30) * 8 * u : 0);
-    capeShape(ctx, 0, -74 * u, 48 * u, flap, 40 * u);
-    ctx.fillStyle = CAPE; ctx.fill();
-    ctx.strokeStyle = CAPE_IN; ctx.lineWidth = 1.5 * u;
-    ctx.beginPath(); ctx.moveTo(-10 * u, -70 * u); ctx.quadraticCurveTo(-14 * u - flap, -48 * u, -16 * u - flap, -30 * u); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(10 * u, -70 * u); ctx.quadraticCurveTo(14 * u + flap, -48 * u, 16 * u + flap, -30 * u); ctx.stroke();
-    // vertical FLAMIO lettering
-    ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = `900 ${Math.max(5, 7.5 * u)}px system-ui, sans-serif`;
-    const word = "FLAMIO";
-    for (let i = 0; i < word.length; i++) ctx.fillText(word[i]!, flap * 0.3 * (i / 6), -66 * u + i * 7 * u);
+    // FLAMIO — horizontal jersey lettering across the upper back, glowing
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "900 13px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    ctx.lineJoin = "round"; ctx.lineWidth = 2.6; ctx.strokeStyle = "#5a1a00";
+    ctx.shadowColor = "rgba(255,140,30,0.95)"; ctx.shadowBlur = 7 * u;
+    ctx.fillStyle = G.letters;
+    arcText(ctx, "FLAMIO", 0, -64, 60, 0.115);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "800 6px system-ui, sans-serif";
+    ctx.fillText("10", 0, -50);
 
-    // left arm swinging, right arm raised holding burger platter
-    ctx.fillStyle = SUIT;
-    ctx.save(); ctx.translate(-18 * u, -70 * u); ctx.rotate(0.35 + stride * 0.35);
-    ctx.beginPath(); ctx.roundRect(-5 * u, 0, 10 * u, 26 * u, 5 * u); ctx.fill();
-    ctx.fillStyle = FUR; ctx.beginPath(); ctx.arc(0, 27 * u, 5.5 * u, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    ctx.save(); ctx.translate(18 * u, -72 * u); ctx.rotate(-0.45);
-    ctx.fillStyle = SUIT; ctx.beginPath(); ctx.roundRect(-5 * u, -30 * u, 10 * u, 32 * u, 5 * u); ctx.fill();
-    ctx.fillStyle = SEAM; ctx.fillRect(-5 * u, -10 * u, 10 * u, 2 * u);
-    ctx.fillStyle = FUR; ctx.beginPath(); ctx.arc(0, -31 * u, 5.5 * u, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-
-    // head (back of head, 3/4: slight right turn shows cheek + mask edge)
-    const hy = -92 * u + (frame % 2) * 1.2 * u;
-    ctx.fillStyle = FUR;
-    for (const side of [-1, 1] as const) { // ears
-      ctx.beginPath(); ctx.moveTo(side * 6 * u, hy - 12 * u); ctx.lineTo(side * 19 * u, hy - 28 * u); ctx.lineTo(side * 20 * u, hy - 6 * u); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = CREAM; ctx.beginPath(); ctx.moveTo(side * 10 * u, hy - 12 * u); ctx.lineTo(side * 17.5 * u, hy - 23 * u); ctx.lineTo(side * 18 * u, hy - 9 * u); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = FUR;
+    // arms: both reach forward-right to grip the burger at chest height
+    const bx = 30, by = -50;
+    ctx.lineCap = "round";
+    for (const side of [-1, 1] as const) {
+      const sx = side * 19, sy = -74;
+      const hx = bx + side * 15, hy = by - 6 + stride * side * 0.8;
+      ctx.strokeStyle = SUIT_DARK; ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo((sx + hx) / 2 + 4, sy + 4, hx, hy); ctx.stroke();
+      ctx.strokeStyle = SUIT; ctx.lineWidth = 7.5; ctx.stroke();
+      ctx.strokeStyle = ACCENT; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(hx - (hx - sx) * 0.14, hy - (hy - sy) * 0.14); ctx.lineTo(hx - (hx - sx) * 0.08, hy - (hy - sy) * 0.08); ctx.stroke();
     }
-    ctx.beginPath(); ctx.ellipse(0, hy, 21 * u, 18 * u, 0, 0, Math.PI * 2); ctx.fill();
-    // shading + stripes
-    ctx.fillStyle = FUR_DARK; ctx.globalAlpha = 0.5;
-    ctx.beginPath(); ctx.ellipse(-6 * u, hy + 6 * u, 16 * u, 10 * u, 0, 0, Math.PI); ctx.fill(); ctx.globalAlpha = 1;
-    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 2.5 * u; ctx.lineCap = "round";
-    for (const dx of [-7, 0, 7]) { ctx.beginPath(); ctx.moveTo(dx * u, hy - 16 * u); ctx.lineTo(dx * 0.8 * u, hy - 8 * u); ctx.stroke(); }
     ctx.lineCap = "butt";
-    // mask tie + right cheek peek (3/4)
-    ctx.fillStyle = MASK; ctx.fillRect(-21 * u, hy - 3 * u, 42 * u, 5 * u);
-    ctx.beginPath(); ctx.moveTo(-18 * u, hy); ctx.lineTo(-28 * u, hy + 4 * u + flap * 0.3); ctx.lineTo(-26 * u, hy - 4 * u); ctx.fill();
-    ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(19 * u, hy + 6 * u, 5 * u, 6 * u, -0.3, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1 * u;
-    ctx.beginPath(); ctx.moveTo(22 * u, hy + 5 * u); ctx.lineTo(32 * u, hy + 2 * u); ctx.moveTo(22 * u, hy + 8 * u); ctx.lineTo(32 * u, hy + 9 * u); ctx.stroke();
-    if (flinching && ft < 0.5) { // blink: closed eye tick at the visible edge
-      ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 1.5 * u;
-      ctx.beginPath(); ctx.moveTo(15 * u, hy - 2 * u); ctx.lineTo(20 * u, hy - 1 * u); ctx.stroke();
+
+    // head (rear 3/4: back of head + right cheek, eye and whiskers)
+    const hy = -98 + (frame % 2) * 1.2;
+    for (const side of [-1, 1] as const) {
+      ctx.fillStyle = FUR;
+      ctx.beginPath(); ctx.moveTo(side * 6, hy - 13); ctx.quadraticCurveTo(side * 16, hy - 32, side * 21, hy - 30); ctx.quadraticCurveTo(side * 23, hy - 16, side * 20, hy - 5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = PINK;
+      ctx.beginPath(); ctx.moveTo(side * 10, hy - 13); ctx.quadraticCurveTo(side * 16, hy - 26, side * 19, hy - 25); ctx.quadraticCurveTo(side * 20, hy - 15, side * 18, hy - 9); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = G.head; ctx.beginPath(); ctx.ellipse(0, hy, 22, 19, 0, 0, Math.PI * 2); ctx.fill();
+    // tabby stripes
+    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 2.6; ctx.lineCap = "round";
+    for (const dx of [-8, 0, 8]) { ctx.beginPath(); ctx.moveTo(dx, hy - 18); ctx.quadraticCurveTo(dx * 0.9 + 1, hy - 12, dx * 0.75, hy - 8); ctx.stroke(); }
+    ctx.lineCap = "butt";
+    // emerald mask band + flowing ties
+    ctx.fillStyle = G.mask;
+    ctx.beginPath(); ctx.moveTo(-22, hy - 4); ctx.quadraticCurveTo(0, hy - 7, 23, hy - 5); ctx.lineTo(23, hy + 2); ctx.quadraticCurveTo(0, hy, -22, hy + 3); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-19, hy - 2); ctx.quadraticCurveTo(-30, hy + 2 - flap, -34, hy + 7 - flap * 0.6); ctx.lineTo(-29, hy + 1); ctx.lineTo(-33, hy - 3 - flap * 0.5); ctx.closePath(); ctx.fill();
+    // cheek + muzzle peek
+    ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(18, hy + 7, 6.5, 6.5, -0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ff8fa3"; ctx.beginPath(); ctx.ellipse(23.5, hy + 4.5, 1.8, 1.3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(60,40,30,0.8)"; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.moveTo(22, hy + 6); ctx.lineTo(34, hy + 3); ctx.moveTo(22, hy + 9); ctx.lineTo(34, hy + 10); ctx.stroke();
+    // eye inside the mask
+    if (flinching && ft < 0.5) {
+      ctx.strokeStyle = "#0b2a1f"; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(14, hy - 2); ctx.lineTo(20, hy - 1); ctx.stroke();
     } else {
-      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(18 * u, hy - 1 * u, 2.4 * u, 2 * u, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(18, hy - 1.5, 3, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#123"; ctx.beginPath(); ctx.ellipse(19.2, hy - 1.4, 1.4, 1.8, 0, 0, Math.PI * 2); ctx.fill();
     }
 
-    // burger platter above the raised paw
-    burger(ctx, 26 * u, -108 * u, 46 * u, layers.length > 10 ? layers.slice(-10) : layers);
+    // burger gripped in both paws in front of the chest (last 10 layers)
+    burger(ctx, bx, by + 8, 34, layers.length > 10 ? layers.slice(-10) : layers, false);
+    // paws over the bun edges
+    ctx.fillStyle = FUR;
+    for (const side of [-1, 1] as const) {
+      ctx.beginPath(); ctx.ellipse(bx + side * 16, by - 6 + stride * side * 0.8, 4.8, 5.5, 0, 0, Math.PI * 2); ctx.fill();
+    }
 
     // collection star
     if (ct >= 0 && ct < 1) {
       ctx.globalAlpha = 1 - ct; ctx.fillStyle = "#ffd54a";
-      const sx = 26 * u, sy = -150 * u - ct * 16 * u, r1 = 8 * u, r2 = 3.5 * u;
+      const sx = bx, sy = -86 - ct * 16;
       ctx.beginPath();
-      for (let i = 0; i < 10; i++) { const ang = (i * Math.PI) / 5 - Math.PI / 2, rr = i % 2 ? r2 : r1; ctx.lineTo(sx + Math.cos(ang) * rr, sy + Math.sin(ang) * rr); }
+      for (let i = 0; i < 10; i++) { const ang = (i * Math.PI) / 5 - Math.PI / 2, rr = i % 2 ? 3.5 : 8; ctx.lineTo(sx + Math.cos(ang) * rr, sy + Math.sin(ang) * rr); }
       ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
     }
-    if (flinching) { ctx.fillStyle = "rgba(160,90,255,0.35)"; ctx.beginPath(); ctx.arc(0, -60 * u, 46 * u * (0.6 + ft * 0.6), 0, Math.PI * 2); ctx.fill(); }
+    if (flinching) { ctx.fillStyle = "rgba(160,90,255,0.35)"; ctx.beginPath(); ctx.arc(0, -60, 46 * (0.6 + ft * 0.6), 0, Math.PI * 2); ctx.fill(); }
   } catch { /* procedural fallback */ }
   ctx.restore();
 }
@@ -209,64 +423,69 @@ export const VICTORY_MS = 2600;
 
 /**
  * Front-facing victory: turn → sit → bite. `t` = ms since the victory started.
- * Callers start it only after a confirmed completion.
+ * Callers render it only after a confirmed completion (static final frame).
  */
 export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: readonly Ingredient[]) {
+  const G = grads(ctx);
   ctx.save();
   try {
     ctx.clearRect(0, 0, W, H);
     const u = Math.min(W, H) / 180;
-    const sit = ease((t - 500) / 500); // 0.5–1.0s
+    const sit = ease((t - 500) / 500);
     const bite = t > 1100 ? Math.max(0, Math.sin(((t - 1100) / 700) * Math.PI)) : 0;
     const bites = Math.min(3, Math.floor(Math.max(0, t - 1100) / 700));
     const turn = ease(t / 500);
-    ctx.translate(W / 2, H * 0.92 - sit * 0 * u);
-    ctx.scale(0.7 + 0.3 * turn, 1);
+    ctx.translate(W / 2, H * 0.92);
+    ctx.scale(u * (0.7 + 0.3 * turn), u);
 
-    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(0, 0, 50 * u, 9 * u, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(0, 0, 50, 9, 0, 0, Math.PI * 2); ctx.fill();
     // cape behind
-    capeShape(ctx, 0, -80 * u + sit * 14 * u, 70 * u - sit * 14 * u, Math.sin(t / 240) * 3 * u, 50 * u);
-    ctx.fillStyle = CAPE_IN; ctx.fill();
-    // sitting body
-    const by = sit * 14 * u;
-    ctx.fillStyle = SUIT; ctx.beginPath(); ctx.ellipse(0, -36 * u + by * 0.5, 30 * u, 36 * u - by * 0.5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = SUIT_HI; ctx.beginPath(); ctx.ellipse(0, -36 * u + by * 0.5, 16 * u, 26 * u, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = SEAM; ctx.font = `900 ${10 * u}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("F", 0, -40 * u + by * 0.5);
+    ctx.fillStyle = CAPE_DARK;
+    ctx.beginPath(); ctx.moveTo(-26, -70); ctx.quadraticCurveTo(-56, -30, -46, -2); ctx.lineTo(46, -2); ctx.quadraticCurveTo(56, -30, 26, -70); ctx.closePath(); ctx.fill();
+    // tail
+    ctx.lineCap = "round"; ctx.strokeStyle = FUR; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(24, -8); ctx.bezierCurveTo(54, -10, 58, -40, 44, -56); ctx.stroke(); ctx.lineCap = "butt";
+    // sitting body (teal suit)
+    const by = sit * 7;
+    ctx.fillStyle = G.vSuit; ctx.beginPath(); ctx.ellipse(0, -36 + by, 30, 36 - by, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-26, -22 + by, 52, 5, 2.5); ctx.fill();
+    // chest emblem: flame
+    ctx.fillStyle = ACCENT;
+    ctx.beginPath(); ctx.moveTo(0, -60 + by); ctx.quadraticCurveTo(10, -48 + by, 4, -38 + by); ctx.quadraticCurveTo(0, -44 + by, -4, -38 + by); ctx.quadraticCurveTo(-10, -48 + by, 0, -60 + by); ctx.fill();
     // feet
     ctx.fillStyle = FUR;
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 16 * u, -4 * u, 12 * u, 7 * u, 0, 0, Math.PI * 2); ctx.fill(); }
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 16, -4, 12, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(s * 16, -3, 5, 3, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = FUR; }
     // head
-    const hy = -88 * u + by;
+    const hy = -88 + by;
     for (const side of [-1, 1] as const) {
-      ctx.fillStyle = FUR; ctx.beginPath(); ctx.moveTo(side * 8 * u, hy - 14 * u); ctx.lineTo(side * 22 * u, hy - 34 * u); ctx.lineTo(side * 25 * u, hy - 6 * u); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = CREAM; ctx.beginPath(); ctx.moveTo(side * 12 * u, hy - 14 * u); ctx.lineTo(side * 21 * u, hy - 28 * u); ctx.lineTo(side * 22 * u, hy - 10 * u); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = FUR; ctx.beginPath(); ctx.moveTo(side * 8, hy - 14); ctx.quadraticCurveTo(side * 18, hy - 38, side * 25, hy - 34); ctx.quadraticCurveTo(side * 28, hy - 18, side * 25, hy - 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = PINK; ctx.beginPath(); ctx.moveTo(side * 12, hy - 14); ctx.quadraticCurveTo(side * 19, hy - 31, side * 23, hy - 29); ctx.quadraticCurveTo(side * 24, hy - 18, side * 22, hy - 10); ctx.closePath(); ctx.fill();
     }
-    ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(0, hy, 27 * u, 23 * u, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(0, hy + 9 * u, 14 * u, 10 * u, 0, 0, Math.PI * 2); ctx.fill();
-    // mask + happy eyes
-    ctx.fillStyle = MASK; ctx.beginPath(); ctx.roundRect(-22 * u, hy - 9 * u, 44 * u, 11 * u, 5 * u); ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.4 * u; ctx.lineCap = "round";
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 10 * u, hy - 2 * u, 4 * u, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
-    ctx.fillStyle = "#e86a7a"; ctx.beginPath(); ctx.moveTo(-3 * u, hy + 5 * u); ctx.lineTo(3 * u, hy + 5 * u); ctx.lineTo(0, hy + 8 * u); ctx.fill();
-    ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1.4 * u;
-    ctx.beginPath(); ctx.arc(0, hy + 9 * u, 4 * u + bite * 2 * u, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
-    for (const s of [-1, 1]) for (const dy of [6, 10]) { ctx.beginPath(); ctx.moveTo(s * 14 * u, hy + dy * u); ctx.lineTo(s * 30 * u, hy + (dy - 2 + (dy - 8)) * u); ctx.stroke(); }
+    ctx.fillStyle = G.vHead; ctx.beginPath(); ctx.ellipse(0, hy, 27, 23, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(0, hy + 9, 14, 10, 0, 0, Math.PI * 2); ctx.fill();
+    // emerald mask + happy eyes
+    ctx.fillStyle = MASK; ctx.beginPath(); ctx.roundRect(-23, hy - 9, 46, 11, 5.5); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 10, hy - 2, 4, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
+    ctx.fillStyle = "#e86a7a"; ctx.beginPath(); ctx.moveTo(-3, hy + 5); ctx.lineTo(3, hy + 5); ctx.lineTo(0, hy + 8); ctx.fill();
+    ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(0, hy + 9, 4 + bite * 2, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
+    for (const s of [-1, 1]) for (const dy of [6, 10]) { ctx.beginPath(); ctx.moveTo(s * 14, hy + dy); ctx.lineTo(s * 30, hy + (dy - 2 + (dy - 8))); ctx.stroke(); }
     ctx.lineCap = "butt";
-    // burger held at mouth during bites
-    const bx = 0, byy = hy + 40 * u - bite * 18 * u;
-    burger(ctx, bx, byy, 52 * u, layers.length > 12 ? layers.slice(-12) : layers);
-    // bite marks
-    // real cut-out: erase pixels, then restore normal compositing
+    // burger held at the mouth
+    const byy = hy + 52 - bite * 18;
+    burger(ctx, 0, byy, 56, layers.length > 12 ? layers.slice(-12) : layers, false);
+    // real bite cut-outs from the top-right of the bun
+    const topY = byy - (22 + Math.min(12, layers.length) * 3.5 + 16) * 0.56;
     ctx.save();
     ctx.globalCompositeOperation = "destination-out";
     ctx.fillStyle = "#000";
-    for (let i = 0; i < bites; i++) { ctx.beginPath(); ctx.arc(bx + 24 * u - i * 8 * u, byy - 18 * u - layers.length * 0.5 * u, 7 * u, 0, Math.PI * 2); ctx.fill(); }
+    for (let i = 0; i < bites; i++) { ctx.beginPath(); ctx.arc(22 - i * 8, topY, 6.5, 0, Math.PI * 2); ctx.fill(); }
     ctx.restore();
     ctx.globalCompositeOperation = "source-over";
-    // paws on burger
+    // paws gripping both sides
     ctx.fillStyle = FUR;
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 26 * u, byy - 6 * u, 6 * u, 0, Math.PI * 2); ctx.fill(); }
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 28, byy - 10, 6, 7, 0, 0, Math.PI * 2); ctx.fill(); }
   } catch { /* procedural fallback */ }
   ctx.restore();
 }
