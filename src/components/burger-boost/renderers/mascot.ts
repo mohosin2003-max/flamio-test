@@ -257,8 +257,13 @@ export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: r
     const bx = 0, byy = hy + 40 * u - bite * 18 * u;
     burger(ctx, bx, byy, 52 * u, layers.length > 12 ? layers.slice(-12) : layers);
     // bite marks
-    ctx.fillStyle = "#121110";
-    for (let i = 0; i < bites; i++) { ctx.beginPath(); ctx.arc(bx + 22 * u - i * 7 * u, byy - 20 * u - layers.length * 0.5 * u, 5 * u, 0, Math.PI * 2); ctx.fill(); }
+    // real cut-out: erase pixels, then restore normal compositing
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "#000";
+    for (let i = 0; i < bites; i++) { ctx.beginPath(); ctx.arc(bx + 24 * u - i * 8 * u, byy - 18 * u - layers.length * 0.5 * u, 7 * u, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+    ctx.globalCompositeOperation = "source-over";
     // paws on burger
     ctx.fillStyle = FUR;
     for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 26 * u, byy - 6 * u, 6 * u, 0, Math.PI * 2); ctx.fill(); }
