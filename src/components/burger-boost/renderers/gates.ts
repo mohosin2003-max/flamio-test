@@ -1,7 +1,10 @@
 /**
- * Procedural vector food art for Burger Boost (visual only, browser only).
- * One function per ingredient key; `r` is the icon radius in CSS px.
+ * Burger Boost gate renderer + procedural vector food art (visual only, browser only).
+ * Reads only PublicGate-shaped data (a, op, b, lanes, spoiled, spoiledLane).
+ * Never computes answers or decides outcomes.
  */
+import type { Ingredient, MathOp, Lane } from "@/lib/burger-boost-rules";
+import type { Colors, Projected } from "./types";
 import type { Ingredient } from "@/lib/burger-boost-rules";
 
 type Ctx = CanvasRenderingContext2D;
