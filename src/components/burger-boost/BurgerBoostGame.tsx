@@ -7,6 +7,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { drawEnvironment } from "@/components/burger-boost/renderers/environment";
 import type { Colors, EnvFrame } from "@/components/burger-boost/renderers/types";
+import { drawGate } from "@/components/burger-boost/renderers/gates";
+import { createMascotAnim, resetMascotAnim, updateMascot, drawMascot, drawVictory, VICTORY_MS } from "@/components/burger-boost/renderers/mascot";
 import { RealGamePanel } from "@/components/burger-boost/RealGamePanel";
 import {
   createGame, passGate, switchLane, phaseAt, stackPercent, inTargetRange, practiceSeed,
@@ -14,7 +16,7 @@ import {
   createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
 import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
-import type { Gate, Ingredient, Lane } from "@/lib/burger-boost-rules";
+import type { Ingredient, Lane } from "@/lib/burger-boost-rules";
 
 /** Ingredient art colors (food colors, canvas only). */
 const ING: Record<Ingredient, { color: string; label: string }> = {
@@ -47,7 +49,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const startLive = useCallback((live: LiveSession) => {
     const g = createLiveGame(live);
     if (!g) { setVerdict({ kind: "fail", text: "This saved game couldn't be loaded." }); return; }
-    liveRef.current = live; stateRef.current = g;
+    liveRef.current = live; stateRef.current = g; resetMascotAnim(mascot);
     finalizeRef.current = once(async () => {
       const s = stateRef.current!;
       const payload = buildLiveSubmission(live.sessionId, s);
@@ -72,7 +74,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
 
   const start = useCallback(() => {
     liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
-    stateRef.current = createGame(practiceSeed(), gateCount);
+    stateRef.current = createGame(practiceSeed(), gateCount); resetMascotAnim(mascot);
     startRef.current = performance.now();
     setPaused(false); setResult(null); setScreen("playing");
   }, [gateCount]);
@@ -203,7 +205,9 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             <p className="font-display text-6xl font-black text-primary">{result.score}</p>
             <p className="text-sm text-muted-foreground">practice score</p>
           </>)}
-          <BurgerStack layers={result.layers} />
+          {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
+            ? <VictoryCat layers={result.layers} />
+            : <BurgerStack layers={result.layers} />}
           <dl className="grid w-full grid-cols-3 gap-2 text-sm">
             <Stat label="Correct" value={result.mathCorrect} />
             <Stat label="Layers" value={result.layers.length} />
@@ -252,6 +256,21 @@ function Overlay({ children }: { children: React.ReactNode }) {
 function Stat({ label, value }: { label: string; value: number }) {
   return <div className="rounded-lg bg-muted/50 p-2"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-display text-lg font-bold">{value}</dd></div>;
 }
+/** Victory scene. Mounted only after completion is confirmed (server verdict for saved games). Runs a bounded animation after the game loop has stopped. */
+function VictoryCat({ layers }: { layers: Ingredient[] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current; const ctx = cv?.getContext("2d");
+    if (!cv || !ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = 200, H = 200; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const t0 = performance.now(); let raf = 0;
+    const tick = (now: number) => { const t = now - t0; drawVictory(ctx, W, H, Math.min(t, VICTORY_MS), layers); if (t < VICTORY_MS) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [layers]);
+  return <canvas ref={ref} className="size-[200px]" role="img" aria-label="FLAMIO Cat eats the burger" />;
+}
 function BurgerStack({ layers }: { layers: Ingredient[] }) {
   return (
     <div className="flex w-32 flex-col-reverse items-center" aria-label={`${layers.length} burger layers`}>
@@ -264,6 +283,7 @@ function BurgerStack({ layers }: { layers: Ingredient[] }) {
 
 /* ------------------------------ canvas draw ------------------------------ */
 
+const mascot = createMascotAnim();
 const envFrame: EnvFrame = { W: 0, H: 0, horizon: 0, playerY: 0, speed: 0, proj: () => ({ y: 0, left: 0, right: 0, scale: 0 }), C: { bg: "", fg: "", primary: "", muted: "", destructive: "" } };
 
 function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState, elapsed: number, interval: number, C: Colors, flash: { text: string; good: boolean; at: number } | null, now: number) {
@@ -289,57 +309,21 @@ function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState
     const hit = (i + 1) * interval;
     const d = 1 - (hit - elapsed) / view;
     if (d < 0 || d > 1.05) continue;
-    drawGate(ctx, s.track[i]!, proj(d), C);
+    drawGate(ctx, s.track[i]!, proj(d), C, now, i, s.gateCount);
   }
 
-  // player burger
+  // FLAMIO Cat mascot (presentation only; reads already-resolved state)
   const p = proj(1);
-  const laneX = s.lane === 0 ? (p.left + W / 2) / 2 : (p.right + W / 2) / 2;
-  const bw = 70, layers = s.layers.slice(-10);
-  let y = playerY + 20;
-  ctx.fillStyle = C.primary; roundRect(ctx, laneX - bw / 2, y - 12, bw, 12, 6); ctx.fill(); y -= 12;
-  for (const l of layers) { ctx.fillStyle = ING[l].color; roundRect(ctx, laneX - bw / 2 + 3, y - 6, bw - 6, 6, 3); ctx.fill(); y -= 6; }
-  ctx.fillStyle = C.primary; ctx.beginPath(); ctx.ellipse(laneX, y, bw / 2, 18, 0, Math.PI, 0); ctx.fill();
-  // flames
-  ctx.fillStyle = C.destructive; ctx.globalAlpha = 0.7;
-  for (let k = -1; k <= 1; k++) { ctx.beginPath(); const fx = laneX + k * 18, fh = 10 + 6 * Math.sin(now / 80 + k); ctx.moveTo(fx - 6, playerY + 22); ctx.lineTo(fx, playerY + 22 + fh); ctx.lineTo(fx + 6, playerY + 22); ctx.fill(); }
-  ctx.globalAlpha = 1;
-
+  const targetX = s.lane === 0 ? (p.left + W / 2) / 2 : (p.right + W / 2) / 2;
+  const laneX = updateMascot(mascot, s.lane, targetX, s.layers.length, s.spoiledHits, now);
+  drawMascot(ctx, mascot, laneX, playerY + 30, 92, s.layers, now);
+  const y = playerY - 110;
   if (flash && now - flash.at < 700) {
     ctx.globalAlpha = 1 - (now - flash.at) / 700;
     ctx.fillStyle = flash.good ? C.primary : C.destructive;
     ctx.font = "bold 22px system-ui, sans-serif"; ctx.textAlign = "center";
     ctx.fillText(flash.text, laneX, y - 30 - (now - flash.at) / 20);
     ctx.globalAlpha = 1;
-  }
-}
-
-function drawGate(ctx: CanvasRenderingContext2D, gate: Gate, p: { y: number; left: number; right: number; scale: number }, C: Colors) {
-  const mid = (p.left + p.right) / 2, h = 70 * p.scale, w = (p.right - p.left) / 2 - 6 * p.scale;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const panel = (x: number, fill: string, stroke: string, text: string, sub?: string) => {
-    ctx.globalAlpha = 0.85; ctx.fillStyle = fill; roundRect(ctx, x, p.y - h, w, h, 8 * p.scale); ctx.fill(); ctx.globalAlpha = 1;
-    ctx.lineWidth = 3 * p.scale; ctx.strokeStyle = stroke; ctx.stroke();
-    ctx.fillStyle = C.fg; ctx.font = `bold ${Math.max(8, 26 * p.scale)}px system-ui, sans-serif`;
-    ctx.fillText(text, x + w / 2, p.y - h / 2 - (sub ? 8 * p.scale : 0));
-    if (sub) { ctx.font = `${Math.max(6, 13 * p.scale)}px system-ui, sans-serif`; ctx.fillText(sub, x + w / 2, p.y - h / 2 + 14 * p.scale); }
-  };
-  const lx = p.left + 3 * p.scale, rx = mid + 3 * p.scale;
-  if (gate.kind === "math") {
-    ctx.fillStyle = C.fg; ctx.font = `bold ${Math.max(8, 20 * p.scale)}px system-ui, sans-serif`;
-    ctx.fillText(`${gate.a} ${gate.op} ${gate.b} = ?`, mid, p.y - h - 14 * p.scale);
-    panel(lx, "#1f4fa8", "#7aa7ff", String(gate.lanes[0]));
-    panel(rx, "#1f4fa8", "#7aa7ff", String(gate.lanes[1]));
-  } else if (gate.kind === "ingredient") {
-    const [a, b] = gate.lanes;
-    panel(lx, ING[a].color, C.fg, "🍔", ING[a].label);
-    panel(rx, ING[b].color, C.fg, "🍔", ING[b].label);
-  } else {
-    const spoiled = { fill: "#3d2a3a", stroke: C.destructive, text: "☠", sub: `Spoiled ${ING[gate.spoiled].label}` };
-    const safe = { fill: "#1d3b2a", stroke: "#4cd17a", text: "✓", sub: "Safe" };
-    const [L, R] = gate.spoiledLane === 0 ? [spoiled, safe] : [safe, spoiled];
-    panel(lx, L.fill, L.stroke, L.text, L.sub);
-    panel(rx, R.fill, R.stroke, R.text, R.sub);
   }
 }
 
