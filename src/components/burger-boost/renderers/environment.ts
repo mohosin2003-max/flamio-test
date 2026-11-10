@@ -195,15 +195,28 @@ export function drawStreetlamps(ctx: CanvasRenderingContext2D, f: EnvFrame) {
 }
 
 /* ---------------------------- billboards --------------------------------- */
-type Board = { name: string; price: number; img: HTMLImageElement | null; ok: boolean };
+type Board = { name: string; price: string; img: HTMLImageElement | null; ok: boolean };
 let boards: Board[] | null = null;
+
+/** Curated sequence (exact menu.ts names) covering all five categories. */
+const BOARD_PRODUCTS = [
+  "Flamio Special Burger",
+  "Flamio Special Meat Box",
+  "BBQ Chicken Supreme",
+  "Chicken Shawarma",
+  "Oven Baked Pasta",
+  "BBQ Cheese Burst Burger",
+  "Italiano Flamio Special",
+  "Flamio Classic Burger",
+] as const;
 
 function loadBoards(): Board[] {
   if (boards) return boards;
-  // Real menu data only: featured items first, then popular. Prices come from menu.ts.
-  const picked = products.filter((p) => p.isFeatured).concat(products.filter((p) => p.isPopular && !p.isFeatured)).slice(0, 6);
-  boards = picked.map((p) => {
-    const b: Board = { name: p.name, price: p.basePrice, img: null, ok: false };
+  const out: Board[] = [];
+  for (const name of BOARD_PRODUCTS) {
+    const p = products.find((x) => x.name === name);
+    if (!p) continue; // never invent a product or price
+    const b: Board = { name: p.name, price: `৳${p.basePrice}`, img: null, ok: false };
     const url = p.images[0]?.url;
     if (url && typeof Image !== "undefined") {
       const img = new Image();
@@ -212,71 +225,99 @@ function loadBoards(): Board[] {
       img.src = url;
       b.img = img;
     }
-    return b;
-  });
+    out.push(b);
+  }
+  boards = out;
   return boards;
 }
 
-const BOARD_EVERY = 5.5; // gate units
+const BOARD_EVERY = 3.5; // gate units, alternating sides
+const BOARD_W = 150, BOARD_H = 105, POST_H = 46;
+const PHOTO = 0.68;
 
-function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number) {
-  if (ctx.measureText(text).width <= maxW) return text;
-  let t = text;
-  while (t.length > 3 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
-  return t + "…";
+/** Largest bold font (≤ max) whose text fits maxW — shrinks instead of truncating. */
+function fitFont(ctx: CanvasRenderingContext2D, text: string, maxW: number, maxPx: number, weight: string) {
+  let px = maxPx;
+  ctx.font = `${weight} ${px}px system-ui, sans-serif`;
+  const w = ctx.measureText(text).width;
+  if (w > maxW) {
+    px = Math.max(3, px * (maxW / w));
+    ctx.font = `${weight} ${px}px system-ui, sans-serif`;
+  }
+  return px;
 }
 
 export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
-  const { proj, speed, C } = f;
+  const { proj, speed, C, W } = f;
   const list = loadBoards();
   ctx.save();
   const last = Math.floor((speed + VIEW) / BOARD_EVERY);
-  const firstN = Math.max(1, Math.ceil(speed / BOARD_EVERY));
+  const firstN = Math.max(1, Math.ceil((speed - 0.3) / BOARD_EVERY));
   for (let n = last; n >= firstN; n--) {
-    const d = depthAt(n * BOARD_EVERY + 0.5, speed);
-    if (d < 0.05 || d > 1.05) continue;
+    const d = depthAt(n * BOARD_EVERY, speed);
+    if (d < 0.06 || d > 1.05) continue;
     const p = proj(d), s = p.scale;
     const side = (n & 1) === 0 ? 1 : -1;
-    const bw = 92 * s, bh = 60 * s;
-    // keep boards fully off the road
-    const x = side < 0 ? p.left - 34 * s - bw : p.right + 34 * s;
-    const y = p.y - 70 * s - bh;
+    const bw = BOARD_W * s, bh = BOARD_H * s, ph = POST_H * s;
+    // fully outside the road + curb (curb is 6*s wide)
+    const x = side < 0 ? p.left - 14 * s - bw : p.right + 14 * s;
+    if (x > W || x + bw < 0) continue;
+    const y = p.y - ph - bh;
+    // fade in at the horizon, fade out as it sweeps past the screen edge
+    const a = Math.min(1, (d - 0.06) / 0.1) * (d > 0.88 ? Math.max(0, 1 - (d - 0.88) / 0.17) : 1);
+    if (a <= 0) continue;
+    ctx.globalAlpha = a;
+
+    // ground shadow
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath(); ctx.ellipse(x + bw / 2, p.y, bw * 0.45, 5 * s, 0, 0, Math.PI * 2); ctx.fill();
     // posts
     ctx.fillStyle = "#3f3a36";
-    ctx.fillRect(x + bw * 0.2, y + bh, 3 * s, 70 * s);
-    ctx.fillRect(x + bw * 0.8 - 3 * s, y + bh, 3 * s, 70 * s);
-    // frame
-    ctx.fillStyle = "#1c1917";
-    ctx.fillRect(x - 2 * s, y - 2 * s, bw + 4 * s, bh + 4 * s);
+    ctx.fillRect(x + bw * 0.22 - 2.5 * s, y + bh, 5 * s, ph);
+    ctx.fillRect(x + bw * 0.78 - 2.5 * s, y + bh, 5 * s, ph);
+    // dark-steel frame + orange accent
+    const fr = 3 * s;
+    ctx.fillStyle = "#24201d";
+    ctx.fillRect(x - fr, y - fr, bw + fr * 2, bh + fr * 2);
     ctx.fillStyle = C.primary;
-    ctx.fillRect(x - 2 * s, y - 2 * s, bw + 4 * s, 3 * s);
+    ctx.fillRect(x - fr, y - fr, bw + fr * 2, 2.5 * s);
 
     const b = list.length ? list[n % list.length]! : null;
-    const fontPx = Math.max(5, 9 * s);
-    if (b && b.ok && b.img) {
-      const imgH = bh * 0.62;
-      ctx.drawImage(b.img, x, y, bw, imgH);
-      ctx.fillStyle = "#111";
-      ctx.fillRect(x, y + imgH, bw, bh - imgH);
-      ctx.textBaseline = "middle"; ctx.textAlign = "left";
-      ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
-      ctx.fillStyle = C.primary;
-      const price = `৳${b.price}`;
-      const pw = ctx.measureText(price).width;
-      ctx.fillText(price, x + bw - pw - 3 * s, y + imgH + (bh - imgH) / 2);
-      ctx.fillStyle = "#fafaf9";
-      ctx.fillText(fitText(ctx, b.name, bw - pw - 9 * s), x + 3 * s, y + imgH + (bh - imgH) / 2);
+    const photoH = bh * PHOTO, panelH = bh - photoH;
+    if (b && b.ok && b.img && b.img.naturalWidth > 0) {
+      // centred source crop matching the photo window aspect — no stretching
+      const iw = b.img.naturalWidth, ih = b.img.naturalHeight;
+      const target = bw / photoH;
+      let sw = iw, sh = iw / target;
+      if (sh > ih) { sh = ih; sw = ih * target; }
+      ctx.drawImage(b.img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, bw, photoH);
     } else {
-      // Branded fallback — no invented prices.
-      ctx.fillStyle = "#111";
-      ctx.fillRect(x, y, bw, bh);
+      ctx.fillStyle = "#1c1917";
+      ctx.fillRect(x, y, bw, photoH);
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillStyle = C.primary;
-      ctx.font = `900 ${Math.max(6, 15 * s)}px system-ui, sans-serif`;
-      ctx.fillText("FLAMIO", x + bw / 2, y + bh * 0.42);
-      ctx.fillStyle = "#fafaf9";
-      ctx.font = `bold ${Math.max(4, 7 * s)}px system-ui, sans-serif`;
-      ctx.fillText("BURGER BOOST", x + bw / 2, y + bh * 0.72);
+      ctx.font = `900 ${Math.max(4, 20 * s)}px system-ui, sans-serif`;
+      ctx.fillText("FLAMIO", x + bw / 2, y + photoH / 2);
+    }
+    // info panel
+    ctx.fillStyle = "#141110";
+    ctx.fillRect(x, y + photoH, bw, panelH);
+    if (b) {
+      const pad = 5 * s;
+      ctx.textBaseline = "middle";
+      // price pill (right)
+      const pricePx = fitFont(ctx, b.price, bw * 0.3, 13 * s, "900");
+      const pw = ctx.measureText(b.price).width + pad * 1.6;
+      const pillH = pricePx * 1.45;
+      const px = x + bw - pad - pw, py = y + photoH + (panelH - pillH) / 2;
+      ctx.fillStyle = C.primary;
+      ctx.fillRect(px, py, pw, pillH);
+      ctx.fillStyle = "#141110"; ctx.textAlign = "center";
+      ctx.fillText(b.price, px + pw / 2, py + pillH / 2 + 0.5 * s);
+      // product name (left), full text, shrinks to fit
+      ctx.textAlign = "left"; ctx.fillStyle = "#fafaf9";
+      fitFont(ctx, b.name, bw - pw - pad * 3, 11 * s, "800");
+      ctx.fillText(b.name, x + pad, y + photoH + panelH / 2);
     }
   }
   ctx.restore();
