@@ -264,10 +264,8 @@ function VictoryCat({ layers }: { layers: Ingredient[] }) {
     if (!cv || !ctx) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const W = 200, H = 200; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const t0 = performance.now(); let raf = 0;
-    const tick = (now: number) => { const t = now - t0; drawVictory(ctx, W, H, Math.min(t, VICTORY_MS), layers); if (t < VICTORY_MS) raf = requestAnimationFrame(tick); };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // Single still frame of the finished victory pose — no timer or extra animation loop.
+    drawVictory(ctx, W, H, VICTORY_MS, layers);
   }, [layers]);
   return <canvas ref={ref} className="size-[200px]" role="img" aria-label="FLAMIO Cat eats the burger" />;
 }
