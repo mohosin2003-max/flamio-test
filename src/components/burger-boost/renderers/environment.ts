@@ -181,15 +181,89 @@ export function drawStreetlamps(ctx: CanvasRenderingContext2D, f: EnvFrame) {
     ctx.fillRect(Math.min(baseX, baseX - side * 14 * s), p.y - h, 14 * s, 2.5 * s);
     ctx.fillStyle = "#fde68a";
     ctx.beginPath(); ctx.arc(baseX - side * 14 * s, p.y - h + 3 * s, 3.5 * s, 0, Math.PI * 2); ctx.fill();
-    // small tree in planter on alternating lamps, outside the lamp
-    if (n % 3 === 0) {
-      const tx = baseX + side * 16 * s;
-      ctx.fillStyle = "#44403c"; ctx.fillRect(tx - 6 * s, p.y - 8 * s, 12 * s, 8 * s);
-      ctx.fillStyle = "#166534";
-      ctx.beginPath(); ctx.arc(tx, p.y - 20 * s, 11 * s, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#15803d";
-      ctx.beginPath(); ctx.arc(tx - 3 * s, p.y - 23 * s, 6 * s, 0, Math.PI * 2); ctx.fill();
+    // Bangladesh roadside trees on alternating lamps: coconut palm / krishnachura
+    if (n % 3 === 0) drawTree(ctx, baseX + side * 18 * s, p.y, s, treeKind(n));
+  }
+  ctx.restore();
+}
+
+/* ------------------------------ trees ----------------------------------- */
+export type TreeKind = "coconut" | "krishnachura";
+/** Deterministic per-slot tree choice (same every frame/run). */
+export function treeKind(n: number): TreeKind { return Math.abs(n) % 2 === 0 ? "coconut" : "krishnachura"; }
+
+function drawTree(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, kind: TreeKind) {
+  if (kind === "coconut") {
+    // curved slender trunk + fan of fronds + coconuts
+    ctx.strokeStyle = "#8b5a2b"; ctx.lineWidth = 3 * s; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + 6 * s, y - 30 * s, x + 2 * s, y - 56 * s); ctx.stroke();
+    const tx = x + 2 * s, ty = y - 56 * s;
+    ctx.strokeStyle = "#15803d"; ctx.lineWidth = 2.6 * s;
+    for (let k = 0; k < 6; k++) {
+      const a = -Math.PI + (k / 5) * Math.PI;
+      ctx.beginPath(); ctx.moveTo(tx, ty);
+      ctx.quadraticCurveTo(tx + Math.cos(a) * 12 * s, ty + Math.sin(a) * 10 * s - 6 * s, tx + Math.cos(a) * 20 * s, ty + Math.sin(a) * 6 * s + 6 * s);
+      ctx.stroke();
     }
+    ctx.fillStyle = "#6b4423";
+    ctx.beginPath(); ctx.arc(tx - 2 * s, ty + 2 * s, 2 * s, 0, Math.PI * 2); ctx.arc(tx + 2 * s, ty + 2.5 * s, 2 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.lineCap = "butt";
+  } else {
+    // krishnachura (flame tree): short trunk, wide umbrella canopy of red-orange blooms
+    ctx.fillStyle = "#5b3a24"; ctx.fillRect(x - 2 * s, y - 24 * s, 4 * s, 24 * s);
+    ctx.fillStyle = "#166534";
+    ctx.beginPath(); ctx.ellipse(x, y - 30 * s, 20 * s, 9 * s, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#dc2626";
+    ctx.beginPath(); ctx.ellipse(x - 6 * s, y - 33 * s, 11 * s, 6 * s, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#f97316";
+    ctx.beginPath(); ctx.ellipse(x + 7 * s, y - 32 * s, 10 * s, 5.5 * s, 0, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+/* ------------------------- overhead signs & arches ------------------------ */
+/** Gates (1-based) that get a FLAMIO milestone arch. */
+export const MILESTONE_GATES = [15, 30] as const;
+const SIGN_EVERY = 7; // plain green overhead highway sign every 7 gate units
+const ARCH_OFFSET = 0.5; // arch sits just past its gate so it never hides the gate
+
+/** World positions (gate units) of milestone arches. */
+export function archPositions(): number[] { return MILESTONE_GATES.map((g) => g + ARCH_OFFSET); }
+
+function gantry(ctx: CanvasRenderingContext2D, f: EnvFrame, d: number, label: string, milestone: boolean) {
+  const p = f.proj(d), s = p.scale;
+  const h = (milestone ? 120 : 105) * s;
+  const pad = 10 * s;
+  ctx.fillStyle = milestone ? "#f97316" : "#3f3a36";
+  ctx.fillRect(p.left - pad - 3 * s, p.y - h, 4 * s, h);
+  ctx.fillRect(p.right + pad - 1 * s, p.y - h, 4 * s, h);
+  const bw = Math.min(p.right - p.left + pad * 2, (milestone ? 220 : 120) * s), bh = (milestone ? 22 : 16) * s;
+  const bx = (p.left + p.right) / 2 - bw / 2, by = p.y - h - bh / 2;
+  ctx.fillStyle = milestone ? "#1c1917" : "#166534";
+  ctx.fillRect(p.left - pad, p.y - h - 2 * s, p.right - p.left + pad * 2, 4 * s);
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = milestone ? "#fbbf24" : "#e7e5e4"; ctx.lineWidth = Math.max(1, 1.2 * s);
+  ctx.strokeRect(bx, by, bw, bh);
+  if (s > 0.22) {
+    ctx.fillStyle = milestone ? "#fbbf24" : "#f5f5f4";
+    ctx.font = `900 ${Math.round((milestone ? 12 : 9) * s)}px system-ui, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, bx + bw / 2, by + bh / 2);
+  }
+}
+
+export function drawOverheads(ctx: CanvasRenderingContext2D, f: EnvFrame) {
+  const { speed } = f;
+  ctx.save();
+  type Item = { pos: number; label: string; milestone: boolean };
+  const items: Item[] = [];
+  for (const g of MILESTONE_GATES) items.push({ pos: g + ARCH_OFFSET, label: `FLAMIO · GATE ${g}`, milestone: true });
+  const firstN = Math.ceil(speed / SIGN_EVERY), lastN = Math.floor((speed + VIEW) / SIGN_EVERY);
+  for (let n = firstN; n <= lastN; n++) if (n > 0) items.push({ pos: n * SIGN_EVERY + 0.5 + 0.25, label: "DHAKA ↑", milestone: false });
+  items.sort((a, b) => b.pos - a.pos); // far → near
+  for (const it of items) {
+    const d = depthAt(it.pos, speed);
+    if (d < 0.05 || d > 0.92) continue; // fade out before it reaches the player
+    gantry(ctx, f, d, it.label, it.milestone);
   }
   ctx.restore();
 }
@@ -331,4 +405,5 @@ export function drawEnvironment(ctx: CanvasRenderingContext2D, f: EnvFrame) {
   drawCurbs(ctx, f);
   drawStreetlamps(ctx, f);
   drawBillboards(ctx, f);
+  drawOverheads(ctx, f);
 }
