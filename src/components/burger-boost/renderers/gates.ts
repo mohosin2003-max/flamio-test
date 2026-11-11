@@ -166,7 +166,17 @@ export const LAYER_COLOR: Record<Ingredient, string> = {
 export type DrawableGate =
   | { kind: "math"; a: number; op: MathOp; b: number; lanes: readonly [number, number] }
   | { kind: "ingredient"; lanes: readonly [Ingredient, Ingredient] }
-  | { kind: "negative"; spoiled: Ingredient; spoiledLane: Lane };
+  | { kind: "negative"; spoiled: Ingredient; spoiledLane: Lane }
+  | { kind: "op"; lanes: readonly [{ op: MathOp; v: number }, { op: MathOp; v: number }] };
+
+/** Lane label for an operation choice, e.g. "+12%", "×2", "÷2". */
+export function opLabel(c: { op: MathOp; v: number }): string {
+  return `${c.op}${c.v}${c.op === "+" || c.op === "−" ? "%" : ""}`;
+}
+/** Colour family: growth ops warm/gold, shrinking ops red. Same info as the label. */
+export function opTone(c: { op: MathOp; v: number }): "grow" | "shrink" {
+  return c.op === "+" || c.op === "×" ? "grow" : "shrink";
+}
 
 function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.max(0, r));
@@ -189,7 +199,22 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
     const cxL = lx + w / 2, cxR = rx + w / 2, cy = top + h / 2;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
 
-    if (gate.kind === "math") {
+    if (gate.kind === "op") {
+      // compact top bar (thin, so upcoming gates stay visible behind it)
+      const gy = top - 16 * s;
+      ctx.fillStyle = "#23201e"; rr(ctx, p.left - 4 * s, gy, p.right - p.left + 8 * s, 12 * s, 4 * s); ctx.fill();
+      ctx.lineWidth = Math.max(1, 1.5 * s); ctx.strokeStyle = C.primary; ctx.stroke();
+      ctx.fillStyle = "#fff4e6"; ctx.font = `800 ${Math.max(6, 9 * s)}px system-ui, sans-serif`;
+      if (s > 0.3) ctx.fillText("DISCOUNT BOOST", mid, gy + 6 * s);
+      for (const [x, cx, c] of [[lx, cxL, gate.lanes[0]], [rx, cxR, gate.lanes[1]]] as const) {
+        const grow = opTone(c) === "grow";
+        portal(ctx, x, top, w, h, s, grow ? "#22c55e" : "#ef4444", grow ? "#16a34a" : "#dc2626", grow ? "#0d2a17" : "#2a0d0d");
+        ctx.font = `900 ${Math.max(9, 30 * s)}px system-ui, sans-serif`;
+        ctx.lineWidth = Math.max(1, 4 * s); ctx.strokeStyle = "#0b0705";
+        const t = opLabel(c);
+        ctx.strokeText(t, cx, cy); ctx.fillStyle = grow ? "#dcfce7" : "#fee2e2"; ctx.fillText(t, cx, cy);
+      }
+    } else if (gate.kind === "math") {
       // gantry
       const gy = top - 34 * s;
       ctx.fillStyle = "#23201e"; ctx.fillRect(p.left - 4 * s, gy, 7 * s, h + 34 * s); ctx.fillRect(p.right - 3 * s, gy, 7 * s, h + 34 * s);
