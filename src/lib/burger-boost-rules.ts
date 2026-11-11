@@ -53,7 +53,7 @@ export type OperationGate = { kind: "op"; lanes: [OpChoice, OpChoice] };
 export type Gate = MathGate | IngredientGate | NegativeGate | OperationGate;
 
 /** v2 meter constants (whole percent, integers only). */
-export const METER = { start: 0, min: -100, max: 200, ingredient: 2, hazard: -10, maxMultipliers: 2 } as const;
+export const METER = { start: 0, min: -100, max: 200, ingredient: 1, hazard: -12, maxMultipliers: 2 } as const;
 
 /**
  * Apply one operation to the meter. Integer-only, no floats:
@@ -141,15 +141,15 @@ function mathGate(r: ReturnType<typeof createPrng>): MathGate {
  */
 function opGate(r: ReturnType<typeof createPrng>, mulLeft: { n: number }): OperationGate {
   const k = r.int(10);
-  const add = () => ({ op: "+" as const, v: 5 * (1 + r.int(4)) }); // +5..+20
-  const sub = () => ({ op: "−" as const, v: 5 * (1 + r.int(3)) }); // −5..−15
+  const add = () => ({ op: "+" as const, v: 3 * (1 + r.int(4)) }); // +3..+12
+  const sub = () => ({ op: "−" as const, v: 5 * (1 + r.int(4)) }); // −5..−20
   let pair: [OpChoice, OpChoice];
-  if (k < 3) {
+  if (k < 2) {
     const a = add();
     if (mulLeft.n > 0) { mulLeft.n--; pair = [a, { op: "×", v: 2 }]; }
     else pair = [a, add()];
   } else if (k < 5) pair = [sub(), { op: "÷", v: 2 }];
-  else if (k < 7) pair = [add(), sub()];
+  else if (k < 8) pair = [add(), sub()];
   else pair = [add(), add()];
   if (r.int(2) === 1) pair = [pair[1], pair[0]];
   return { kind: "op", lanes: pair };
