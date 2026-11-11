@@ -11,8 +11,8 @@ import { drawGate } from "@/components/burger-boost/renderers/gates";
 import { createMascotAnim, resetMascotAnim, updateMascot, drawMascot, drawVictory, VICTORY_MS } from "@/components/burger-boost/renderers/mascot";
 import { RealGamePanel } from "@/components/burger-boost/RealGamePanel";
 import {
-  createGame, passGate, switchLane, phaseAt, stackPercent, inTargetRange, practiceSeed,
-  DEFAULT_GATE_COUNT, GAMEPLAY_DURATION_MS, HARD_CUTOFF_MS, STACK_TARGET_MIN, STACK_TARGET_MAX,
+  createGame, passGate, switchLane, phaseAt, stackPercent, practiceSeed,
+  DEFAULT_GATE_COUNT, GAMEPLAY_DURATION_MS, HARD_CUTOFF_MS,
   createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
 import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
