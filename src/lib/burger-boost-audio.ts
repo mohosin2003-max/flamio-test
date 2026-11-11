@@ -1,6 +1,6 @@
 /**
  * Burger Boost procedural audio. Browser-safe: nothing touches Web Audio until
- * unlock() is called from a user gesture. No files, no network, no timers.
+ * unlock() is called from a user gesture. No files, no network, a single managed BGM interval (cleared on stop/hold/dispose).
  * Audio is fire-and-forget and never affects gameplay.
  *
  * Sound style: original cartoon-slapstick Foley built from harmonic-rich
@@ -9,7 +9,7 @@
  */
 export type SoundEvent =
   | "start" | "gate" | "correct" | "wrong" | "collect" | "hazard"
-  | "lane" | "gameOver" | "victory";
+  | "lane" | "gameOver" | "victory" | "milestone";
 
 type Ctx = AudioContext;
 export type AudioFactory = () => Ctx | null;
@@ -18,6 +18,52 @@ export type AudioFactory = () => Ctx | null;
 export const MAX_VOICES = 4;
 /** Master bus gain (before the soft compressor). */
 export const MASTER_GAIN = 0.7;
+/** Background-music bus gain (approved target ≈ 0.22). */
+export const MUSIC_GAIN = 0.22;
+/** Sound-effects bus gain. */
+export const SFX_GAIN = 1;
+/** Background music tempo. */
+export const BGM_BPM = 128;
+/** One step = an eighth note at BGM_BPM (seconds). */
+export const BGM_STEP_SEC = 60 / BGM_BPM / 2;
+/** Max simultaneous music oscillators (separate from the SFX cap). */
+export const MAX_MUSIC_VOICES = 3;
+/** Scheduler look-ahead: steps are queued this far ahead of currentTime. */
+export const BGM_LOOKAHEAD_SEC = 0.6;
+export const BGM_TICK_MS = 100;
+/** Gates (1-based) that trigger the milestone chime. */
+export const MILESTONE_GATES = [15, 30] as const;
+export function isMilestoneGate(passedGates: number): boolean {
+  return (MILESTONE_GATES as readonly number[]).includes(passedGates);
+}
+
+/**
+ * Original pentatonic loop (C-major pentatonic: C D E G A), 32 eighth-note
+ * steps = 4 bars of 4/4. `lead`/`bass` are Hz or 0 (rest). Not derived from
+ * any existing commercial song.
+ */
+const C4 = 261.63, D4 = 293.66, E4 = 329.63, G4 = 392.0, A4 = 440.0, C5 = 523.25, D5 = 587.33, E5 = 659.25;
+const C3 = 130.81, G2 = 98.0, A2 = 110.0, E3 = 164.81;
+export const BGM_PATTERN: ReadonlyArray<{ lead: number; bass: number }> = [
+  // bar 1
+  { lead: E4, bass: C3 }, { lead: 0, bass: 0 }, { lead: G4, bass: 0 }, { lead: A4, bass: C3 },
+  { lead: G4, bass: 0 }, { lead: 0, bass: 0 }, { lead: E4, bass: C3 }, { lead: D4, bass: 0 },
+  // bar 2
+  { lead: C4, bass: A2 }, { lead: 0, bass: 0 }, { lead: D4, bass: 0 }, { lead: E4, bass: A2 },
+  { lead: G4, bass: 0 }, { lead: 0, bass: 0 }, { lead: E4, bass: A2 }, { lead: 0, bass: 0 },
+  // bar 3
+  { lead: A4, bass: G2 }, { lead: 0, bass: 0 }, { lead: C5, bass: 0 }, { lead: D5, bass: G2 },
+  { lead: C5, bass: 0 }, { lead: A4, bass: 0 }, { lead: G4, bass: G2 }, { lead: 0, bass: 0 },
+  // bar 4
+  { lead: E5, bass: E3 }, { lead: D5, bass: 0 }, { lead: C5, bass: 0 }, { lead: A4, bass: E3 },
+  { lead: G4, bass: 0 }, { lead: E4, bass: 0 }, { lead: D4, bass: C3 }, { lead: 0, bass: 0 },
+];
+
+export type TimerApi = { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
+const defaultTimers: TimerApi = {
+  set: (fn, ms) => setInterval(fn, ms),
+  clear: (h) => clearInterval(h as ReturnType<typeof setInterval>),
+};
 
 const defaultFactory: AudioFactory = () => {
   if (typeof window === "undefined") return null;
@@ -102,6 +148,13 @@ export const SOUNDS: Record<SoundEvent, Note[]> = {
     n(0.36, 0.17, "sawtooth", 0.12, [[0, 415], [0.15, 402]], 0.012),
     n(0.54, 0.6, "sawtooth", 0.13, wobble(392, 300, 0.58, 6, 0.035), 0.012),
   ],
+  // Milestone chime (Gate 15 / Gate 30): bright rising pentatonic bell arpeggio.
+  milestone: [
+    n(0, 0.18, "sine", 0.30, [[0, 1046]], 0.002),
+    n(0.09, 0.18, "sine", 0.30, [[0, 1319]], 0.002),
+    n(0.18, 0.18, "sine", 0.30, [[0, 1568]], 0.002),
+    n(0.27, 0.5, "triangle", 0.28, [[0, 2093], [0.45, 2093]], 0.002),
+  ],
   // Bugle flourish resolving to a ringing chord (4 voices total).
   victory: [
     n(0, 0.12, "triangle", 0.30, [[0, 523]], 0.003),
@@ -113,11 +166,19 @@ export const SOUNDS: Record<SoundEvent, Note[]> = {
 
 export type AudioEngine = ReturnType<typeof createAudioEngine>;
 
-export function createAudioEngine(factory: AudioFactory = defaultFactory) {
+export function createAudioEngine(factory: AudioFactory = defaultFactory, timers: TimerApi = defaultTimers) {
   let ctx: Ctx | null = null;
   let master: GainNode | null = null;
+  let sfxBus: GainNode | null = null;
+  let musicBus: GainNode | null = null;
   let comp: DynamicsCompressorNode | null = null;
-  let muted = false;
+  let muted = false; // SFX mute
+  let musicMuted = false;
+  let musicWanted = false; // caller asked for music (survives hold/resume)
+  let timer: unknown = null;
+  let nextStepTime = 0;
+  let step = 0;
+  const musicVoices = new Set<OscillatorNode>();
   let held = false; // silenced by pause / hidden tab
   let disposed = false;
   let unsupported = false;
@@ -126,6 +187,41 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory) {
   const stopAll = () => {
     for (const o of voices) { try { o.stop(); } catch { /* already stopped */ } try { o.disconnect(); } catch { /* noop */ } }
     voices.clear();
+  };
+  const stopMusicVoices = () => {
+    for (const o of musicVoices) { try { o.stop(); } catch { /* noop */ } try { o.disconnect(); } catch { /* noop */ } }
+    musicVoices.clear();
+  };
+  const stopScheduler = () => { if (timer !== null) { try { timers.clear(timer); } catch { /* noop */ } timer = null; } };
+  const musicVoice = (hz: number, start: number, dur: number, type: OscillatorType, vol: number) => {
+    if (!ctx || !musicBus || musicVoices.size >= MAX_MUSIC_VOICES) return;
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(hz, start);
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.linearRampToValueAtTime(vol, start + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g); g.connect(musicBus);
+    o.onended = () => { musicVoices.delete(o); try { o.disconnect(); g.disconnect(); } catch { /* noop */ } };
+    musicVoices.add(o);
+    o.start(start); o.stop(start + dur + 0.02);
+  };
+  const tick = () => {
+    try {
+      if (!ctx || ctx.state !== "running" || musicMuted || held || disposed) return;
+      const horizon = ctx.currentTime + BGM_LOOKAHEAD_SEC;
+      if (nextStepTime < ctx.currentTime) nextStepTime = ctx.currentTime + 0.05;
+      while (nextStepTime < horizon) {
+        const st = BGM_PATTERN[step % BGM_PATTERN.length]!;
+        if (st.bass) musicVoice(st.bass, nextStepTime, BGM_STEP_SEC * 1.8, "triangle", 0.5);
+        if (st.lead) musicVoice(st.lead, nextStepTime, BGM_STEP_SEC * 0.9, "square", 0.12);
+        nextStepTime += BGM_STEP_SEC; step++;
+      }
+    } catch { /* music must never break gameplay */ }
+  };
+  const ensureScheduler = () => {
+    if (timer !== null || !musicWanted || musicMuted || held || disposed || !ctx) return;
+    nextStepTime = 0; tick();
+    timer = timers.set(tick, BGM_TICK_MS);
   };
 
   return {
@@ -137,6 +233,8 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory) {
           ctx = factory();
           if (!ctx) { unsupported = true; return; }
           master = ctx.createGain(); master.gain.value = MASTER_GAIN;
+          sfxBus = ctx.createGain(); sfxBus.gain.value = SFX_GAIN; sfxBus.connect(master);
+          musicBus = ctx.createGain(); musicBus.gain.value = MUSIC_GAIN; musicBus.connect(master);
           // Conservative soft compression to tame layered peaks. Not a true peak limiter.
           try {
             comp = ctx.createDynamicsCompressor();
@@ -147,10 +245,11 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory) {
         }
         held = false;
         if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+        ensureScheduler();
       } catch { unsupported = true; ctx = null; }
     },
     play(ev: SoundEvent) {
-      if (disposed || muted || held || !ctx || !master || ctx.state !== "running") return;
+      if (disposed || muted || held || !ctx || !sfxBus || ctx.state !== "running") return;
       try {
         const t0 = ctx.currentTime;
         for (const note of SOUNDS[ev]) {
@@ -164,33 +263,46 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory) {
           g.gain.setValueAtTime(0.0001, start);
           g.gain.linearRampToValueAtTime(note.vol, start + (note.attack ?? 0.004));
           g.gain.exponentialRampToValueAtTime(0.0001, end);
-          o.connect(g); g.connect(master);
+          o.connect(g); g.connect(sfxBus);
           o.onended = () => { voices.delete(o); try { o.disconnect(); g.disconnect(); } catch { /* noop */ } };
           voices.add(o);
           o.start(start); o.stop(end + 0.02);
         }
       } catch { /* audio must never break gameplay */ }
     },
+    /** Legacy single toggle: mutes/unmutes SFX only (music has its own control). */
     setMuted(m: boolean) { muted = m; if (m) stopAll(); },
     isMuted: () => muted,
+    setSfxMuted(m: boolean) { muted = m; if (m) stopAll(); },
+    isSfxMuted: () => muted,
+    setMusicMuted(m: boolean) {
+      musicMuted = m;
+      if (m) { stopScheduler(); stopMusicVoices(); } else ensureScheduler();
+    },
+    isMusicMuted: () => musicMuted,
+    /** Begin the continuous BGM loop (idempotent — never creates a second loop). */
+    startMusic() { if (disposed) return; musicWanted = true; step = 0; ensureScheduler(); },
+    stopMusic() { musicWanted = false; stopScheduler(); stopMusicVoices(); },
+    isMusicPlaying: () => timer !== null,
+    activeMusicVoices: () => musicVoices.size,
     /** Silence (pause / hidden tab). Resumed only via unlock() from a gesture. */
-    hold() { held = true; stopAll(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },
+    hold() { held = true; stopAll(); stopScheduler(); stopMusicVoices(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },
     stopAll,
     activeVoices: () => voices.size,
     hasContext: () => ctx !== null,
     hasCompressor: () => comp !== null,
     dispose() {
       if (disposed) return;
-      disposed = true; stopAll();
-      try { comp?.disconnect(); master?.disconnect(); } catch { /* noop */ }
+      disposed = true; musicWanted = false; stopScheduler(); stopMusicVoices(); stopAll();
+      try { comp?.disconnect(); sfxBus?.disconnect(); musicBus?.disconnect(); master?.disconnect(); } catch { /* noop */ }
       try { void ctx?.close().catch(() => {}); } catch { /* noop */ }
-      ctx = null; master = null; comp = null;
+      ctx = null; master = null; comp = null; sfxBus = null; musicBus = null;
     },
   };
 }
 
 /** Pick one gate sound per frame so catch-up resolution never bursts. */
-const PRIORITY: SoundEvent[] = ["hazard", "wrong", "correct", "collect", "gate"];
+const PRIORITY: SoundEvent[] = ["milestone", "hazard", "wrong", "correct", "collect", "gate"];
 export function pickGateSound(events: readonly SoundEvent[]): SoundEvent | null {
   for (const p of PRIORITY) if (events.includes(p)) return p;
   return null;
