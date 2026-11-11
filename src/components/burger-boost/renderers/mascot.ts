@@ -13,7 +13,32 @@ type Ctx = CanvasRenderingContext2D;
 
 /* palette */
 const FUR = "#f7902f", FUR_DARK = "#cf5f10", FUR_LIGHT = "#ffb766", CREAM = "#fff1d8", PINK = "#ffb3a7";
-const SUIT = "#0f7c80", SUIT_DARK = "#08565a", SUIT_LIGHT = "#2bb5b0";
+const SUIT = "#23201e", SUIT_DARK = "#121010", SUIT_LIGHT = "#4a423d";
+
+/** Approved visual spec (Step 48): charcoal suit, branding on jersey AND cape. */
+export const MASCOT_PALETTE = { suit: SUIT, suitDark: SUIT_DARK, suitLight: SUIT_LIGHT } as const;
+export const MASCOT_BRANDING = { jersey: "FLAMIO", cape: "FLAMIO" } as const;
+/** Burger is held centred in front of the body (bx ≈ 4), never offset to one side. */
+export const BURGER_GRIP = { bx: 4, by: -44, halfSpan: 15 } as const;
+/** Periodic backward glance: every 4.5 s, lasting 700 ms. */
+export const GLANCE_PERIOD_MS = 4500;
+export const GLANCE_MS = 700;
+
+/** Symmetric paw positions around the burger centre for a given stride (-1..1). */
+export function gripPoints(stride: number): { left: { x: number; y: number }; right: { x: number; y: number } } {
+  const { bx, by, halfSpan } = BURGER_GRIP;
+  const dy = stride * 0.8;
+  return { left: { x: bx - halfSpan, y: by - 6 - dy }, right: { x: bx + halfSpan, y: by - 6 + dy } };
+}
+
+/** 0..1 head-turn amount; smooth in/out, zero outside the glance window. */
+export function glanceAmount(now: number): number {
+  if (!Number.isFinite(now) || now < 0) return 0;
+  const t = now % GLANCE_PERIOD_MS;
+  const start = GLANCE_PERIOD_MS - GLANCE_MS;
+  if (t < start) return 0;
+  return Math.sin(((t - start) / GLANCE_MS) * Math.PI);
+}
 const ACCENT = "#ff7a1a", GOLD = "#f4c14a", MASK = "#10b981", MASK_DARK = "#047857";
 const CAPE = "#ff6a13", CAPE_DARK = "#c2410c";
 
@@ -79,7 +104,7 @@ function grads(ctx: Ctx): Grads {
   g = {
     // running cat (unit space: feet at y=0, head ≈ y=-100)
     suit: lin(ctx, -26, 0, 26, 0, [[0, SUIT_DARK], [0.45, SUIT], [0.75, SUIT_LIGHT], [1, SUIT_DARK]]),
-    suitRim: lin(ctx, 0, -80, 0, -30, [[0, "rgba(160,255,245,0.55)"], [0.3, "rgba(160,255,245,0)"]]),
+    suitRim: lin(ctx, 0, -80, 0, -30, [[0, "rgba(255,190,120,0.35)"], [0.3, "rgba(255,190,120,0)"]]),
     head: rad(ctx, 6, -104, 2, 0, -96, 24, [[0, FUR_LIGHT], [0.6, FUR], [1, FUR_DARK]]),
     leg: lin(ctx, -8, 0, 8, 0, [[0, SUIT_DARK], [0.5, SUIT], [1, SUIT_DARK]]),
     cape: lin(ctx, 0, -78, 0, -20, [[0, CAPE], [1, CAPE_DARK]]),
@@ -324,6 +349,21 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
       ctx.quadraticCurveTo(side * 22, -56, side * 10, -76);
       ctx.closePath(); ctx.fill();
     }
+    // FLAMIO on the cape: small vertical lettering down each flap (balanced, readable)
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "900 6px system-ui, -apple-system, sans-serif";
+    ctx.fillStyle = "#fff6c2"; ctx.strokeStyle = "#7a2400"; ctx.lineWidth = 1.4; ctx.lineJoin = "round";
+    for (const side of [-1, 1] as const) {
+      const f = flap * side;
+      const letters = MASCOT_BRANDING.cape;
+      for (let i = 0; i < letters.length; i++) {
+        const k = i / (letters.length - 1);
+        const lx = side * (24 + k * 5) + f * (0.4 + k), ly = -66 + k * 32;
+        ctx.strokeText(letters[i]!, lx, ly); ctx.fillText(letters[i]!, lx, ly);
+      }
+    }
+    ctx.restore();
 
     // torso (athletic, tapered)
     ctx.fillStyle = G.suit;
@@ -346,19 +386,21 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
     ctx.lineJoin = "round"; ctx.lineWidth = 2.6; ctx.strokeStyle = "#5a1a00";
     ctx.shadowColor = "rgba(255,140,30,0.95)"; ctx.shadowBlur = 7 * u;
     ctx.fillStyle = G.letters;
-    arcText(ctx, "FLAMIO", 0, -64, 60, 0.115);
+    arcText(ctx, MASCOT_BRANDING.jersey, 0, -64, 60, 0.115);
     ctx.shadowBlur = 0;
     ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "800 6px system-ui, sans-serif";
     ctx.fillText("10", 0, -50);
 
     // arms: both reach forward-right to grip the burger at chest height
-    const bx = 30, by = -50;
+    const { bx, by } = BURGER_GRIP;
+    const grip = gripPoints(stride);
     ctx.lineCap = "round";
     for (const side of [-1, 1] as const) {
       const sx = side * 19, sy = -74;
-      const hx = bx + side * 15, hy = by - 6 + stride * side * 0.8;
+      const p = side < 0 ? grip.left : grip.right;
+      const hx = p.x, hy = p.y;
       ctx.strokeStyle = SUIT_DARK; ctx.lineWidth = 10;
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo((sx + hx) / 2 + 4, sy + 4, hx, hy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(sx + side * 4, (sy + hy) / 2, hx, hy); ctx.stroke();
       ctx.strokeStyle = SUIT; ctx.lineWidth = 7.5; ctx.stroke();
       ctx.strokeStyle = ACCENT; ctx.lineWidth = 8;
       ctx.beginPath(); ctx.moveTo(hx - (hx - sx) * 0.14, hy - (hy - sy) * 0.14); ctx.lineTo(hx - (hx - sx) * 0.08, hy - (hy - sy) * 0.08); ctx.stroke();
@@ -367,6 +409,10 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
 
     // head (rear 3/4: back of head + right cheek, eye and whiskers)
     const hy = -98 + (frame % 2) * 1.2;
+    // periodic backward glance: head turns over the shoulder; body/grip unaffected
+    const glance = glanceAmount(now);
+    ctx.save();
+    if (glance > 0) { ctx.translate(-glance * 3, 0); ctx.rotate(-glance * 0.22); }
     for (const side of [-1, 1] as const) {
       ctx.fillStyle = FUR;
       ctx.beginPath(); ctx.moveTo(side * 6, hy - 13); ctx.quadraticCurveTo(side * 16, hy - 32, side * 21, hy - 30); ctx.quadraticCurveTo(side * 23, hy - 16, side * 20, hy - 5); ctx.closePath(); ctx.fill();
@@ -396,12 +442,15 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
       ctx.fillStyle = "#123"; ctx.beginPath(); ctx.ellipse(19.2, hy - 1.4, 1.4, 1.8, 0, 0, Math.PI * 2); ctx.fill();
     }
 
-    // burger gripped in both paws in front of the chest (last 10 layers)
-    burger(ctx, bx, by + 8, 34, layers.length > 10 ? layers.slice(-10) : layers, false);
+    ctx.restore(); // end head glance transform
+
+    // burger gripped in both paws, centred in front of the body (last 10 layers)
+    burger(ctx, bx, by + 8, 32, layers.length > 10 ? layers.slice(-10) : layers, false);
     // paws over the bun edges
     ctx.fillStyle = FUR;
     for (const side of [-1, 1] as const) {
-      ctx.beginPath(); ctx.ellipse(bx + side * 16, by - 6 + stride * side * 0.8, 4.8, 5.5, 0, 0, Math.PI * 2); ctx.fill();
+      const p = side < 0 ? grip.left : grip.right;
+      ctx.beginPath(); ctx.ellipse(p.x + side, p.y, 4.8, 5.5, 0, 0, Math.PI * 2); ctx.fill();
     }
 
     // collection star
