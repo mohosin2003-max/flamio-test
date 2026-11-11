@@ -3,7 +3,7 @@ import { createAudioEngine, pickGateSound, MAX_VOICES } from "./burger-boost-aud
 
 function fakeCtx() {
   let created = 0;
-  const ctx: any = {
+  const ctx = {
     state: "running", currentTime: 0, destination: {}, closed: false,
     resume: async () => { ctx.state = "running"; }, suspend: async () => { ctx.state = "suspended"; },
     close: async () => { ctx.closed = true; },
