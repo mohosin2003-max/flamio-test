@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX, Music } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -16,8 +16,8 @@ import {
   createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
 import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
-import type { Ingredient, Lane } from "@/lib/burger-boost-rules";
-import { createAudioEngine, pickGateSound, type AudioEngine, type SoundEvent } from "@/lib/burger-boost-audio";
+import { OPERATION_RULES_VERSION, METER, type Ingredient, type Lane } from "@/lib/burger-boost-rules";
+import { createAudioEngine, pickGateSound, isMilestoneGate, type AudioEngine, type SoundEvent } from "@/lib/burger-boost-audio";
 
 /** Ingredient art colors (food colors, canvas only). */
 const ING: Record<Ingredient, { color: string; label: string }> = {
