@@ -16,6 +16,9 @@
  */
 
 export const RULES_VERSION = 1;
+/** Rules v2: strategic Operation Gates + single Discount Meter (Step 48/49). */
+export const OPERATION_RULES_VERSION = 2;
+export const SUPPORTED_RULES_VERSIONS = [RULES_VERSION, OPERATION_RULES_VERSION] as const;
 export const GAMEPLAY_DURATION_MS = 60_000;
 export const GRACE_PERIOD_MS = 15_000;
 export const HARD_CUTOFF_MS = GAMEPLAY_DURATION_MS + GRACE_PERIOD_MS; // 75 s
@@ -44,7 +47,34 @@ export type MathGate = { kind: "math"; a: number; op: MathOp; b: number; lanes: 
 export type IngredientGate = { kind: "ingredient"; lanes: [Ingredient, Ingredient] };
 /** One lane is a spoiled ingredient, the other is safe (empty). */
 export type NegativeGate = { kind: "negative"; spoiled: Ingredient; spoiledLane: Lane };
-export type Gate = MathGate | IngredientGate | NegativeGate;
+/** v2: each lane is a deterministic integer transformation of the meter. */
+export type OpChoice = { op: MathOp; v: number };
+export type OperationGate = { kind: "op"; lanes: [OpChoice, OpChoice] };
+export type Gate = MathGate | IngredientGate | NegativeGate | OperationGate;
+
+/** v2 meter constants (whole percent, integers only). */
+export const METER = { start: 0, min: -100, max: 200, ingredient: 2, hazard: -10, maxMultipliers: 2 } as const;
+
+/**
+ * Apply one operation to the meter. Integer-only, no floats:
+ *  + / − add/subtract v; × multiplies by v; ÷ divides by v truncating toward
+ *  zero (v ≥ 2 by construction, so division by zero is impossible). The
+ *  result is clamped to [METER.min, METER.max].
+ */
+export function applyOp(meter: number, c: OpChoice): number {
+  if (!Number.isInteger(meter) || !Number.isInteger(c.v) || c.v < 1) throw new Error("invalid operation");
+  let m: number;
+  switch (c.op) {
+    case "+": m = meter + c.v; break;
+    case "−": m = meter - c.v; break;
+    case "×": m = meter * c.v; break;
+    case "÷": if (c.v < 2) throw new Error("invalid divisor"); m = Math.trunc(meter / c.v); break;
+    default: throw new Error("invalid operation");
+  }
+  return Math.max(METER.min, Math.min(METER.max, m));
+}
+export const clampMeter = (m: number) => Math.max(METER.min, Math.min(METER.max, Math.trunc(m)));
+export const formatOp = (c: OpChoice) => `${c.op}${c.v}${c.op === "+" || c.op === "−" ? "%" : ""}`;
 
 export type PlayerAction = { gateIndex: number; lane: number; t: number };
 export type ReplayResult =
@@ -102,7 +132,31 @@ function mathGate(r: ReturnType<typeof createPrng>): MathGate {
   return { kind: "math", a, op, b, lanes, correctLane };
 }
 
+/**
+ * v2 strategic pair. Pairs are risk/reward trade-offs, never a quiz:
+ *  0: +a vs ×2 (×2 only while the multiplier budget lasts, else +b)
+ *  1: +a vs −b then catch-up  (greedy vs. safe small gain) → +small vs +big−risk
+ *  2: −a vs ÷2  (damage control: which hurts less depends on the meter)
+ *  3: +a vs +b  (pick the bigger boost)
+ */
+function opGate(r: ReturnType<typeof createPrng>, mulLeft: { n: number }): OperationGate {
+  const k = r.int(10);
+  const add = () => ({ op: "+" as const, v: 5 * (1 + r.int(4)) }); // +5..+20
+  const sub = () => ({ op: "−" as const, v: 5 * (1 + r.int(3)) }); // −5..−15
+  let pair: [OpChoice, OpChoice];
+  if (k < 3) {
+    const a = add();
+    if (mulLeft.n > 0) { mulLeft.n--; pair = [a, { op: "×", v: 2 }]; }
+    else pair = [a, add()];
+  } else if (k < 5) pair = [sub(), { op: "÷", v: 2 }];
+  else if (k < 7) pair = [add(), sub()];
+  else pair = [add(), add()];
+  if (r.int(2) === 1) pair = [pair[1], pair[0]];
+  return { kind: "op", lanes: pair };
+}
+
 export function generateTrack(seed: bigint | number | string, rulesVersion: number, gateCount: number): Gate[] {
+  if (rulesVersion === OPERATION_RULES_VERSION) return generateOperationTrack(seed, gateCount);
   if (rulesVersion !== RULES_VERSION) throw new Error("unsupported rules version");
   if (!Number.isInteger(gateCount) || gateCount < MIN_GATE_COUNT || gateCount > MAX_GATE_COUNT) throw new Error("invalid gate count");
   const r = createPrng(toSeed(seed), rulesVersion);
@@ -118,6 +172,64 @@ export function generateTrack(seed: bigint | number | string, rulesVersion: numb
   return track;
 }
 
+function generateOperationTrack(seed: bigint | number | string, gateCount: number): Gate[] {
+  if (!Number.isInteger(gateCount) || gateCount < MIN_GATE_COUNT || gateCount > MAX_GATE_COUNT) throw new Error("invalid gate count");
+  const r = createPrng(toSeed(seed), OPERATION_RULES_VERSION);
+  const mulLeft = { n: METER.maxMultipliers };
+  const track: Gate[] = [];
+  for (let i = 0; i < gateCount; i++) {
+    const k = i === 0 ? 0 : r.int(10); // first gate is always an operation so the meter can start moving
+    if (k < 5) track.push(opGate(r, mulLeft));
+    else if (k < 8) {
+      const x = r.int(8); const y = (x + 1 + r.int(7)) % 8;
+      track.push({ kind: "ingredient", lanes: [pick(BURGER_INGREDIENTS, x), pick(BURGER_INGREDIENTS, y)] });
+    } else track.push({ kind: "negative", spoiled: pick(BURGER_INGREDIENTS, r.int(8)), spoiledLane: r.int(2) as Lane });
+  }
+  return track;
+}
+
+/** Meter delta of one resolved gate (v2). Shared by client preview and server replay. */
+export function stepMeter(meter: number, g: Gate, lane: Lane): number {
+  if (g.kind === "op") return applyOp(meter, g.lanes[lane]);
+  if (g.kind === "ingredient") return clampMeter(meter + METER.ingredient);
+  if (g.kind === "negative") return lane === g.spoiledLane ? clampMeter(meter + METER.hazard) : meter;
+  throw new Error("math gates are not part of rules v2");
+}
+
+export type MeterReplayResult =
+  | { valid: true; finalMeter: number; peakMeter: number; gatesPassed: number; ingredients: Ingredient[]; spoiledHits: number; error: null }
+  | { valid: false; finalMeter: 0; peakMeter: 0; gatesPassed: 0; error: string };
+
+/**
+ * v2 authoritative replay. Same action contract as v1 ({gateIndex, lane, t},
+ * strictly in order, once each). Any client meter/score field is ignored.
+ */
+export function replayDiscountMeter(seed: bigint | number | string, gateCount: number, playerActions: unknown): MeterReplayResult {
+  const bad = (error: string): MeterReplayResult => ({ valid: false, finalMeter: 0, peakMeter: 0, gatesPassed: 0, error });
+  let track: Gate[];
+  try { track = generateOperationTrack(seed, gateCount); } catch (e) { return bad((e as Error).message); }
+  if (!Array.isArray(playerActions)) return bad("malformed actions");
+  if (playerActions.length > gateCount) return bad("too many actions");
+  let meter: number = METER.start, peak: number = METER.start, spoiledHits = 0, lastT = -1;
+  const ingredients: Ingredient[] = [];
+  for (let i = 0; i < playerActions.length; i++) {
+    const a = playerActions[i] as PlayerAction;
+    if (!a || typeof a !== "object") return bad("malformed action");
+    if (Object.keys(a).sort().join(",") !== "gateIndex,lane,t") return bad("malformed action");
+    if (!Number.isInteger(a.gateIndex) || a.gateIndex < 0 || a.gateIndex >= gateCount) return bad("invalid gate index");
+    if (a.gateIndex !== i) return bad("impossible gate progression");
+    if (a.lane !== 0 && a.lane !== 1) return bad("invalid lane");
+    if (!Number.isInteger(a.t) || a.t < 0 || a.t > HARD_CUTOFF_MS || a.t < lastT) return bad("malformed timing");
+    lastT = a.t;
+    const g = pick(track, i);
+    if (g.kind === "ingredient") ingredients.push(g.lanes[a.lane]);
+    if (g.kind === "negative" && a.lane === g.spoiledLane) spoiledHits++;
+    meter = stepMeter(meter, g, a.lane);
+    if (meter > peak) peak = meter;
+  }
+  return { valid: true, finalMeter: meter, peakMeter: peak, gatesPassed: playerActions.length, ingredients, spoiledHits, error: null };
+}
+
 // ---------- Replay ----------
 const fail = (error: string): ReplayResult => ({ valid: false, score: 0, gatesPassed: 0, timingAuthoritative: false, error });
 
@@ -131,6 +243,12 @@ const fail = (error: string): ReplayResult => ({ valid: false, score: 0, gatesPa
 export function simulateBurgerBoostReplay(
   seed: bigint | number | string, gateCount: number, playerActions: unknown, rulesVersion: number = RULES_VERSION,
 ): ReplayResult {
+  if (rulesVersion === OPERATION_RULES_VERSION) {
+    const m = replayDiscountMeter(seed, gateCount, playerActions);
+    if (!m.valid) return fail(m.error);
+    // v2 verified score = meter clamped to 0..100 (non-negative storage contract).
+    return { valid: true, score: Math.max(0, Math.min(100, m.finalMeter)), gatesPassed: m.gatesPassed, mathCorrect: 0, mathWrong: 0, ingredients: m.ingredients, spoiledHits: m.spoiledHits, timingAuthoritative: false, error: null };
+  }
   let track: Gate[];
   try { track = generateTrack(seed, rulesVersion, gateCount); } catch (e) { return fail((e as Error).message); }
   if (!Array.isArray(playerActions)) return fail("malformed actions");
@@ -149,6 +267,7 @@ export function simulateBurgerBoostReplay(
     if (!Number.isInteger(a.t) || a.t < 0 || a.t > HARD_CUTOFF_MS || a.t < lastT) return fail("malformed timing");
     lastT = a.t;
     const g = pick(track, i);
+    if (g.kind === "op") return fail("operation gate in v1 track");
     if (g.kind === "math") { if (a.lane === g.correctLane) mathCorrect++; else mathWrong++; }
     else if (g.kind === "ingredient") ingredients.push(g.lanes[a.lane]);
     else if (a.lane === g.spoiledLane) spoiledHits++;
@@ -166,12 +285,14 @@ export function simulateBurgerBoostReplay(
 export type PublicGate =
   | { kind: "math"; a: number; op: MathOp; b: number; lanes: [number, number] }
   | { kind: "ingredient"; lanes: [Ingredient, Ingredient] }
-  | { kind: "negative"; spoiled: Ingredient; spoiledLane: Lane };
+  | { kind: "negative"; spoiled: Ingredient; spoiledLane: Lane }
+  | { kind: "op"; lanes: [OpChoice, OpChoice] };
 
 export function sanitizeGates(track: readonly Gate[]): PublicGate[] {
   return track.map((g): PublicGate => {
     if (g.kind === "math") return { kind: "math", a: g.a, op: g.op, b: g.b, lanes: [g.lanes[0], g.lanes[1]] };
     if (g.kind === "ingredient") return { kind: "ingredient", lanes: [g.lanes[0], g.lanes[1]] };
+    if (g.kind === "op") return { kind: "op", lanes: [{ ...g.lanes[0] }, { ...g.lanes[1] }] };
     return { kind: "negative", spoiled: g.spoiled, spoiledLane: g.spoiledLane };
   });
 }
