@@ -243,12 +243,8 @@ const fail = (error: string): ReplayResult => ({ valid: false, score: 0, gatesPa
 export function simulateBurgerBoostReplay(
   seed: bigint | number | string, gateCount: number, playerActions: unknown, rulesVersion: number = RULES_VERSION,
 ): ReplayResult {
-  if (rulesVersion === OPERATION_RULES_VERSION) {
-    const m = replayDiscountMeter(seed, gateCount, playerActions);
-    if (!m.valid) return fail(m.error);
-    // v2 verified score = meter clamped to 0..100 (non-negative storage contract).
-    return { valid: true, score: Math.max(0, Math.min(100, m.finalMeter)), gatesPassed: m.gatesPassed, mathCorrect: 0, mathWrong: 0, ingredients: m.ingredients, spoiledHits: m.spoiledHits, timingAuthoritative: false, error: null };
-  }
+  // v1-only entry point (v2 uses replayDiscountMeter). Keeps the stored-score contract unchanged.
+  if (rulesVersion !== RULES_VERSION) return fail("unsupported rules version");
   let track: Gate[];
   try { track = generateTrack(seed, rulesVersion, gateCount); } catch (e) { return fail((e as Error).message); }
   if (!Array.isArray(playerActions)) return fail("malformed actions");
