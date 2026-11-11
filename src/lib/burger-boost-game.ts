@@ -11,7 +11,7 @@
  * Practice scores are provisional, never submitted, and award 0% discount.
  */
 import {
-  generateTrack, simulateBurgerBoostReplay, PROVISIONAL_SCORE, RULES_VERSION,
+  generateTrack, simulateBurgerBoostReplay, PROVISIONAL_SCORE, RULES_VERSION, OPERATION_RULES_VERSION, METER, stepMeter, replayDiscountMeter,
   GAMEPLAY_DURATION_MS, GRACE_PERIOD_MS, HARD_CUTOFF_MS, MIN_GATE_COUNT, MAX_GATE_COUNT,
   type Gate, type Ingredient, type Lane, type PlayerAction, type PublicGate,
 } from "./burger-boost-rules";
@@ -35,6 +35,9 @@ export type GameState = {
   mathCorrect: number;
   mathWrong: number;
   spoiledHits: number;
+  /** v2 single Discount Meter (display only — never trusted for rewards). */
+  meter: number;
+  rulesVersion: number;
   phase: Phase;
 };
 
@@ -42,11 +45,11 @@ export function normalizeGateCount(n: unknown): number {
   return typeof n === "number" && Number.isInteger(n) && n >= MIN_GATE_COUNT && n <= MAX_GATE_COUNT ? n : DEFAULT_GATE_COUNT;
 }
 
-export function createGame(seed: bigint | string | number, gateCount: number = DEFAULT_GATE_COUNT): GameState {
+export function createGame(seed: bigint | string | number, gateCount: number = DEFAULT_GATE_COUNT, rulesVersion: number = RULES_VERSION): GameState {
   const n = normalizeGateCount(gateCount);
   return {
-    track: generateTrack(seed, RULES_VERSION, n), gateCount: n, lane: 0, nextGate: 0, actions: [],
-    layers: [], score: 0, mathCorrect: 0, mathWrong: 0, spoiledHits: 0, phase: "running",
+    track: generateTrack(seed, rulesVersion, n), gateCount: n, lane: 0, nextGate: 0, actions: [],
+    layers: [], score: 0, mathCorrect: 0, mathWrong: 0, spoiledHits: 0, meter: METER.start, rulesVersion, phase: "running",
   };
 }
 
@@ -86,7 +89,7 @@ export function mathAnswer(a: number, op: string, b: number): number | null {
   }
 }
 
-export type GateOutcome = "correct" | "wrong" | "collect" | "spoiled" | "safe";
+export type GateOutcome = "correct" | "wrong" | "collect" | "spoiled" | "safe" | "boost" | "drop";
 
 /** Resolve the next gate in the player's current lane at practice time t (ms). */
 export function passGate(s: GameState, t: number): { state: GameState; outcome: GateOutcome | null } {
@@ -98,7 +101,10 @@ export function passGate(s: GameState, t: number): { state: GameState; outcome: 
   let { score, mathCorrect, mathWrong, spoiledHits } = s;
   let layers = s.layers;
   let outcome: GateOutcome;
-  if (g.kind === "math") {
+  const meter = s.rulesVersion === OPERATION_RULES_VERSION ? stepMeter(s.meter, g, lane) : s.meter;
+  if (g.kind === "op") {
+    outcome = meter >= s.meter ? "boost" : "drop";
+  } else if (g.kind === "math") {
     if (lane === g.correctLane) { mathCorrect++; score += PROVISIONAL_SCORE.mathCorrect; outcome = "correct"; }
     else { mathWrong++; outcome = "wrong"; }
   } else if (g.kind === "ingredient") {
@@ -109,11 +115,15 @@ export function passGate(s: GameState, t: number): { state: GameState; outcome: 
   const nextGate = s.nextGate + 1;
   const actions = [...s.actions, { gateIndex: s.nextGate, lane, t: tt }];
   const phase: Phase = nextGate >= s.gateCount ? "finished" : phaseAt(tt);
-  return { state: { ...s, score: Math.max(0, score), mathCorrect, mathWrong, spoiledHits, layers, nextGate, actions, phase }, outcome };
+  return { state: { ...s, meter, score: Math.max(0, score), mathCorrect, mathWrong, spoiledHits, layers, nextGate, actions, phase }, outcome };
 }
 
 /** Cross-check: practice score equals the shared server replay result. */
 export function replayScore(seed: bigint | string | number, s: GameState): number | null {
+  if (s.rulesVersion === OPERATION_RULES_VERSION) {
+    const m = replayDiscountMeter(seed, s.gateCount, s.actions);
+    return m.valid ? m.finalMeter : null;
+  }
   const r = simulateBurgerBoostReplay(seed, s.gateCount, s.actions);
   return r.valid ? r.score : null;
 }
@@ -144,6 +154,10 @@ export function trackFromPublicGates(gates: readonly PublicGate[]): Gate[] | nul
       const idx = ans === null ? -1 : g.lanes.indexOf(ans);
       if (idx < 0) return null;
       out.push({ kind: "math", a: g.a, op: g.op, b: g.b, lanes: [g.lanes[0], g.lanes[1]], correctLane: idx as Lane });
+    } else if (g?.kind === "op") {
+      const ok = Array.isArray(g.lanes) && g.lanes.length === 2 && g.lanes.every((c: { op: string; v: number }) => c && ["+", "−", "×", "÷"].includes(c.op) && Number.isInteger(c.v) && c.v >= (c.op === "÷" ? 2 : 1) && c.v <= 100);
+      if (!ok) return null;
+      out.push({ kind: "op", lanes: [{ op: g.lanes[0].op, v: g.lanes[0].v }, { op: g.lanes[1].op, v: g.lanes[1].v }] });
     } else if (g?.kind === "ingredient") out.push({ kind: "ingredient", lanes: [g.lanes[0], g.lanes[1]] });
     else if (g?.kind === "negative" && (g.spoiledLane === 0 || g.spoiledLane === 1)) out.push({ kind: "negative", spoiled: g.spoiled, spoiledLane: g.spoiledLane });
     else return null;
@@ -155,7 +169,9 @@ export function trackFromPublicGates(gates: readonly PublicGate[]): Gate[] | nul
 export function createLiveGame(live: LiveSession): GameState | null {
   const track = trackFromPublicGates(live.publicGates);
   if (!track) return null;
-  return { track, gateCount: track.length, lane: 0, nextGate: 0, actions: [], layers: [], score: 0, mathCorrect: 0, mathWrong: 0, spoiledHits: 0, phase: "running" };
+  const rulesVersion = track.some((g) => g.kind === "op") ? OPERATION_RULES_VERSION : RULES_VERSION;
+  if (rulesVersion === OPERATION_RULES_VERSION && track.some((g) => g.kind === "math")) return null; // mixed versions fail closed
+  return { track, gateCount: track.length, lane: 0, nextGate: 0, actions: [], layers: [], score: 0, mathCorrect: 0, mathWrong: 0, spoiledHits: 0, meter: METER.start, rulesVersion, phase: "running" };
 }
 
 /** Submission payload: sessionId + raw actions only. No score, seed, discount or timestamps. */
