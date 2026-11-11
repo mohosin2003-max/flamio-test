@@ -324,7 +324,7 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
     ctx.strokeStyle = CREAM; ctx.lineWidth = 6;
     ctx.beginPath(); ctx.moveTo(-23 + stride * 9, -66); ctx.lineTo(-22 + stride * 9, -70); ctx.stroke();
 
-    // legs: teal tights + orange boots with paw pads
+    // legs: charcoal tights + orange boots with paw pads
     for (const side of [-1, 1] as const) {
       const lift = Math.max(0, stride * side) * 13;
       const lx = side * 11;
@@ -494,7 +494,7 @@ export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: r
     // tail
     ctx.lineCap = "round"; ctx.strokeStyle = FUR; ctx.lineWidth = 8;
     ctx.beginPath(); ctx.moveTo(24, -8); ctx.bezierCurveTo(54, -10, 58, -40, 44, -56); ctx.stroke(); ctx.lineCap = "butt";
-    // sitting body (teal suit)
+    // sitting body (charcoal suit)
     const by = sit * 7;
     ctx.fillStyle = G.vSuit; ctx.beginPath(); ctx.ellipse(0, -36 + by, 30, 36 - by, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-26, -22 + by, 52, 5, 2.5); ctx.fill();
