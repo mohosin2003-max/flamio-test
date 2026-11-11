@@ -134,10 +134,10 @@ function mathGate(r: ReturnType<typeof createPrng>): MathGate {
 
 /**
  * v2 strategic pair. Pairs are risk/reward trade-offs, never a quiz:
- *  0: +a vs ×2 (×2 only while the multiplier budget lasts, else +b)
- *  1: +a vs −b then catch-up  (greedy vs. safe small gain) → +small vs +big−risk
- *  2: −a vs ÷2  (damage control: which hurts less depends on the meter)
- *  3: +a vs +b  (pick the bigger boost)
+ *  20%: +a vs ×2  (×2 only while the 2-per-track budget lasts, else +b)
+ *  30%: −a vs ÷2  (damage control: which hurts less depends on the meter sign/size)
+ *  30%: +a vs −b  (avoid the trap)
+ *  20%: +a vs +b  (pick the bigger boost)
  */
 function opGate(r: ReturnType<typeof createPrng>, mulLeft: { n: number }): OperationGate {
   const k = r.int(10);
