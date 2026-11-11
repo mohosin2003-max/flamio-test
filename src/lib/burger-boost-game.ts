@@ -151,7 +151,7 @@ export function trackFromPublicGates(gates: readonly PublicGate[]): Gate[] | nul
       if (idx < 0) return null;
       out.push({ kind: "math", a: g.a, op: g.op, b: g.b, lanes: [g.lanes[0], g.lanes[1]], correctLane: idx as Lane });
     } else if (g?.kind === "op") {
-      const ok = Array.isArray(g.lanes) && g.lanes.length === 2 && g.lanes.every((c) => c && ["+", "−", "×", "÷"].includes(c.op) && Number.isInteger(c.v) && c.v >= (c.op === "÷" ? 2 : 1) && c.v <= 100);
+      const ok = Array.isArray(g.lanes) && g.lanes.length === 2 && g.lanes.every((c: { op: string; v: number }) => c && ["+", "−", "×", "÷"].includes(c.op) && Number.isInteger(c.v) && c.v >= (c.op === "÷" ? 2 : 1) && c.v <= 100);
       if (!ok) return null;
       out.push({ kind: "op", lanes: [{ op: g.lanes[0].op, v: g.lanes[0].v }, { op: g.lanes[1].op, v: g.lanes[1].v }] });
     } else if (g?.kind === "ingredient") out.push({ kind: "ingredient", lanes: [g.lanes[0], g.lanes[1]] });
