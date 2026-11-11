@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -17,6 +17,7 @@ import {
 } from "@/lib/burger-boost-game";
 import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
 import type { Ingredient, Lane } from "@/lib/burger-boost-rules";
+import { createAudioEngine, pickGateSound, type AudioEngine, type SoundEvent } from "@/lib/burger-boost-audio";
 
 /** Ingredient art colors (food colors, canvas only). */
 const ING: Record<Ingredient, { color: string; label: string }> = {
@@ -45,6 +46,24 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; text?: string } | null>(null);
   const submitFn = useServerFn(submitBurgerBoostGameplay);
   const expireFn = useServerFn(expireBurgerBoostSession);
+  // Audio: one engine per mounted game, created lazily, disposed on unmount.
+  const audioRef = useRef<AudioEngine | null>(null);
+  const [muted, setMuted] = useState(false);
+  const audio = useCallback(() => (audioRef.current ??= createAudioEngine()), []);
+  const unlockAudio = useCallback(() => { audio().unlock(); }, [audio]);
+  useEffect(() => {
+    const onVis = () => { if (document.hidden) audioRef.current?.hold(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { document.removeEventListener("visibilitychange", onVis); audioRef.current?.dispose(); audioRef.current = null; };
+  }, []);
+  useEffect(() => { if (paused) audioRef.current?.hold(); }, [paused]);
+  // Saved-game victory waits for the server-confirmed verdict, once.
+  const victoryPlayedRef = useRef(false);
+  useEffect(() => {
+    if (isLive && verdict?.kind === "ok" && result?.phase === "finished" && !victoryPlayedRef.current) {
+      victoryPlayedRef.current = true; audioRef.current?.play("victory");
+    }
+  }, [isLive, verdict, result]);
 
   const startLive = useCallback((live: LiveSession) => {
     const g = createLiveGame(live);
@@ -67,20 +86,27 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         setVerdict({ kind: "fail", text: "We couldn't reach the server to verify this game." });
       }
     });
-    startRef.current = performance.now();
+    startRef.current = performance.now(); victoryPlayedRef.current = false;
+    audioRef.current?.play("start");
     setIsLive(true); setVerdict({ kind: "pending" });
     setPaused(false); setResult(null); setScreen("playing");
   }, [submitFn, expireFn]);
 
   const start = useCallback(() => {
+    unlockAudio(); victoryPlayedRef.current = false;
     liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
     stateRef.current = createGame(practiceSeed(), gateCount); resetMascotAnim(mascot);
     startRef.current = performance.now();
+    audioRef.current?.play("start");
     setPaused(false); setResult(null); setScreen("playing");
-  }, [gateCount]);
+  }, [gateCount, unlockAudio]);
 
   const setLane = useCallback((lane: Lane) => {
-    if (stateRef.current) stateRef.current = switchLane(stateRef.current, lane);
+    const prev = stateRef.current;
+    if (!prev) return;
+    const next = switchLane(prev, lane);
+    stateRef.current = next;
+    if (next.lane !== prev.lane) audioRef.current?.play("lane");
   }, []);
 
   // Keyboard fallback
@@ -114,23 +140,30 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     resize();
     window.addEventListener("resize", resize);
 
+    const OUT_SOUND: Record<string, SoundEvent> = { correct: "correct", wrong: "wrong", collect: "collect", spoiled: "hazard", safe: "gate" };
     const frame = (now: number) => {
       let s = stateRef.current!;
+      const sounds: SoundEvent[] = [];
       const elapsed = Math.min(HARD_CUTOFF_MS, now - startRef.current);
       // resolve gates that reached the player
       while (s.nextGate < s.gateCount && (s.nextGate + 1) * interval <= elapsed && (s.phase === "running" || s.phase === "grace")) {
         const r = passGate(s, elapsed);
         s = r.state;
+        if (r.outcome) sounds.push(OUT_SOUND[r.outcome]!);
         if (r.outcome) flashRef.current = { text: { correct: "+10 Correct!", wrong: "Wrong", collect: "+5 Layer", spoiled: "Spoiled! −5", safe: "Dodged" }[r.outcome], good: r.outcome !== "wrong" && r.outcome !== "spoiled", at: now };
       }
       if (s.phase === "running" || s.phase === "grace") s = { ...s, phase: phaseAt(elapsed) === "expired" ? "expired" : s.phase === "grace" || phaseAt(elapsed) === "grace" ? "grace" : "running" };
       stateRef.current = s;
+      const snd = pickGateSound(sounds); if (snd) audioRef.current?.play(snd);
       draw(ctx, canvas, s, elapsed, interval, C, flashRef.current, now);
       if (now - lastHud > 100) {
         lastHud = now;
         setHud({ score: s.score, elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
       }
-      if (s.phase === "finished" || s.phase === "expired") { setResult(s); setScreen("over"); void finalizeRef.current?.(); return; }
+      if (s.phase === "finished" || s.phase === "expired") {
+        const a = audioRef.current; a?.stopAll();
+        if (s.phase === "finished" && !liveRef.current) { victoryPlayedRef.current = true; a?.play("victory"); } else a?.play("gameOver");
+        setResult(s); setScreen("over"); void finalizeRef.current?.(); return; }
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
@@ -148,7 +181,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     <div ref={rootRef} className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground">
       {screen === "playing" && (
         <>
-          <Hud live={isLive} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)} />
+          <Hud live={isLive} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)} muted={muted} onMute={() => { const m = !muted; if (!m) unlockAudio(); audio().setMuted(m); setMuted(m); }} />
           <div
             className="relative min-h-0 flex-1 touch-none select-none"
             onTouchStart={(e) => { touchX.current = e.touches[0]?.clientX ?? null; }}
@@ -167,7 +200,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
               <Overlay>
                 <h2 className="font-display text-2xl font-bold">Paused</h2>
                 <p className="text-sm text-muted-foreground">The clock keeps running — the 75-second limit can’t be paused.</p>
-                <Button size="lg" onClick={() => setPaused(false)}><Play className="size-5" /> Resume</Button>
+                <Button size="lg" onClick={() => { if (!muted) unlockAudio(); setPaused(false); }}><Play className="size-5" /> Resume</Button>
               </Overlay>
             )}
           </div>
@@ -187,7 +220,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           </ul>
           <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">Practice only: scores are not saved and no rewards or discounts are given yet.</p>
           <Button size="lg" className="w-full" onClick={start}><Play className="size-5" /> Start practice</Button>
-          <RealGamePanel onLive={startLive} />
+          <RealGamePanel onLive={startLive} onUnlock={unlockAudio} />
           <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}
@@ -225,7 +258,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   );
 }
 
-function Hud(p: { live: boolean; score: number; remaining: number; grace: boolean; graceLeft: number; stack: number; gate: number; total: number; onPause: () => void }) {
+function Hud(p: { live: boolean; score: number; remaining: number; grace: boolean; graceLeft: number; stack: number; gate: number; total: number; onPause: () => void; muted: boolean; onMute: () => void }) {
   const ok = inTargetRange(p.stack);
   return (
     <div className="space-y-2 border-b border-border bg-card/80 px-3 py-2">
@@ -236,7 +269,8 @@ function Hud(p: { live: boolean; score: number; remaining: number; grace: boolea
         <div className="text-center"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Score</div><div className="font-display text-xl font-bold text-primary">{p.live ? "—" : p.score}</div></div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{p.gate}/{p.total}</span>
-          <Button size="icon" variant="ghost" onClick={p.onPause} aria-label="Pause"><Pause className="size-5" /></Button>
+          <Button size="icon" variant="ghost" className="size-11" onClick={p.onMute} aria-label={p.muted ? "Unmute sound" : "Mute sound"} aria-pressed={p.muted}>{p.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}</Button>
+          <Button size="icon" variant="ghost" className="size-11" onClick={p.onPause} aria-label="Pause"><Pause className="size-5" /></Button>
         </div>
       </div>
       <div>

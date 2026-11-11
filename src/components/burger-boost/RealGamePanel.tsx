@@ -12,12 +12,14 @@ import type { LiveSession } from "@/lib/burger-boost-game";
  * can't create one, the customer sees the honest reason. On success the
  * server session + public gates are handed to the game screen.
  */
-export function RealGamePanel({ onLive }: { onLive: (live: LiveSession) => void }) {
+export function RealGamePanel({ onLive, onUnlock }: { onLive: (live: LiveSession) => void; onUnlock?: () => void }) {
   const { isAuthenticated, loading } = useAuth();
   const create = useServerFn(createBurgerBoostSession);
   const [state, setState] = useState<{ kind: "idle" | "busy" | "msg"; text?: string }>({ kind: "idle" });
 
   const tryStart = async () => {
+    // Unlock audio synchronously inside the click, before any await. Never blocks.
+    try { onUnlock?.(); } catch { /* silent */ }
     setState({ kind: "busy" });
     try {
       const r = await create({ data: {} });
