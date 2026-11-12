@@ -64,6 +64,35 @@ function OwnerBurgerBoost() {
         <p className="text-sm capitalize">Ingredients / spoiled: {d.ingredients.join(", ")}</p>
       </CardContent></Card>
 
+      <Card><CardContent className="space-y-3 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-semibold">Reward settings (draft)</p>
+          <Badge variant="outline"><Lock className="mr-1 size-3" />Not saved</Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">These are starting values only. They can't be changed or saved until you approve the game's database update and release.</p>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          {([
+            ["Top discount (full winners)", `${d.rewardDraft.values.ownerMax}%`, `0–${d.rewardDraft.bounds.maxDiscount.max}%`],
+            ["Discount for extra winners", `${d.rewardDraft.values.partialMax}%`, "0% up to the top discount"],
+            ["Full winners per day", String(d.rewardDraft.values.dailyFullLimit), `0–${d.rewardDraft.bounds.winnersPerDay.max}`],
+            ["Extra winners per day", String(d.rewardDraft.values.dailyPartialLimit), `0–${d.rewardDraft.bounds.winnersPerDay.max}`],
+            ["Minimum order", `৳${d.rewardDraft.values.minOrderBdt}`, `৳0–৳${d.rewardDraft.bounds.minOrderBdt.max}`],
+            ["Gates per game", String(d.rewardDraft.values.gateCount), `${d.rewardDraft.bounds.gateCount.min}–${d.rewardDraft.bounds.gateCount.max}`],
+          ] as const).map(([label, value, range]) => (
+            <div key={label} className="rounded-md border border-border p-3">
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd className="text-lg font-bold">{value}</dd>
+              <dd className="text-xs text-muted-foreground">Allowed {range}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent></Card>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card><CardContent className="p-4"><p className="font-semibold">Today's winners &amp; slots left</p><p className="text-sm text-muted-foreground">Unavailable — {d.usage.reason}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="font-semibold">Reward history</p><p className="text-sm text-muted-foreground">Unavailable — {d.rewardHistory.reason}</p></CardContent></Card>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
         <Card><CardContent className="p-4"><p className="font-semibold">Game analytics</p><p className="text-sm text-muted-foreground">Unavailable — {d.analytics.reason}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="font-semibold">Activity log</p><p className="text-sm text-muted-foreground">Unavailable — {d.audit.reason}</p></CardContent></Card>

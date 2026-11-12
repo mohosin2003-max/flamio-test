@@ -8,6 +8,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
+import { REWARD_BOUNDS } from "@/lib/burger-boost-reward";
 import { BURGER_INGREDIENTS, MATH_OPERATIONS, MAX_GATE_COUNT, MIN_GATE_COUNT } from "@/lib/burger-boost-rules";
 
 export function buildOwnerOverview() {
@@ -20,6 +22,10 @@ export function buildOwnerOverview() {
     mathOperations: [...MATH_OPERATIONS],
     ingredients: [...BURGER_INGREDIENTS],
     analytics: { available: false as const, reason: "Burger Boost database not installed yet." },
+    /** Draft defaults only — nothing is saved; the settings table has no such columns yet. */
+    rewardDraft: { values: { ...DRAFT_SETTINGS }, bounds: REWARD_BOUNDS, persisted: false as const },
+    usage: { available: false as const, reason: "Daily winner counts need the approved database update." },
+    rewardHistory: { available: false as const, reason: "No coupons can be issued while the release lock is on." },
     audit: { available: false as const, reason: "Burger Boost database not installed yet." },
   };
 }

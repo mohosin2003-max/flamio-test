@@ -9,7 +9,8 @@
  * Score weights (rules engine) remain PROVISIONAL. awardedDiscountPercent is
  * always 0. No coupon / checkout logic. Game remains disabled.
  */
-import { simulateBurgerBoostReplay } from "./burger-boost-rules";
+import { simulateBurgerBoostReplay, replayDiscountMeter, OPERATION_RULES_VERSION } from "./burger-boost-rules";
+import { dhakaDate, type SessionMode } from "./burger-boost-reward";
 
 /**
  * Runtime server-only guard. NOTE: this is NOT compile-time enforcement
@@ -23,6 +24,8 @@ export function assertServerEnvironment(): void {
 assertServerEnvironment();
 
 export const RULES_VERSION = 1;
+/** Step 53: new Practice/Reward sessions use the v2 operation rules. Legacy v1 rows replay unchanged. */
+export const MODE_RULES_VERSION = OPERATION_RULES_VERSION;
 export const GATE_COUNT = 30;
 export const GAMEPLAY_WINDOW_MS = 60_000;
 export const GRACE_PERIOD_MS = 15_000;
@@ -44,6 +47,8 @@ export type SessionRecord = {
   verifiedScore: number | null;
   telemetryHash: string | null;
   awardedDiscountPercent: 0;
+  /** Server-set at creation. Absent on legacy v1 rows. Never accepted from the client. */
+  mode?: SessionMode;
 };
 
 export type CompletionUpdate = { verifiedScore: number; telemetryHash: string; completedAt: number };
@@ -55,7 +60,18 @@ export interface BurgerBoostSessionRepository {
   completeIfInProgress(id: string, userId: string, update: CompletionUpdate): Promise<boolean>;
   /** Sets status only. MUST NOT set completedAt, verifiedScore or telemetryHash. */
   transitionIfInProgress(id: string, userId: string, status: "expired" | "rejected"): Promise<boolean>;
+  /**
+   * Step 53 contract (NOT database-backed yet): in ONE transaction insert the
+   * session, THEN insert (userId, dhakaDate, sessionId) into
+   * daily_reward_attempts. A unique conflict must roll back both and resolve
+   * to `false`. See docs/burger-boost/drafts. Absent => reward start unavailable.
+   */
+  insertRewardWithAttempt?(record: SessionRecord, dhakaDate: string): Promise<boolean>;
 }
+
+export type ModeStartResult =
+  | { ok: true; session: SessionDTO }
+  | { ok: false; reason: "attempt_used" | "unavailable" };
 
 /** Client-safe view: no seed, track, answers, verified score or discount. */
 export type SessionDTO = {
@@ -69,7 +85,7 @@ export type SessionDTO = {
 };
 
 export type SubmitResult =
-  | { ok: true; status: "completed"; verifiedScore: number }
+  | { ok: true; status: "completed"; verifiedScore: number; rulesVersion?: number; finalMeter?: number; mode?: SessionMode }
   | { ok: false; status: SessionStatus | "not_found" | "clock_anomaly"; error: string };
 
 // ---------- Seed ----------
@@ -109,6 +125,14 @@ export function toDTO(r: SessionRecord): SessionDTO {
 
 export function createBurgerBoostSessionService(deps: ServiceDeps) {
   const makeSeed = deps.seed ?? generateSeed;
+  function newRecord(userId: string, mode: SessionMode): SessionRecord {
+    const startedAt = deps.now();
+    return {
+      id: deps.newId(), userId, seed: makeSeed(), rulesVersion: MODE_RULES_VERSION, status: "in_progress",
+      startedAt, expiresAt: startedAt + HARD_CUTOFF_MS, completedAt: null,
+      verifiedScore: null, telemetryHash: null, awardedDiscountPercent: 0, mode,
+    };
+  }
   return {
     async start(userId: string): Promise<SessionDTO> {
       if (!userId) throw new Error("unauthenticated");
@@ -120,6 +144,29 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       };
       await deps.repo.insert(rec);
       return toDTO(rec);
+    },
+
+    /** Practice: unlimited, v2 rules, never touches attempts, slots or coupons. */
+    async startPractice(userId: string): Promise<ModeStartResult> {
+      if (!userId) throw new Error("unauthenticated");
+      const rec = newRecord(userId, "practice");
+      await deps.repo.insert(rec);
+      return { ok: true, session: toDTO(rec) };
+    },
+
+    /**
+     * Reward: one per user per Asia/Dhaka day, date taken from the SERVER start
+     * time. Session + attempt are written atomically by the repository; a
+     * failure before that commit consumes nothing.
+     */
+    async startReward(userId: string): Promise<ModeStartResult> {
+      if (!userId) throw new Error("unauthenticated");
+      if (typeof deps.repo.insertRewardWithAttempt !== "function") return { ok: false, reason: "unavailable" };
+      const rec = newRecord(userId, "reward");
+      let created: boolean;
+      try { created = await deps.repo.insertRewardWithAttempt(rec, dhakaDate(rec.startedAt)); }
+      catch { return { ok: false, reason: "unavailable" }; }
+      return created ? { ok: true, session: toDTO(rec) } : { ok: false, reason: "attempt_used" };
     },
 
     async get(id: string, userId: string): Promise<SessionDTO | null> {
@@ -168,13 +215,28 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       }
       let seed: bigint;
       try { seed = int8StringToUnsigned(r.seed); } catch { return reject(); }
-      const result = simulateBurgerBoostReplay(seed, GATE_COUNT, actions, r.rulesVersion);
-      if (!result.valid || result.gatesPassed !== GATE_COUNT) return reject(result.valid ? "incomplete replay" : result.error);
+      // Explicit routing on the PERSISTED rules version. Never reinterpreted.
+      let verifiedScore: number;
+      let finalMeter: number | undefined;
+      if (r.rulesVersion === RULES_VERSION) {
+        const result = simulateBurgerBoostReplay(seed, GATE_COUNT, actions, RULES_VERSION);
+        if (!result.valid || result.gatesPassed !== GATE_COUNT) return reject(result.valid ? "incomplete replay" : result.error);
+        verifiedScore = result.score;
+      } else if (r.rulesVersion === OPERATION_RULES_VERSION) {
+        const m = replayDiscountMeter(seed, GATE_COUNT, actions);
+        if (!m.valid || m.gatesPassed !== GATE_COUNT) return reject(m.valid ? "incomplete replay" : m.error);
+        finalMeter = m.finalMeter;
+        // Stored score column is non-negative; the signed meter is returned separately.
+        verifiedScore = Math.max(0, m.finalMeter);
+      } else {
+        return reject("unsupported rules version");
+      }
 
       const hash = await sha256Hex(canonicalTelemetry(actions as { gateIndex: number; lane: number; t: number }[]));
-      const won = await deps.repo.completeIfInProgress(id, userId, { verifiedScore: result.score, telemetryHash: hash, completedAt: now });
+      const won = await deps.repo.completeIfInProgress(id, userId, { verifiedScore, telemetryHash: hash, completedAt: now });
       if (!won) return { ok: false, status: "completed", error: "session already finalized" };
-      return { ok: true, status: "completed", verifiedScore: result.score };
+      if (finalMeter === undefined) return { ok: true, status: "completed", verifiedScore };
+      return { ok: true, status: "completed", verifiedScore, rulesVersion: r.rulesVersion, finalMeter, ...(r.mode ? { mode: r.mode } : {}) };
 
       async function reject(error = "invalid replay"): Promise<SubmitResult> {
         await deps.repo.transitionIfInProgress(id, userId, "rejected");
