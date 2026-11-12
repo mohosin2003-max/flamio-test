@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, existsSync } from "node:fs";
-import { generateTrack, generateOperationTrack } from "./burger-boost-rules.ts";
+import { generateTrack } from "./burger-boost-rules.ts";
 import { createBurgerBoostSessionService, int8StringToUnsigned, RULES_VERSION, MODE_RULES_VERSION, GATE_COUNT } from "./burger-boost-session-core.ts";
 import { decideCompletion, RELEASE_LOCKS, DRAFT_SETTINGS } from "./burger-boost-reward-flow.ts";
 import { dhakaDate, checkCoupon, COUPON_VALIDITY_MS } from "./burger-boost-reward.ts";
@@ -30,7 +30,7 @@ function setup(opts) {
   const svc = createBurgerBoostSessionService({ repo, now: () => clock, newId: () => `s${++n}`, seed: () => SEED });
   return { repo, svc, at: (ms) => { clock = ms; } };
 }
-const v2Track = generateOperationTrack(int8StringToUnsigned(SEED), GATE_COUNT);
+const v2Track = generateTrack(int8StringToUnsigned(SEED), 2, GATE_COUNT);
 const v1Track = generateTrack(int8StringToUnsigned(SEED), RULES_VERSION, GATE_COUNT);
 const acts = (n = GATE_COUNT) => Array.from({ length: n }, (_, i) => ({ gateIndex: i, lane: 0, t: i * 1000 }));
 const settings = { ownerMax: 20, partialMax: 10, dailyFullLimit: 1, dailyPartialLimit: 1, minOrderBdt: 300, gateCount: 30 };
