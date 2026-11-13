@@ -17,6 +17,8 @@ import {
 } from "@/lib/burger-boost-game";
 import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
 import { OPERATION_RULES_VERSION, METER, type Ingredient, type Lane } from "@/lib/burger-boost-rules";
+import { createPauseClock, storeDiscountPreview, boostDelta, type PauseClock } from "@/lib/burger-boost-pause";
+import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
 import { createAudioEngine, pickGateSound, isMilestoneGate, type AudioEngine, type SoundEvent } from "@/lib/burger-boost-audio";
 
 /** Ingredient art colors (food colors, canvas only). */
@@ -34,9 +36,16 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const rootRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<GameState | null>(null);
   const startRef = useRef(0);
+  const clockRef = useRef<PauseClock>(createPauseClock(0));
   const flashRef = useRef<{ text: string; good: boolean; at: number } | null>(null);
   const [screen, setScreen] = useState<Screen>("start");
   const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  useEffect(() => {
+    pausedRef.current = paused;
+    const now = performance.now();
+    if (paused) clockRef.current.pause(now); else clockRef.current.resume(now);
+  }, [paused]);
   const [hud, setHud] = useState({ score: 0, meter: 0, v2: true, elapsed: 0, stack: 0, gate: 0, layers: [] as Ingredient[] });
   const [result, setResult] = useState<GameState | null>(null);
   // Live saved session (server gates). null = practice.
@@ -87,7 +96,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         setVerdict({ kind: "fail", text: "We couldn't reach the server to verify this game." });
       }
     });
-    startRef.current = performance.now(); victoryPlayedRef.current = false;
+    startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current); victoryPlayedRef.current = false;
     audioRef.current?.play("start"); audioRef.current?.startMusic();
     setIsLive(true); setVerdict({ kind: "pending" });
     setPaused(false); setResult(null); setScreen("playing");
@@ -97,14 +106,14 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     unlockAudio(); victoryPlayedRef.current = false;
     liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
     stateRef.current = createGame(practiceSeed(), gateCount, OPERATION_RULES_VERSION); resetMascotAnim(mascot);
-    startRef.current = performance.now();
+    startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current);
     audioRef.current?.play("start"); audioRef.current?.startMusic();
     setPaused(false); setResult(null); setScreen("playing");
   }, [gateCount, unlockAudio]);
 
   const setLane = useCallback((lane: Lane) => {
     const prev = stateRef.current;
-    if (!prev) return;
+    if (!prev || pausedRef.current) return;
     const next = switchLane(prev, lane);
     stateRef.current = next;
     if (next.lane !== prev.lane) audioRef.current?.play("lane");
@@ -121,7 +130,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     return () => window.removeEventListener("keydown", onKey);
   }, [screen, setLane]);
 
-  // Game loop. Pause hides the track but the clock keeps running (hard 75 s cutoff).
+  // Game loop. Pause freezes the arcade clock (gates, timer, meter, mascot); server expiry is unaffected.
   useEffect(() => {
     if (screen !== "playing") return;
     const canvas = canvasRef.current!;
@@ -142,10 +151,13 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     window.addEventListener("resize", resize);
 
     const OUT_SOUND: Record<string, SoundEvent> = { correct: "correct", wrong: "wrong", collect: "collect", spoiled: "hazard", safe: "gate", boost: "correct", drop: "wrong" };
-    const frame = (now: number) => {
+    const frame = (realNow: number) => {
+      if (pausedRef.current) { raf = requestAnimationFrame(frame); return; }
       let s = stateRef.current!;
       const sounds: SoundEvent[] = [];
-      const elapsed = Math.min(HARD_CUTOFF_MS, now - startRef.current);
+      const played = clockRef.current.elapsed(realNow);
+      const now = startRef.current + played; // virtual time: frozen while paused
+      const elapsed = Math.min(HARD_CUTOFF_MS, played);
       // resolve gates that reached the player
       while (s.nextGate < s.gateCount && (s.nextGate + 1) * interval <= elapsed && (s.phase === "running" || s.phase === "grace")) {
         const before = s.meter;
@@ -153,7 +165,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         s = r.state;
         if (r.outcome) sounds.push(OUT_SOUND[r.outcome]!);
         if (isMilestoneGate(s.nextGate) && r.outcome) sounds.push("milestone");
-        const d = s.meter - before, ds = `${d >= 0 ? "+" : "−"}${Math.abs(d)}%`;
+        const d = s.meter - before, ds = boostDelta(d);
         if (r.outcome) flashRef.current = { text: { correct: "+10 Correct!", wrong: "Wrong", collect: s.rulesVersion === 2 ? `Layer ${ds}` : "+5 Layer", spoiled: s.rulesVersion === 2 ? `Spoiled! ${ds}` : "Spoiled! −5", safe: "Dodged", boost: ds, drop: ds }[r.outcome], good: r.outcome !== "wrong" && r.outcome !== "spoiled" && r.outcome !== "drop", at: now };
       }
       if (s.phase === "running" || s.phase === "grace") s = { ...s, phase: phaseAt(elapsed) === "expired" ? "expired" : s.phase === "grace" || phaseAt(elapsed) === "grace" ? "grace" : "running" };
@@ -205,7 +217,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             {paused && (
               <Overlay>
                 <h2 className="font-display text-2xl font-bold">Paused</h2>
-                <p className="text-sm text-muted-foreground">The clock keeps running — the 75-second limit can’t be paused.</p>
+                <p className="text-sm text-muted-foreground">Game frozen — tap Resume to continue exactly where you left off.</p>
                 <Button size="lg" onClick={() => { if (!muted) unlockAudio(); setPaused(false); }}><Play className="size-5" /> Resume</Button>
               </Overlay>
             )}
@@ -241,9 +253,10 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             </>) : verdict?.kind === "fail" ? <p role="status" className="text-sm text-destructive">{verdict.text}</p>
               : <p role="status" className="text-sm text-muted-foreground">Verifying your game…</p>
           ) : (<>
-            <p className={result.meter > 0 ? "font-display text-6xl font-black text-primary" : "font-display text-6xl font-black text-destructive"}>{result.meter}%</p>
-            <p className="text-sm text-muted-foreground">practice discount meter</p>
-            {result.meter <= 0 && <p className="text-sm text-muted-foreground">Meter at or below 0% — in a reward game this would earn no coupon.</p>}
+            <p className={result.meter > 0 ? "font-display text-6xl font-black text-primary" : "font-display text-6xl font-black text-destructive"}>{result.meter}</p>
+            <p className="text-sm text-muted-foreground">FLAMIO Boost Power</p>
+            <p className="text-sm">Store discount: <b>{storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter)}%</b></p>
+            {result.meter <= 0 && <p className="text-sm text-muted-foreground">Boost Power at or below 0 — in a reward game this would earn no coupon.</p>}
           </>)}
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
             ? <VictoryCat layers={result.layers} />
@@ -278,8 +291,11 @@ function Hud(p: { live: boolean; v2: boolean; meter: number; score: number; rema
       </div>
       {p.v2 ? (
         <div>
-          <div className="mb-1 flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground"><span>Discount</span><span className={p.meter > 0 ? "font-display text-base font-black text-primary" : "font-display text-base font-black text-destructive"}>{p.meter}%</span></div>
-          <div className="relative h-3 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={100} aria-valuenow={p.meter} aria-label="Discount meter">
+          <div className="mb-1 flex items-end justify-between gap-2">
+            <div className="flex items-baseline gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">FLAMIO Boost Power</span><span className={p.meter > 0 ? "font-display text-xl font-black text-primary" : "font-display text-xl font-black text-destructive"}>{p.meter}</span></div>
+            <div className="text-right leading-none"><span className="block text-[9px] uppercase tracking-widest text-muted-foreground">Store discount</span><span className="font-display text-sm font-bold">{storeDiscountPreview(DRAFT_SETTINGS.ownerMax, p.meter)}%</span></div>
+          </div>
+          <div className="relative h-3 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={100} aria-valuenow={p.meter} aria-label="Boost power">
             <div className={p.meter > 0 ? "absolute inset-y-0 left-0 bg-primary transition-all" : "absolute inset-y-0 left-0 bg-destructive transition-all"} style={{ width: `${p.meter > 0 ? shown : Math.min(100, -p.meter)}%` }} />
           </div>
         </div>

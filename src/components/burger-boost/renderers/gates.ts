@@ -169,9 +169,9 @@ export type DrawableGate =
   | { kind: "negative"; spoiled: Ingredient; spoiledLane: Lane }
   | { kind: "op"; lanes: readonly [{ op: MathOp; v: number }, { op: MathOp; v: number }] };
 
-/** Lane label for an operation choice, e.g. "+12%", "×2", "÷2". */
+/** Lane label for an operation choice, e.g. "+12", "×2", "÷2". */
 export function opLabel(c: { op: MathOp; v: number }): string {
-  return `${c.op}${c.v}${c.op === "+" || c.op === "−" ? "%" : ""}`;
+  return `${c.op}${c.v}`;
 }
 /** Colour family: growth ops warm/gold, shrinking ops red. Same info as the label. */
 export function opTone(c: { op: MathOp; v: number }): "grow" | "shrink" {
@@ -205,14 +205,14 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       ctx.fillStyle = "#23201e"; rr(ctx, p.left - 4 * s, gy, p.right - p.left + 8 * s, 12 * s, 4 * s); ctx.fill();
       ctx.lineWidth = Math.max(1, 1.5 * s); ctx.strokeStyle = C.primary; ctx.stroke();
       ctx.fillStyle = "#fff4e6"; ctx.font = `800 ${Math.max(6, 9 * s)}px system-ui, sans-serif`;
-      if (s > 0.3) ctx.fillText("DISCOUNT BOOST", mid, gy + 6 * s);
+      if (s > 0.3) ctx.fillText("FLAMIO BOOST", mid, gy + 6 * s);
       for (const [x, cx, c] of [[lx, cxL, gate.lanes[0]], [rx, cxR, gate.lanes[1]]] as const) {
-        const grow = opTone(c) === "grow";
-        portal(ctx, x, top, w, h, s, grow ? "#22c55e" : "#ef4444", grow ? "#16a34a" : "#dc2626", grow ? "#0d2a17" : "#2a0d0d");
+        // Unified FLAMIO portal for both lanes — colour never reveals the better choice.
+        portal(ctx, x, top, w, h, s, "#f26b1d", "#ff8a3d", "#23201e");
         ctx.font = `900 ${Math.max(9, 30 * s)}px system-ui, sans-serif`;
         ctx.lineWidth = Math.max(1, 4 * s); ctx.strokeStyle = "#0b0705";
         const t = opLabel(c);
-        ctx.strokeText(t, cx, cy); ctx.fillStyle = grow ? "#dcfce7" : "#fee2e2"; ctx.fillText(t, cx, cy);
+        ctx.strokeText(t, cx, cy); ctx.fillStyle = "#fff4e6"; ctx.fillText(t, cx, cy);
       }
     } else if (gate.kind === "math") {
       // gantry
@@ -244,7 +244,7 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       const bad = gate.spoiledLane === 0 ? { x: lx, cx: cxL } : { x: rx, cx: cxR };
       const good = gate.spoiledLane === 0 ? { x: rx, cx: cxR } : { x: lx, cx: cxL };
       // spoiled lane
-      portal(ctx, bad.x, top, w, h, s, "#8b5cf6", "#7c3aed", "#1e1328");
+      portal(ctx, bad.x, top, w, h, s, "#f26b1d", "#ff8a3d", "#23201e");
       const r = Math.min(w, h) * 0.3;
       drawFood(ctx, gate.spoiled, bad.cx, cy + 4 * s, r, true);
       ctx.strokeStyle = "rgba(180,120,255,0.7)"; ctx.lineWidth = Math.max(1, 2 * s);
@@ -260,14 +260,14 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       ctx.fillStyle = "#facc15"; ctx.fill(); ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.stroke();
       ctx.fillStyle = "#1a1a1a"; ctx.font = `900 ${Math.max(6, 11 * s)}px system-ui, sans-serif`; ctx.fillText("!", bx, by + br * 0.15);
       // safe lane
-      portal(ctx, good.x, top, w, h, s, "#4cd17a", "#22c55e", "#0f2a1a");
-      ctx.fillStyle = "#bbf7d0";
+      portal(ctx, good.x, top, w, h, s, "#f26b1d", "#ff8a3d", "#23201e");
+      ctx.fillStyle = "#ffe2b8";
       for (let k = 0; k < 5; k++) {
         const t = (now / 600 + k * 0.37) % 1;
         const sx = good.x + w * (0.15 + 0.7 * ((k * 0.53) % 1)), sy = top + h * (0.2 + 0.6 * t), ss = (1 - Math.abs(t - 0.5) * 2) * 4 * s + 0.5;
         ctx.beginPath(); ctx.moveTo(sx, sy - ss); ctx.lineTo(sx + ss * 0.3, sy); ctx.lineTo(sx, sy + ss); ctx.lineTo(sx - ss * 0.3, sy); ctx.closePath(); ctx.fill();
       }
-      ctx.strokeStyle = "#4cd17a"; ctx.lineWidth = Math.max(1.5, 4 * s);
+      ctx.strokeStyle = "#ffd38a"; ctx.lineWidth = Math.max(1.5, 4 * s);
       ctx.beginPath(); ctx.moveTo(good.cx - 10 * s, cy); ctx.lineTo(good.cx - 2 * s, cy + 9 * s); ctx.lineTo(good.cx + 13 * s, cy - 10 * s); ctx.stroke();
     }
 

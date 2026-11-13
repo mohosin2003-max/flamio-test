@@ -18,8 +18,11 @@ const SUIT = "#23201e", SUIT_DARK = "#121010", SUIT_LIGHT = "#4a423d";
 /** Approved visual spec (Step 48): charcoal suit, branding on jersey AND cape. */
 export const MASCOT_PALETTE = { suit: SUIT, suitDark: SUIT_DARK, suitLight: SUIT_LIGHT } as const;
 export const MASCOT_BRANDING = { jersey: "FLAMIO", cape: "FLAMIO" } as const;
-/** Burger is held centred in front of the body (bx ≈ 4), never offset to one side. */
-export const BURGER_GRIP = { bx: 4, by: -44, halfSpan: 15 } as const;
+/**
+ * Three-quarter carry: upper torso turned slightly so the burger is held out in
+ * front of the chest on the player's right, clear of the lower-back seam.
+ */
+export const BURGER_GRIP = { bx: 30, by: -52, halfSpan: 17 } as const;
 /** Periodic backward glance: every 4.5 s, lasting 700 ms. */
 export const GLANCE_PERIOD_MS = 4500;
 export const GLANCE_MS = 700;
@@ -284,6 +287,17 @@ function arcText(ctx: Ctx, word: string, cx: number, cy: number, radius: number,
   }
 }
 
+function drawArm(ctx: Ctx, side: -1 | 1, hx: number, hy: number) {
+  const sx = side * 19, sy = -74;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = SUIT_DARK; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo((sx + hx) / 2 + side * 4, sy + 6, hx, hy); ctx.stroke();
+  ctx.strokeStyle = SUIT; ctx.lineWidth = 7.5; ctx.stroke();
+  ctx.strokeStyle = ACCENT; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(hx - (hx - sx) * 0.16, hy - (hy - sy) * 0.16); ctx.lineTo(hx - (hx - sx) * 0.08, hy - (hy - sy) * 0.08); ctx.stroke();
+  ctx.lineCap = "butt";
+}
+
 /** Rear three-quarter running cat at (x, footY). `size` ≈ body height in px. */
 export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, size: number, layers: readonly Ingredient[], now: number) {
   const G = grads(ctx);
@@ -365,6 +379,11 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
     }
     ctx.restore();
 
+    // far (left) arm reaches around the chest — drawn behind the torso
+    const { bx, by } = BURGER_GRIP;
+    const grip = gripPoints(stride);
+    drawArm(ctx, -1, grip.left.x, grip.left.y);
+
     // torso (athletic, tapered)
     ctx.fillStyle = G.suit;
     ctx.beginPath(); ctx.moveTo(-17, -32);
@@ -391,21 +410,6 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
     ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "800 6px system-ui, sans-serif";
     ctx.fillText("10", 0, -50);
 
-    // arms: both reach forward-right to grip the burger at chest height
-    const { bx, by } = BURGER_GRIP;
-    const grip = gripPoints(stride);
-    ctx.lineCap = "round";
-    for (const side of [-1, 1] as const) {
-      const sx = side * 19, sy = -74;
-      const p = side < 0 ? grip.left : grip.right;
-      const hx = p.x, hy = p.y;
-      ctx.strokeStyle = SUIT_DARK; ctx.lineWidth = 10;
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(sx + side * 4, (sy + hy) / 2, hx, hy); ctx.stroke();
-      ctx.strokeStyle = SUIT; ctx.lineWidth = 7.5; ctx.stroke();
-      ctx.strokeStyle = ACCENT; ctx.lineWidth = 8;
-      ctx.beginPath(); ctx.moveTo(hx - (hx - sx) * 0.14, hy - (hy - sy) * 0.14); ctx.lineTo(hx - (hx - sx) * 0.08, hy - (hy - sy) * 0.08); ctx.stroke();
-    }
-    ctx.lineCap = "butt";
 
     // head (rear 3/4: back of head + right cheek, eye and whiskers)
     const hy = -98 + (frame % 2) * 1.2;
@@ -444,8 +448,9 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
 
     ctx.restore(); // end head glance transform
 
-    // burger gripped in both paws, centred in front of the body (last 10 layers)
-    burger(ctx, bx, by + 8, 32, layers.length > 10 ? layers.slice(-10) : layers, false);
+    // near (right) arm, then the burger held out in front of the chest (last 10 layers)
+    drawArm(ctx, 1, grip.right.x, grip.right.y);
+    burger(ctx, bx, by + 8, 36, layers.length > 10 ? layers.slice(-10) : layers, false);
     // paws over the bun edges
     ctx.fillStyle = FUR;
     for (const side of [-1, 1] as const) {
