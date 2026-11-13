@@ -18,8 +18,12 @@ export type AudioFactory = () => Ctx | null;
 export const MAX_VOICES = 4;
 /** Master bus gain (before the soft compressor). */
 export const MASTER_GAIN = 0.7;
-/** Background-music bus gain (approved target ≈ 0.22). */
-export const MUSIC_GAIN = 0.22;
+/** Background-music bus gain (Step 62D: raised from 0.22 so BGM is audible on phone speakers). */
+export const MUSIC_GAIN = 0.55;
+/** Per-voice music levels. Bass is played one octave up (196–330 Hz) so phone speakers reproduce it. */
+export const BGM_LEAD_VOL = 0.2;
+export const BGM_BASS_VOL = 0.32;
+export const BGM_BASS_OCTAVE = 2;
 /** Sound-effects bus gain. */
 export const SFX_GAIN = 1;
 /** Background music tempo. */
@@ -212,8 +216,8 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
       if (nextStepTime < ctx.currentTime) nextStepTime = ctx.currentTime + 0.05;
       while (nextStepTime < horizon) {
         const st = BGM_PATTERN[step % BGM_PATTERN.length]!;
-        if (st.bass) musicVoice(st.bass, nextStepTime, BGM_STEP_SEC * 1.8, "triangle", 0.5);
-        if (st.lead) musicVoice(st.lead, nextStepTime, BGM_STEP_SEC * 0.9, "square", 0.12);
+        if (st.bass) musicVoice(st.bass * BGM_BASS_OCTAVE, nextStepTime, BGM_STEP_SEC * 1.8, "triangle", BGM_BASS_VOL);
+        if (st.lead) musicVoice(st.lead, nextStepTime, BGM_STEP_SEC * 0.9, "square", BGM_LEAD_VOL);
         nextStepTime += BGM_STEP_SEC; step++;
       }
     } catch { /* music must never break gameplay */ }
@@ -284,6 +288,7 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
     startMusic() { if (disposed) return; musicWanted = true; step = 0; ensureScheduler(); },
     stopMusic() { musicWanted = false; stopScheduler(); stopMusicVoices(); },
     isMusicPlaying: () => timer !== null,
+    isHeld: () => held,
     activeMusicVoices: () => musicVoices.size,
     /** Silence (pause / hidden tab). Resumed only via unlock() from a gesture. */
     hold() { held = true; stopAll(); stopScheduler(); stopMusicVoices(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },

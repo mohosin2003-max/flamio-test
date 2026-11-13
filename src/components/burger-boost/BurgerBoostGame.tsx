@@ -62,7 +62,12 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const audio = useCallback(() => (audioRef.current ??= createAudioEngine()), []);
   const unlockAudio = useCallback(() => { audio().unlock(); }, [audio]);
   useEffect(() => {
-    const onVis = () => { if (document.hidden) audioRef.current?.hold(); };
+    const onVis = () => {
+      if (document.hidden) { audioRef.current?.hold(); return; }
+      // Tab return: resume the single existing engine only if a game is actively running and not paused.
+      const st = stateRef.current?.phase;
+      if (!pausedRef.current && (st === "running" || st === "grace")) audioRef.current?.unlock();
+    };
     document.addEventListener("visibilitychange", onVis);
     return () => { document.removeEventListener("visibilitychange", onVis); audioRef.current?.dispose(); audioRef.current = null; };
   }, []);
@@ -218,7 +223,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
               <Overlay>
                 <h2 className="font-display text-2xl font-bold">Paused</h2>
                 <p className="text-sm text-muted-foreground">Game frozen — tap Resume to continue exactly where you left off.</p>
-                <Button size="lg" onClick={() => { if (!muted) unlockAudio(); setPaused(false); }}><Play className="size-5" /> Resume</Button>
+                <Button size="lg" onClick={() => { unlockAudio(); setPaused(false); }}><Play className="size-5" /> Resume</Button>
               </Overlay>
             )}
           </div>

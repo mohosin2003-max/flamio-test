@@ -103,3 +103,28 @@ describe("burger boost audio", () => {
     for (const k of ["unlock", "play", "setMuted", "isMuted", "hold", "stopAll", "dispose", "activeVoices", "hasContext"]) expect(typeof e[k]).toBe("function");
   });
 });
+
+import { MUSIC_GAIN, BGM_LEAD_VOL, BGM_BASS_VOL, BGM_BASS_OCTAVE, BGM_PATTERN } from "./burger-boost-audio";
+describe("step 62D bgm", () => {
+  const timers = () => { const live = new Set(); let id = 0; return { live, api: { set: () => { const h = ++id; live.add(h); return h; }, clear: (h) => live.delete(h) } }; };
+  test("effective lead gain well above old 0.0185", () => {
+    expect(MUSIC_GAIN * BGM_LEAD_VOL * MASTER_GAIN).toBeGreaterThan(0.05);
+    expect(MUSIC_GAIN).toBeLessThanOrEqual(0.7);
+  });
+  test("bass sits in phone-speaker range", () => {
+    for (const st of BGM_PATTERN) if (st.bass) expect(st.bass * BGM_BASS_OCTAVE).toBeGreaterThanOrEqual(190);
+    expect(BGM_BASS_VOL).toBeLessThan(0.5);
+  });
+  test("repeated hold/unlock never duplicates the scheduler", () => {
+    const f = fakeCtx(); const t = timers(); const e = createAudioEngine(() => f.ctx, t.api);
+    e.unlock(); e.startMusic();
+    for (let i = 0; i < 5; i++) { e.hold(); f.ctx.state = "running"; e.unlock(); e.unlock(); }
+    expect(t.live.size).toBe(1); expect(e.activeMusicVoices()).toBeLessThanOrEqual(3);
+    e.startMusic(); expect(t.live.size).toBe(1);
+  });
+  test("dispose releases scheduler and context", () => {
+    const f = fakeCtx(); const t = timers(); const e = createAudioEngine(() => f.ctx, t.api);
+    e.unlock(); e.startMusic(); e.dispose();
+    expect(t.live.size).toBe(0); expect(f.ctx.closed).toBe(true); expect(e.activeMusicVoices()).toBe(0);
+  });
+});
