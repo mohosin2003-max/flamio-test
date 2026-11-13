@@ -28,13 +28,19 @@ export type RpcSessionRow = {
   idempotency_key: string;
   status: string;
   seed: string | number | bigint;
-  started_at: string;
-  expires_at: string;
+  /** NULL only for a never-acknowledged Reward row (Step 58 two-phase start). */
+  started_at: string | null;
+  expires_at: string | null;
   completed_at: string | null;
   verified_score: number | null;
   telemetry_hash: string | null;
   awarded_discount_percent: string | number;
   rules_version: number;
+  /** Step 58 columns; absent from the base read RPC ⇒ treated as legacy. */
+  mode?: string;
+  prepared_at?: string | null;
+  ack_deadline_at?: string | null;
+  ack_at?: string | null;
 };
 
 /** Transport for the four approved RPCs. Implementations must pass int8 as string. */
@@ -51,7 +57,7 @@ export interface BurgerBoostRpcTransport {
   transition_session(p: { p_id: string; p_user_id: string; p_target_status: "expired" | "rejected" }): Promise<boolean>;
 }
 
-export type PersistenceErrorCode = "persistence_unavailable" | "invalid_input" | "conflict" | "invalid_row";
+export type PersistenceErrorCode = "persistence_unavailable" | "invalid_input" | "conflict" | "invalid_row" | "not_started";
 
 export class BurgerBoostPersistenceError extends Error {
   readonly code: PersistenceErrorCode;
@@ -65,6 +71,10 @@ export class BurgerBoostPersistenceError extends Error {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const STATUSES: ReadonlySet<string> = new Set(["in_progress", "completed", "expired", "rejected"]);
+const ROW_STATUSES: ReadonlySet<string> = new Set(["prepared", "in_progress", "completed", "expired", "rejected"]);
+const MODES: ReadonlySet<string> = new Set(["legacy", "practice", "reward"]);
+const ACK_WINDOW_MS = 15_000;
+const HARD_CUTOFF_MS = 75_000;
 
 /** Maps any transport error to a sanitized code. Never forwards message/details/hint. */
 export function mapPersistenceError(err: unknown): BurgerBoostPersistenceError {
@@ -104,28 +114,102 @@ function requireUuid(v: string): void {
   if (typeof v !== "string" || !UUID_RE.test(v)) throw new BurgerBoostPersistenceError("invalid_input");
 }
 
-export function rowToRecord(row: RpcSessionRow): SessionRecord {
-  if (!row || !STATUSES.has(row.status)) throw new BurgerBoostPersistenceError("invalid_row");
-  if (Number(row.awarded_discount_percent) !== 0) throw new BurgerBoostPersistenceError("invalid_row");
+/**
+ * Reward session that has no official start (Step 58 two-phase): status
+ * "prepared", or "expired" without acknowledgement. started/expires stay null —
+ * never replaced with placeholder times.
+ */
+export type UnstartedRewardRecord = {
+  id: string;
+  userId: string;
+  seed: string;
+  rulesVersion: number;
+  mode: "reward";
+  status: "prepared" | "expired";
+  startedAt: null;
+  expiresAt: null;
+  preparedAt: number;
+  ackDeadlineAt: number;
+  ackAt: null;
+};
+
+export type ParsedSessionRow =
+  | { kind: "started"; record: SessionRecord }
+  | { kind: "unstarted"; record: UnstartedRewardRecord };
+
+const bad = () => new BurgerBoostPersistenceError("invalid_row");
+
+/** Strict parser for every valid row shape. Throws invalid_row on anything else. */
+export function parseSessionRow(row: RpcSessionRow): ParsedSessionRow {
+  if (!row || !ROW_STATUSES.has(row.status)) throw bad();
+  if (Number(row.awarded_discount_percent) !== 0) throw bad();
+  const mode = row.mode ?? "legacy";
+  if (!MODES.has(mode)) throw bad();
+  if ((mode === "legacy") !== (row.rules_version === 1)) throw bad();
+  const completedAt = nullableTs(row.completed_at ?? null);
+  const verifiedScore = row.verified_score ?? null;
+  const telemetryHash = row.telemetry_hash ?? null;
+  const done = row.status === "completed";
+  const fields = [completedAt, verifiedScore, telemetryHash];
+  if (done ? fields.some((f) => f === null) : fields.some((f) => f !== null)) throw bad();
+
+  const preparedAt = nullableTs(row.prepared_at ?? null);
+  const ackDeadlineAt = nullableTs(row.ack_deadline_at ?? null);
+  const ackAt = nullableTs(row.ack_at ?? null);
+  if (mode === "reward") {
+    if (preparedAt === null || ackDeadlineAt !== preparedAt + ACK_WINDOW_MS) throw bad();
+  } else if (preparedAt !== null || ackDeadlineAt !== null || ackAt !== null) {
+    throw bad();
+  }
+
+  const unstarted = row.started_at === null || row.started_at === undefined;
+  if (unstarted) {
+    if (row.expires_at !== null && row.expires_at !== undefined) throw bad();
+    if (mode !== "reward" || ackAt !== null) throw bad();
+    if (row.status !== "prepared" && row.status !== "expired") throw bad();
+    return {
+      kind: "unstarted",
+      record: {
+        id: row.id, userId: row.user_id, seed: normalizeInt8(row.seed), rulesVersion: row.rules_version,
+        mode: "reward", status: row.status, startedAt: null, expiresAt: null,
+        preparedAt: preparedAt!, ackDeadlineAt: ackDeadlineAt!, ackAt: null,
+      },
+    };
+  }
+  // Official start exists: both timestamps required and valid.
+  if (row.status === "prepared") throw bad();
+  const startedAt = timestamptzToMs(row.started_at as string);
+  if (row.expires_at === null || row.expires_at === undefined) throw bad();
+  const expiresAt = timestamptzToMs(row.expires_at);
+  if (expiresAt !== startedAt + HARD_CUTOFF_MS) throw bad();
+  if (mode === "reward" && (ackAt === null || ackAt !== startedAt || ackAt > ackDeadlineAt!)) throw bad();
+  if (!STATUSES.has(row.status)) throw bad();
   const rec: SessionRecord = {
     id: row.id,
     userId: row.user_id,
     seed: normalizeInt8(row.seed),
     rulesVersion: row.rules_version,
     status: row.status as SessionStatus,
-    startedAt: timestamptzToMs(row.started_at),
-    expiresAt: timestamptzToMs(row.expires_at),
-    completedAt: nullableTs(row.completed_at),
-    verifiedScore: row.verified_score ?? null,
-    telemetryHash: row.telemetry_hash ?? null,
+    startedAt,
+    expiresAt,
+    completedAt,
+    verifiedScore,
+    telemetryHash,
     awardedDiscountPercent: 0,
+    ...(mode === "practice" || mode === "reward" ? { mode } : {}),
   };
-  const done = rec.status === "completed";
-  const fields = [rec.completedAt, rec.verifiedScore, rec.telemetryHash];
-  if (done ? fields.some((f) => f === null) : fields.some((f) => f !== null)) {
-    throw new BurgerBoostPersistenceError("invalid_row");
-  }
-  return rec;
+  return { kind: "started", record: rec };
+}
+
+/**
+ * Started-session mapper used by the core. A valid unstarted Reward row is not
+ * a playable session: it fails closed with "not_started" (never invalid_row,
+ * never fake timestamps).
+ */
+export function rowToRecord(row: RpcSessionRow): SessionRecord {
+  const parsed = parseSessionRow(row);
+  if (parsed.kind !== "started") throw new BurgerBoostPersistenceError("not_started");
+  return parsed.record;
 }
 
 /**
