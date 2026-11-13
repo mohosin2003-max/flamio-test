@@ -264,7 +264,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             {result.meter <= 0 && <p className="text-sm text-muted-foreground">Boost Power at or below 0 — in a reward game this would earn no coupon.</p>}
           </>)}
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
-            ? <VictoryCat layers={result.layers} />
+            ? <VictoryCat layers={result.layers} loss={result.meter <= 0} />
             : <BurgerStack layers={result.layers} />}
           <dl className="grid w-full grid-cols-2 gap-2 text-sm">
             <Stat label="Layers" value={result.layers.length} />
@@ -320,18 +320,26 @@ function Overlay({ children }: { children: React.ReactNode }) {
 function Stat({ label, value }: { label: string; value: number }) {
   return <div className="rounded-lg bg-muted/50 p-2"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-display text-lg font-bold">{value}</dd></div>;
 }
-/** Victory scene. Mounted only after completion is confirmed (server verdict for saved games). Runs a bounded animation after the game loop has stopped. */
-function VictoryCat({ layers }: { layers: Ingredient[] }) {
+/** Victory/loss scene. Mounted only after completion is confirmed. One bounded RAF loop: stops at VICTORY_MS and is cancelled on unmount. */
+function VictoryCat({ layers, loss }: { layers: Ingredient[]; loss: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current; const ctx = cv?.getContext("2d");
     if (!cv || !ctx) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const W = 200, H = 200; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // Single still frame of the finished victory pose — no timer or extra animation loop.
-    drawVictory(ctx, W, H, VICTORY_MS, layers);
-  }, [layers]);
-  return <canvas ref={ref} className="size-[200px]" role="img" aria-label="FLAMIO Cat eats the burger" />;
+    const W = 220, H = 220; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    let raf = 0; let elapsed = 0; let last = performance.now();
+    const frame = (now: number) => {
+      // Advance only while the tab is visible, so a hidden scene doesn't skip ahead.
+      if (document.visibilityState === "visible") elapsed += Math.min(100, now - last);
+      last = now;
+      drawVictory(ctx, W, H, elapsed, layers, loss);
+      if (elapsed < VICTORY_MS) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [layers, loss]);
+  return <canvas ref={ref} className="size-[220px]" role="img" aria-label={loss ? "FLAMIO Cat looks disappointed holding the burger" : "FLAMIO Cat bites the burger"} />;
 }
 function BurgerStack({ layers }: { layers: Ingredient[] }) {
   return (

@@ -8,6 +8,7 @@
  * created once per canvas context and reused every frame.
  */
 import type { Ingredient, Lane } from "@/lib/burger-boost-rules";
+import { victoryPose } from "@/lib/burger-boost-victory";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -473,73 +474,100 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
 
 /* ------------------------------- victory ---------------------------------- */
 
-export const VICTORY_MS = 2600;
+export { VICTORY_MS } from "@/lib/burger-boost-victory";
 
 /**
- * Front-facing victory: turn → sit → bite. `t` = ms since the victory started.
- * Callers render it only after a confirmed completion (static final frame).
+ * Front-facing victory (or disappointed loss) scene. `t` = ms since the result
+ * scene started; the pose is a pure function of `t`, so it is frame-rate safe.
  */
-export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: readonly Ingredient[]) {
+export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: readonly Ingredient[], loss = false) {
   const G = grads(ctx);
+  const p = victoryPose(t, loss);
   ctx.save();
   try {
     ctx.clearRect(0, 0, W, H);
-    const u = Math.min(W, H) / 180;
-    const sit = ease((t - 500) / 500);
-    const bite = t > 1100 ? Math.max(0, Math.sin(((t - 1100) / 700) * Math.PI)) : 0;
-    const bites = Math.min(3, Math.floor(Math.max(0, t - 1100) / 700));
-    const turn = ease(t / 500);
-    ctx.translate(W / 2, H * 0.92);
-    ctx.scale(u * (0.7 + 0.3 * turn), u);
+    const u = Math.min(W, H) / 170;
+    ctx.globalAlpha = 0.25 + 0.75 * p.appear;
+    ctx.translate(W / 2, H * 0.95);
+    const sc = 0.9 + 0.1 * p.appear;
+    ctx.scale(u * sc, u * sc);
+    const drop = p.headDrop * 6;          // shoulders/head lower on loss
+    const bob = p.chew * 1.6 - p.cheer * 2; // chewing bob / celebration hop
 
-    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(0, 0, 50, 9, 0, 0, Math.PI * 2); ctx.fill();
-    // cape behind
+    ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.ellipse(0, 0, 50, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // cape behind (FLAMIO lettering)
     ctx.fillStyle = CAPE_DARK;
-    ctx.beginPath(); ctx.moveTo(-26, -70); ctx.quadraticCurveTo(-56, -30, -46, -2); ctx.lineTo(46, -2); ctx.quadraticCurveTo(56, -30, 26, -70); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-26, -72 + drop); ctx.quadraticCurveTo(-60, -30, -50, -2); ctx.lineTo(50, -2); ctx.quadraticCurveTo(60, -30, 26, -72 + drop); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = GOLD; ctx.font = "bold 7px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("FLAMIO", -40, -12); ctx.fillText("FLAMIO", 40, -12);
     // tail
     ctx.lineCap = "round"; ctx.strokeStyle = FUR; ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(24, -8); ctx.bezierCurveTo(54, -10, 58, -40, 44, -56); ctx.stroke(); ctx.lineCap = "butt";
-    // sitting body (charcoal suit)
-    const by = sit * 7;
-    ctx.fillStyle = G.vSuit; ctx.beginPath(); ctx.ellipse(0, -36 + by, 30, 36 - by, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-26, -22 + by, 52, 5, 2.5); ctx.fill();
-    // chest emblem: flame
-    ctx.fillStyle = ACCENT;
-    ctx.beginPath(); ctx.moveTo(0, -60 + by); ctx.quadraticCurveTo(10, -48 + by, 4, -38 + by); ctx.quadraticCurveTo(0, -44 + by, -4, -38 + by); ctx.quadraticCurveTo(-10, -48 + by, 0, -60 + by); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(24, -8); ctx.bezierCurveTo(54, -10, 58 - drop * 2, -40 + drop * 3, 44, -56 + drop * 5); ctx.stroke(); ctx.lineCap = "butt";
+    // body
+    const by = 7 + drop * 0.5 + bob * 0.4;
+    ctx.fillStyle = G.vSuit; ctx.beginPath(); ctx.ellipse(0, -36 + by * 0.5, 31, 36 - by * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-27, -16, 54, 5, 2.5); ctx.fill();
     // feet
-    ctx.fillStyle = FUR;
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 16, -4, 12, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(s * 16, -3, 5, 3, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = FUR; }
+    for (const s of [-1, 1]) { ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(s * 16, -4, 12, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(s * 16, -3, 5, 3, 0, 0, Math.PI * 2); ctx.fill(); }
+    // jersey lettering (stays visible below the burger)
+    ctx.fillStyle = "#fff4e6"; ctx.font = "bold 9px sans-serif"; ctx.fillText("FLAMIO", 0, -22);
+
     // head
-    const hy = -88 + by;
+    const hy = -90 + drop + bob;
+    const earDrop = p.headDrop * 10;
     for (const side of [-1, 1] as const) {
-      ctx.fillStyle = FUR; ctx.beginPath(); ctx.moveTo(side * 8, hy - 14); ctx.quadraticCurveTo(side * 18, hy - 38, side * 25, hy - 34); ctx.quadraticCurveTo(side * 28, hy - 18, side * 25, hy - 6); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = PINK; ctx.beginPath(); ctx.moveTo(side * 12, hy - 14); ctx.quadraticCurveTo(side * 19, hy - 31, side * 23, hy - 29); ctx.quadraticCurveTo(side * 24, hy - 18, side * 22, hy - 10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = FUR; ctx.beginPath(); ctx.moveTo(side * 8, hy - 14); ctx.quadraticCurveTo(side * (18 + earDrop), hy - 38 + earDrop * 1.6, side * (25 + earDrop), hy - 34 + earDrop * 1.8); ctx.quadraticCurveTo(side * 28, hy - 18, side * 25, hy - 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = PINK; ctx.beginPath(); ctx.moveTo(side * 12, hy - 14); ctx.quadraticCurveTo(side * (19 + earDrop), hy - 31 + earDrop * 1.4, side * (23 + earDrop * 0.8), hy - 29 + earDrop * 1.5); ctx.quadraticCurveTo(side * 24, hy - 18, side * 22, hy - 10); ctx.closePath(); ctx.fill();
     }
     ctx.fillStyle = G.vHead; ctx.beginPath(); ctx.ellipse(0, hy, 27, 23, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(0, hy + 9, 14, 10, 0, 0, Math.PI * 2); ctx.fill();
-    // emerald mask + happy eyes
     ctx.fillStyle = MASK; ctx.beginPath(); ctx.roundRect(-23, hy - 9, 46, 11, 5.5); ctx.fill();
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 10, hy - 2, 4, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      if (p.sad) { ctx.arc(s * 10, hy - 6, 4, Math.PI * 0.15, Math.PI * 0.85); } // droopy downcast eyes
+      else if (p.mouthOpen > 0.5 || p.chew !== 0) { ctx.moveTo(s * 10 - 4, hy - 3); ctx.lineTo(s * 10, hy - 5); ctx.lineTo(s * 10 + 4, hy - 3); } // squeezed, savouring
+      else ctx.arc(s * 10, hy - 2, 4, Math.PI * 1.1, Math.PI * 1.9); // happy arcs
+      ctx.stroke();
+    }
+    if (p.sad) { ctx.lineWidth = 1.6; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 5, hy - 12); ctx.lineTo(s * 15, hy - 10); ctx.stroke(); } }
     ctx.fillStyle = "#e86a7a"; ctx.beginPath(); ctx.moveTo(-3, hy + 5); ctx.lineTo(3, hy + 5); ctx.lineTo(0, hy + 8); ctx.fill();
+    // mouth
     ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.arc(0, hy + 9, 4 + bite * 2, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
-    for (const s of [-1, 1]) for (const dy of [6, 10]) { ctx.beginPath(); ctx.moveTo(s * 14, hy + dy); ctx.lineTo(s * 30, hy + (dy - 2 + (dy - 8))); ctx.stroke(); }
+    if (p.sad) { ctx.beginPath(); ctx.arc(0, hy + 15, 4, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke(); }
+    else if (p.mouthOpen > 0.05) {
+      ctx.fillStyle = "#5a1f1a"; ctx.beginPath(); ctx.ellipse(0, hy + 11, 5, 1 + p.mouthOpen * 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.fillRect(-3, hy + 11 - p.mouthOpen * 5, 2, 2); ctx.fillRect(1, hy + 11 - p.mouthOpen * 5, 2, 2);
+    } else { ctx.beginPath(); ctx.arc(0, hy + 9 + p.chew * 0.8, 4 + p.cheer * 1.5, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke(); }
+    if (p.chew !== 0) { ctx.fillStyle = "rgba(255,150,150,0.5)"; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 15, hy + 7 + Math.abs(p.chew), 4, 2.5, 0, 0, Math.PI * 2); ctx.fill(); } }
+    ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1.4;
+    for (const s of [-1, 1]) for (const dy of [6, 10]) { ctx.beginPath(); ctx.moveTo(s * 14, hy + dy); ctx.lineTo(s * 30, hy + (dy - 2 + (dy - 8)) + p.headDrop * 3); ctx.stroke(); }
     ctx.lineCap = "butt";
-    // burger held at the mouth
-    const byy = hy + 52 - bite * 18;
-    burger(ctx, 0, byy, 56, layers.length > 12 ? layers.slice(-12) : layers, false);
-    // real bite cut-outs from the top-right of the bun
-    const topY = byy - (22 + Math.min(12, layers.length) * 3.5 + 16) * 0.56;
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.fillStyle = "#000";
-    for (let i = 0; i < bites; i++) { ctx.beginPath(); ctx.arc(22 - i * 8, topY, 6.5, 0, Math.PI * 2); ctx.fill(); }
-    ctx.restore();
-    ctx.globalCompositeOperation = "source-over";
-    // paws gripping both sides
+
+    // burger in front of chest; rises to the mouth for the bite
+    const restY = p.sad ? -8 : -28;
+    const byy = restY - p.lift * 44 + bob * 0.6;
+    const stack = layers.length > 10 ? layers.slice(-10) : layers;
+    const bw = 58;
+    // arms from shoulders to burger sides (drawn under burger so paws grip over it)
+    ctx.strokeStyle = SUIT; ctx.lineWidth = 9; ctx.lineCap = "round";
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 24, -58 + drop); ctx.quadraticCurveTo(s * 40, byy - 6 + p.cheer * -4, s * 30, byy - 12); ctx.stroke(); }
+    ctx.lineCap = "butt";
+    burger(ctx, 0, byy, bw, stack, false);
+    if (p.bites) {
+      const topY = byy - (22 + Math.min(12, stack.length) * 3.5 + 16) * (bw / 100);
+      ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = "#000";
+      for (const dx of [-6, 2, 10]) { ctx.beginPath(); ctx.arc(dx, topY - 1, 5.5, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    }
+    // both paws gripping the bun sides
     ctx.fillStyle = FUR;
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 28, byy - 10, 6, 7, 0, 0, Math.PI * 2); ctx.fill(); }
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 30, byy - 12, 7, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(s * 30, byy - 11, 3, 2.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = FUR; }
+    // a few subtle celebration sparkles
+    if (p.cheer > 0) {
+      ctx.globalAlpha = p.cheer; ctx.fillStyle = GOLD;
+      for (const [x, y] of [[-46, -110], [48, -104], [-54, -70], [56, -64]] as const) { ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x + 2, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 2, y); ctx.closePath(); ctx.fill(); }
+    }
   } catch { /* procedural fallback */ }
   ctx.restore();
 }
