@@ -402,8 +402,113 @@ export function drawEnvironment(ctx: CanvasRenderingContext2D, f: EnvFrame) {
   drawSky(ctx, f);
   drawSkyline(ctx, f);
   drawRoadbed(ctx, f);
+  drawCenterRail(ctx, f);
   drawCurbs(ctx, f);
+  drawShops(ctx, f);
   drawStreetlamps(ctx, f);
+  drawCables(ctx, f);
   drawBillboards(ctx, f);
   drawOverheads(ctx, f);
+}
+
+/* ---------------------- STEP 3: FLAMIO centre B-rail ------------------- */
+/** Low metallic lane divider drawn on the road surface (visual only, no collision). */
+export function drawCenterRail(ctx: CanvasRenderingContext2D, f: EnvFrame) {
+  const { proj, speed, W } = f;
+  const cx = W / 2, N = 24;
+  ctx.save();
+  for (let k = 0; k < N; k++) {
+    const d0 = k / N, d1 = (k + 1) / N;
+    const a = proj(d0), b = proj(Math.min(1.1, d1 * 1.1));
+    const w0 = 2 + 9 * a.scale, w1 = 2 + 9 * b.scale;
+    ctx.fillStyle = "#2a2624";
+    ctx.beginPath(); ctx.moveTo(cx - w0 / 2, a.y); ctx.lineTo(cx + w0 / 2, a.y); ctx.lineTo(cx + w1 / 2, b.y); ctx.lineTo(cx - w1 / 2, b.y); ctx.closePath(); ctx.fill();
+    // metallic edges + orange core
+    ctx.fillStyle = "#9ca3af"; ctx.fillRect(cx - w1 / 2, a.y, Math.max(0.6, w1 * 0.12), b.y - a.y);
+    ctx.fillRect(cx + w1 / 2 - Math.max(0.6, w1 * 0.12), a.y, Math.max(0.6, w1 * 0.12), b.y - a.y);
+    ctx.fillStyle = "#f26b1d"; ctx.fillRect(cx - w1 * 0.12, a.y, w1 * 0.24, b.y - a.y);
+  }
+  // restrained FLAMIO marks fixed in world space (one per 2 gate units)
+  const first = Math.ceil(speed / 2) * 2;
+  for (let pos = first; pos < speed + VIEW; pos += 2) {
+    const d = depthAt(pos, speed);
+    if (d < 0.25 || d > 0.85) continue;
+    const p = proj(d), s = p.scale, w = 16 * s, h = 34 * s;
+    ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.roundRect(cx - w / 2, p.y - h, w, h, 3 * s); ctx.fill();
+    ctx.strokeStyle = "#f26b1d"; ctx.lineWidth = Math.max(0.8, 1.2 * s); ctx.stroke();
+    if (s > 0.35) {
+      ctx.save(); ctx.translate(cx, p.y - h / 2); ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = "#fbbf24"; ctx.font = `900 ${Math.round(8 * s)}px system-ui, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("FLAMIO", 0, 0); ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+/* ------------------- STEP 3: Bangladesh roadside details -------------- */
+const SHOPS = [
+  { bn: "চা স্টল", en: "TEA STALL", bg: "#0f766e" },
+  { bn: "মুদি দোকান", en: "GROCERY", bg: "#1d4ed8" },
+  { bn: "ফ্লামিও", en: "FLAMIO", bg: "#c2410c" },
+  { bn: "ফার্মেসি", en: "PHARMACY", bg: "#15803d" },
+] as const;
+const SHOP_EVERY = 2.5;
+
+/** Small roadside shopfronts with Bengali + English signs, set back behind the curb. */
+export function drawShops(ctx: CanvasRenderingContext2D, f: EnvFrame) {
+  const { proj, speed, W } = f;
+  ctx.save();
+  const last = Math.floor((speed + VIEW) / SHOP_EVERY), firstN = Math.max(1, Math.ceil(speed / SHOP_EVERY));
+  for (let n = last; n >= firstN; n--) {
+    const d = depthAt(n * SHOP_EVERY + 1.2, speed);
+    if (d < 0.05 || d > 1.0) continue;
+    const p = proj(d), s = p.scale, side = (n & 1) === 0 ? -1 : 1;
+    const w = 70 * s, h = 46 * s;
+    const x = side < 0 ? p.left - 70 * s - w : p.right + 70 * s;
+    if (x > W || x + w < 0) continue;
+    const shop = SHOPS[n % SHOPS.length]!;
+    ctx.fillStyle = "#3f3a36"; ctx.fillRect(x, p.y - h, w, h);
+    ctx.fillStyle = "#57534e"; ctx.fillRect(x + w * 0.12, p.y - h * 0.55, w * 0.76, h * 0.55);
+    ctx.fillStyle = shop.bg; ctx.fillRect(x - 2 * s, p.y - h - 16 * s, w + 4 * s, 16 * s);
+    if (s > 0.3) {
+      ctx.fillStyle = "#fafaf9"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `700 ${Math.round(7 * s)}px 'Noto Sans Bengali', system-ui, sans-serif`;
+      ctx.fillText(shop.bn, x + w / 2, p.y - h - 11 * s);
+      ctx.font = `800 ${Math.round(5 * s)}px system-ui, sans-serif`;
+      ctx.fillText(shop.en, x + w / 2, p.y - h - 4 * s);
+    }
+    // CNG auto-rickshaw parked in front of every 3rd shop
+    if (n % 3 === 0 && s > 0.2) drawCng(ctx, side < 0 ? x + w - 6 * s : x + 6 * s, p.y, s, side);
+  }
+  ctx.restore();
+}
+
+function drawCng(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, side: number) {
+  const w = 30 * s, h = 22 * s, bx = side < 0 ? x - w : x;
+  ctx.fillStyle = "#15803d";
+  ctx.beginPath(); ctx.moveTo(bx, y - 5 * s); ctx.lineTo(bx, y - h * 0.7); ctx.quadraticCurveTo(bx + w * 0.1, y - h, bx + w * 0.45, y - h); ctx.lineTo(bx + w, y - h * 0.85); ctx.lineTo(bx + w, y - 5 * s); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(200,230,255,0.55)"; ctx.fillRect(bx + w * 0.55, y - h * 0.8, w * 0.35, h * 0.35);
+  ctx.fillStyle = "#facc15"; ctx.fillRect(bx, y - 8 * s, w, 2 * s);
+  ctx.fillStyle = "#111";
+  for (const wx of [0.2, 0.82]) { ctx.beginPath(); ctx.arc(bx + w * wx, y - 3 * s, 3.2 * s, 0, Math.PI * 2); ctx.fill(); }
+}
+
+/** Subtle overhead electrical cables sagging between lamp posts (high in frame, thin, low alpha). */
+export function drawCables(ctx: CanvasRenderingContext2D, f: EnvFrame) {
+  const { proj, speed } = f;
+  ctx.save();
+  ctx.strokeStyle = "rgba(20,17,16,0.55)"; ctx.lineWidth = 1;
+  const firstN = Math.ceil(speed), last = Math.floor(speed + VIEW);
+  for (let n = firstN; n < last; n++) {
+    const d0 = depthAt(n + 1, speed), d1 = depthAt(n, speed);
+    if (d0 < 0.02 || d1 > 1.05) continue;
+    const a = proj(d0), b = proj(d1);
+    for (const sideA of [0, 1]) {
+      const xa = sideA ? a.right + 6 * a.scale : a.left - 6 * a.scale;
+      const xb = sideA ? b.right + 6 * b.scale : b.left - 6 * b.scale;
+      const ya = a.y - 120 * a.scale, yb = b.y - 120 * b.scale;
+      ctx.beginPath(); ctx.moveTo(xa, ya); ctx.quadraticCurveTo((xa + xb) / 2, (ya + yb) / 2 + 10 * b.scale, xb, yb); ctx.stroke();
+    }
+  }
+  ctx.restore();
 }

@@ -51,20 +51,25 @@ function sausage(ctx: Ctx, r: number) {
   ctx.lineCap = "butt";
 }
 
+/** Red FLAMIO squeeze bottle (STEP 3 visual only; ingredient key unchanged). */
 function sauce(ctx: Ctx, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(0, -r);
-  ctx.bezierCurveTo(r * 0.3, -r * 0.4, r * 0.95, -r * 0.1, r * 0.8, r * 0.4);
-  ctx.bezierCurveTo(r * 0.7, r * 0.85, -r * 0.7, r * 0.85, -r * 0.8, r * 0.4);
-  ctx.bezierCurveTo(-r * 0.95, -r * 0.1, -r * 0.3, -r * 0.4, 0, -r);
-  ctx.fillStyle = "#c62020"; ctx.fill();
-  ctx.fillStyle = "#e5483a";
-  ctx.beginPath(); ctx.ellipse(-r * 0.1, r * 0.25, r * 0.55, r * 0.35, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.65)";
-  ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 0.05, r * 0.12, r * 0.2, -0.5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#c62020";
-  ctx.beginPath(); ctx.arc(r * 0.95, r * 0.7, r * 0.12, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.rotate(-0.12);
+  // nozzle + cap
+  ctx.fillStyle = "#f5f5f4";
+  ctx.beginPath(); ctx.moveTo(-r * 0.08, -r * 1.02); ctx.lineTo(r * 0.08, -r * 1.02); ctx.lineTo(r * 0.16, -r * 0.72); ctx.lineTo(-r * 0.16, -r * 0.72); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#1c1917"; rrect(ctx, -r * 0.3, -r * 0.76, r * 0.6, r * 0.2, r * 0.06); ctx.fill();
+  // body
+  ctx.fillStyle = "#c81e1e"; rrect(ctx, -r * 0.42, -r * 0.58, r * 0.84, r * 1.5, r * 0.28); ctx.fill();
+  ctx.lineWidth = Math.max(1, r * 0.06); ctx.strokeStyle = "#7f1010"; ctx.stroke();
+  // label band
+  ctx.fillStyle = "#f26b1d"; ctx.fillRect(-r * 0.42, -r * 0.05, r * 0.84, r * 0.34);
+  ctx.fillStyle = "#fff6c2";
+  if (r > 10) { ctx.font = `900 ${Math.max(5, r * 0.22)}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("FLAMIO", 0, r * 0.12); }
+  // shine
+  ctx.fillStyle = "rgba(255,255,255,0.45)"; rrect(ctx, -r * 0.3, -r * 0.48, r * 0.12, r * 0.38, r * 0.06); ctx.fill();
+  ctx.restore();
 }
+function rrect(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number) { ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.max(0, rad)); }
 
 function mayo(ctx: Ctx, r: number) {
   const tier = (y: number, w: number, h: number) => {
