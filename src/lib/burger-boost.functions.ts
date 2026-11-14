@@ -80,6 +80,7 @@ function safe(d: SafeSession): SafeSession {
 
 type Service = {
   start(userId: string): Promise<SafeSession>;
+  startPractice?(userId: string): Promise<{ ok: true; session: SafeSession } | { ok: false; reason: string }>;
   get(id: string, userId: string): Promise<SafeSession | null>;
   submit(id: string, userId: string, payload: unknown): Promise<{ ok: boolean; status: string; error?: string; verifiedScore?: number }>;
   expire(id: string, userId: string): Promise<{ ok: boolean; status: string }>;
@@ -126,7 +127,11 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       if (!createSessionSchema.safeParse(input ?? {}).success) return { ok: false as const, error: MSG.invalid };
       if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}`)) return { ok: false as const, error: MSG.rateLimited };
       try {
-        const session = safe(await deps.service.start(uid));
+        // Step 64K: saved games are persisted PRACTICE sessions (v3). Reward stays locked.
+        if (typeof deps.service.startPractice !== "function") throw new Error("practice_unavailable");
+        const started = await deps.service.startPractice(uid);
+        if (!started.ok) throw new Error("practice_unavailable");
+        const session = safe(started.session);
         const publicGates = await deps.publicGates(session.sessionId, uid);
         if (!publicGates || publicGates.length !== BB_GATE_COUNT) throw new Error("gate_unavailable");
         return { ok: true as const, session, publicGates };

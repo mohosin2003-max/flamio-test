@@ -25,7 +25,7 @@ export function RealGamePanel({ onLive, onUnlock }: { onLive: (live: LiveSession
       const r = await create({ data: {} });
       if (r.ok) {
         setState({ kind: "idle" });
-        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt });
+        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt, rulesVersion: r.session.rulesVersion });
       } else setState({ kind: "msg", text: r.error });
     } catch {
       setState({ kind: "msg", text: "Saved games aren't available yet. Practice is open." });

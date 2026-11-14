@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { generateTrack, simulateBurgerBoostReplay } from "./burger-boost-rules.ts";
+import { generateTrack, simulateBurgerBoostReplay, replayDiscountMeter } from "./burger-boost-rules.ts";
 import { createBurgerBoostSessionService, int8StringToUnsigned, canonicalTelemetry, sha256Hex, RULES_VERSION } from "./burger-boost-session-core.ts";
 import { createBurgerBoostSessionRepository } from "./burger-boost-session.server.ts";
 import { createBurgerBoostApi, createPublicGateLoader, MSG } from "./burger-boost.functions.ts";
@@ -18,7 +18,7 @@ function mockTransport() {
   const guard = () => { if (fail) throw fail; };
   return {
     rows, failWith(e) { fail = e; },
-    async create_session(p) { guard(); rows.set(p.p_id, { id: p.p_id, user_id: p.p_user_id, idempotency_key: p.p_idempotency_key, status: "in_progress", seed: p.p_seed, started_at: p.p_started_at, expires_at: p.p_expires_at, completed_at: null, verified_score: null, telemetry_hash: null, awarded_discount_percent: 0, rules_version: p.p_rules_version }); return p.p_id; },
+    async create_session(p) { guard(); rows.set(p.p_id, { id: p.p_id, user_id: p.p_user_id, idempotency_key: p.p_idempotency_key, status: "in_progress", seed: p.p_seed, started_at: p.p_started_at, expires_at: p.p_expires_at, completed_at: null, verified_score: null, telemetry_hash: null, awarded_discount_percent: 0, rules_version: p.p_rules_version, mode: p.p_rules_version === 1 ? "legacy" : "practice" }); return p.p_id; },
     async get_session_for_user(p) { guard(); const r = rows.get(p.p_id); return r && r.user_id === p.p_user_id ? [{ ...r }] : []; },
     async complete_session(p) { guard(); const r = rows.get(p.p_id); if (!r || r.user_id !== p.p_user_id || r.status !== "in_progress") return false; Object.assign(r, { status: "completed", verified_score: p.p_verified_score, telemetry_hash: p.p_telemetry_hash, completed_at: p.p_completed_at }); return true; },
     async transition_session(p) { guard(); const r = rows.get(p.p_id); if (!r || r.user_id !== p.p_user_id || r.status !== "in_progress") return false; r.status = p.p_target_status; return true; },
@@ -135,12 +135,13 @@ describe("burger boost server API (STEP 04H)", () => {
     const id = await started(s);
     const forged = actionsFor(OTHER_SEED);
     const r = await s.api.submit(U1, { sessionId: id, playerActions: forged });
-    const server = simulateBurgerBoostReplay(int8StringToUnsigned(SEED), 30, forged, RULES_VERSION);
-    const client = simulateBurgerBoostReplay(int8StringToUnsigned(OTHER_SEED), 30, forged, RULES_VERSION);
+    // Step 64K: saved games are persisted v3 practice; replay uses the SERVER seed + v3.
+    const server = replayDiscountMeter(int8StringToUnsigned(SEED), 30, forged, 3);
     expect(server.valid).toBe(true);
     expect(r.ok).toBe(true);
-    expect(s.transport.rows.get(id).verified_score).toBe(server.score);
-    expect(server.score).not.toBe(client.score);
+    expect(r.awardedDiscountPercent).toBe(0);
+    expect(s.transport.rows.get(id).verified_score).toBe(Math.max(0, server.finalMeter));
+    expect(s.transport.rows.get(id).awarded_discount_percent).toBe(0);
   });
 
   test("action order preserved: out-of-order rejected", async () => {
@@ -247,7 +248,8 @@ describe("public gate delivery (STEP 46C)", () => {
     expect(r.ok).toBe(true);
     expect(Object.keys(r).sort()).toEqual(["ok", "publicGates", "session"]);
     expect(r.publicGates.length).toBe(30);
-    const track = generateTrack(int8StringToUnsigned(SEED), RULES_VERSION, 30);
+    expect(r.session.rulesVersion).toBe(3);
+    const track = generateTrack(int8StringToUnsigned(SEED), 3, 30);
     r.publicGates.forEach((g, i) => {
       expect(g.kind).toBe(track[i].kind);
       if (g.kind === "math") expect([g.a, g.op, g.b, ...g.lanes]).toEqual([track[i].a, track[i].op, track[i].b, ...track[i].lanes]);

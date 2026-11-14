@@ -43,9 +43,9 @@ describe("replay routing", () => {
     const r = await s.svc.submit(d.sessionId, "u1", { playerActions: a });
     expect(r.ok).toBe(true); expect(r.finalMeter).toBeUndefined();
   });
-  test("v2 session uses v2 engine and returns meter", async () => {
+  test("persisted v2 practice session still uses v2 engine and returns meter", async () => {
     const s = setup(); const st = await s.svc.startPractice("u1");
-    expect(st.ok && st.session.rulesVersion).toBe(MODE_RULES_VERSION);
+    s.repo.rows.get(st.session.sessionId).rulesVersion = MODE_RULES_VERSION;
     const r = await s.svc.submit(st.session.sessionId, "u1", { playerActions: acts() });
     expect(r.ok).toBe(true); expect(typeof r.finalMeter).toBe("number"); expect(r.mode).toBe("practice");
     expect(r.verifiedScore).toBe(Math.max(0, r.finalMeter));
@@ -66,7 +66,7 @@ describe("replay routing", () => {
   test("forged payload fields cannot change mode or version", async () => {
     const s = setup(); const st = await s.svc.startPractice("u1");
     const r = await s.svc.submit(st.session.sessionId, "u1", { playerActions: acts(), mode: "reward", rulesVersion: 1, finalMeter: 100 });
-    expect(r.mode).toBe("practice"); expect(s.repo.rows.get(st.session.sessionId).rulesVersion).toBe(2);
+    expect(r.mode).toBe("practice"); expect(s.repo.rows.get(st.session.sessionId).rulesVersion).toBe(3);
   });
 });
 

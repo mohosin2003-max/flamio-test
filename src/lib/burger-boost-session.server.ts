@@ -145,7 +145,8 @@ export function parseSessionRow(row: RpcSessionRow): ParsedSessionRow {
   if (Number(row.awarded_discount_percent) !== 0) throw bad();
   const mode = row.mode ?? "legacy";
   if (!MODES.has(mode)) throw bad();
-  if ((mode === "legacy") !== (row.rules_version === 1)) throw bad();
+  // Step 64K: legacy <=> v1 only; practice/reward rows carry v2 or v3.
+  if (mode === "legacy" ? row.rules_version !== 1 : row.rules_version !== 2 && row.rules_version !== 3) throw bad();
   const completedAt = nullableTs(row.completed_at ?? null);
   const verifiedScore = row.verified_score ?? null;
   const telemetryHash = row.telemetry_hash ?? null;

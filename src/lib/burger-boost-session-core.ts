@@ -9,7 +9,7 @@
  * Score weights (rules engine) remain PROVISIONAL. awardedDiscountPercent is
  * always 0. No coupon / checkout logic. Game remains disabled.
  */
-import { simulateBurgerBoostReplay, replayDiscountMeter, OPERATION_RULES_VERSION } from "./burger-boost-rules";
+import { simulateBurgerBoostReplay, replayDiscountMeter, OPERATION_RULES_VERSION, TIERED_RULES_VERSION } from "./burger-boost-rules";
 import { dhakaDate, type SessionMode } from "./burger-boost-reward";
 
 /**
@@ -26,6 +26,8 @@ assertServerEnvironment();
 export const RULES_VERSION = 1;
 /** Step 53: new Practice/Reward sessions use the v2 operation rules. Legacy v1 rows replay unchanged. */
 export const MODE_RULES_VERSION = OPERATION_RULES_VERSION;
+/** Step 64K: new persisted Practice sessions use the v3 tiered rules. Reward stays on MODE_RULES_VERSION (locked). */
+export const PRACTICE_RULES_VERSION = TIERED_RULES_VERSION;
 export const GATE_COUNT = 30;
 export const GAMEPLAY_WINDOW_MS = 60_000;
 export const GRACE_PERIOD_MS = 15_000;
@@ -125,10 +127,10 @@ export function toDTO(r: SessionRecord): SessionDTO {
 
 export function createBurgerBoostSessionService(deps: ServiceDeps) {
   const makeSeed = deps.seed ?? generateSeed;
-  function newRecord(userId: string, mode: SessionMode): SessionRecord {
+  function newRecord(userId: string, mode: SessionMode, rulesVersion: number = MODE_RULES_VERSION): SessionRecord {
     const startedAt = deps.now();
     return {
-      id: deps.newId(), userId, seed: makeSeed(), rulesVersion: MODE_RULES_VERSION, status: "in_progress",
+      id: deps.newId(), userId, seed: makeSeed(), rulesVersion, status: "in_progress",
       startedAt, expiresAt: startedAt + HARD_CUTOFF_MS, completedAt: null,
       verifiedScore: null, telemetryHash: null, awardedDiscountPercent: 0, mode,
     };
@@ -146,10 +148,10 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
       return toDTO(rec);
     },
 
-    /** Practice: unlimited, v2 rules, never touches attempts, slots or coupons. */
+    /** Practice: unlimited, v3 tiered rules, never touches attempts, slots or coupons. */
     async startPractice(userId: string): Promise<ModeStartResult> {
       if (!userId) throw new Error("unauthenticated");
-      const rec = newRecord(userId, "practice");
+      const rec = newRecord(userId, "practice", PRACTICE_RULES_VERSION);
       await deps.repo.insert(rec);
       return { ok: true, session: toDTO(rec) };
     },
@@ -222,8 +224,8 @@ export function createBurgerBoostSessionService(deps: ServiceDeps) {
         const result = simulateBurgerBoostReplay(seed, GATE_COUNT, actions, RULES_VERSION);
         if (!result.valid || result.gatesPassed !== GATE_COUNT) return reject(result.valid ? "incomplete replay" : result.error);
         verifiedScore = result.score;
-      } else if (r.rulesVersion === OPERATION_RULES_VERSION) {
-        const m = replayDiscountMeter(seed, GATE_COUNT, actions);
+      } else if (r.rulesVersion === OPERATION_RULES_VERSION || r.rulesVersion === TIERED_RULES_VERSION) {
+        const m = replayDiscountMeter(seed, GATE_COUNT, actions, r.rulesVersion);
         if (!m.valid || m.gatesPassed !== GATE_COUNT) return reject(m.valid ? "incomplete replay" : m.error);
         finalMeter = m.finalMeter;
         // Stored score column is non-negative; the signed meter is returned separately.

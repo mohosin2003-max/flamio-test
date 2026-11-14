@@ -138,7 +138,7 @@ export function practiceSeed(): bigint {
 /* ------------------------- STEP 46D: live saved session ------------------------- */
 
 /** Minimal typed handoff from createBurgerBoostSession to the game screen. */
-export type LiveSession = { sessionId: string; publicGates: PublicGate[]; expiresAt: number };
+export type LiveSession = { sessionId: string; publicGates: PublicGate[]; expiresAt: number; rulesVersion?: number };
 
 /**
  * Builds the local display track from the SERVER-supplied public gates only.
@@ -169,8 +169,12 @@ export function trackFromPublicGates(gates: readonly PublicGate[]): Gate[] | nul
 export function createLiveGame(live: LiveSession): GameState | null {
   const track = trackFromPublicGates(live.publicGates);
   if (!track) return null;
-  const rulesVersion = track.some((g) => g.kind === "op") ? OPERATION_RULES_VERSION : RULES_VERSION;
-  if (rulesVersion === OPERATION_RULES_VERSION && track.some((g) => g.kind === "math")) return null; // mixed versions fail closed
+  const inferred = track.some((g) => g.kind === "op") ? OPERATION_RULES_VERSION : RULES_VERSION;
+  if (inferred === OPERATION_RULES_VERSION && track.some((g) => g.kind === "math")) return null; // mixed versions fail closed
+  // Step 64K: the server-declared meter version (2 or 3) selects timing/meter; must agree with the gates.
+  const declared = live.rulesVersion;
+  if (declared !== undefined && (isMeterRules(declared) !== (inferred === OPERATION_RULES_VERSION) || (!isMeterRules(declared) && declared !== RULES_VERSION))) return null;
+  const rulesVersion = declared !== undefined && isMeterRules(declared) ? declared : inferred;
   return { track, gateCount: track.length, lane: 0, nextGate: 0, actions: [], layers: [], score: 0, mathCorrect: 0, mathWrong: 0, spoiledHits: 0, meter: METER.start, rulesVersion, phase: "running" };
 }
 
