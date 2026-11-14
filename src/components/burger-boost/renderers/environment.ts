@@ -111,22 +111,7 @@ export function drawRoadbed(ctx: CanvasRenderingContext2D, f: EnvFrame) {
   }
   ctx.restore();
 
-  // dashed centre divider — dashes are fixed in world space (4 per gate unit)
-  ctx.save();
-  ctx.fillStyle = "#f5f5f4";
-  const DASH = 0.5; // gate units between dashes
-  const first = Math.floor(speed / DASH) * DASH;
-  for (let p = first; p < speed + VIEW; p += DASH) {
-    const d0 = depthAt(p + DASH * 0.45, speed), d1 = depthAt(p, speed);
-    if (d1 < 0 || d0 > 1.15) continue;
-    const a = proj(Math.max(0, d0)), b = proj(Math.min(1.15, d1));
-    const w0 = 1 + 4 * a.scale, w1 = 1 + 4 * b.scale;
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - w0 / 2, a.y); ctx.lineTo(W / 2 + w0 / 2, a.y);
-    ctx.lineTo(W / 2 + w1 / 2, b.y); ctx.lineTo(W / 2 - w1 / 2, b.y);
-    ctx.closePath(); ctx.fill();
-  }
-  ctx.restore();
+  // centre divider is the metallic FLAMIO B-rail (drawCenterRail); no painted dashes.
 }
 
 /* ------------------------------ curbs ----------------------------------- */

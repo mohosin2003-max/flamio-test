@@ -223,6 +223,27 @@ function layer(ctx: Ctx, G: Grads, kind: Ingredient, y: number, i: number): numb
       ctx.restore();
       return 4;
     }
+    case "onion": {
+      ctx.save(); ctx.translate(0, y);
+      ctx.lineWidth = 2.2;
+      for (const cx of [-30, -10, 10, 30]) {
+        ctx.strokeStyle = "#8e3a7c"; ctx.beginPath(); ctx.ellipse(cx, 2, 10, 2.6, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = "#f2dcec"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(cx, 2, 6.5, 1.6, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 2.2;
+      }
+      ctx.restore();
+      return 4;
+    }
+    case "capsicum": {
+      ctx.save(); ctx.translate(wob, y);
+      for (const cx of [-28, 0, 28]) {
+        ctx.fillStyle = "#1f7a32"; ctx.beginPath(); ctx.ellipse(cx, 2, 13, 3, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#b9e4a0"; ctx.beginPath(); ctx.ellipse(cx, 1.8, 10, 2, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#1f7a32"; ctx.fillRect(cx - 0.6, 0.2, 1.2, 3.4);
+      }
+      ctx.restore();
+      return 4;
+    }
     default: return 0;
   }
 }

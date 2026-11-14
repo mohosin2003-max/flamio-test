@@ -18,7 +18,15 @@
 export const RULES_VERSION = 1;
 /** Rules v2: strategic Operation Gates + single Discount Meter (Step 48/49). */
 export const OPERATION_RULES_VERSION = 2;
-export const SUPPORTED_RULES_VERSIONS = [RULES_VERSION, OPERATION_RULES_VERSION] as const;
+/**
+ * Rules v3 (Step 63): v2 meter semantics + onion/capsicum, tiered difficulty
+ * and an accelerating gate schedule. LOCAL PRACTICE ONLY — saved sessions stay
+ * on v2 (database constraint), so v1/v2 tracks and replays are unchanged.
+ */
+export const TIERED_RULES_VERSION = 3;
+export const SUPPORTED_RULES_VERSIONS = [RULES_VERSION, OPERATION_RULES_VERSION, TIERED_RULES_VERSION] as const;
+/** v2 and v3 both use the single Discount Meter. */
+export function isMeterRules(v: number): boolean { return v === OPERATION_RULES_VERSION || v === TIERED_RULES_VERSION; }
 export const GAMEPLAY_DURATION_MS = 60_000;
 export const GRACE_PERIOD_MS = 15_000;
 export const HARD_CUTOFF_MS = GAMEPLAY_DURATION_MS + GRACE_PERIOD_MS; // 75 s
@@ -27,6 +35,8 @@ export const MATH_OPERATIONS = ["+", "−", "×", "÷"] as const;
 export const BURGER_INGREDIENTS = [
   "cheese", "lettuce", "sausage", "sauce", "mayo", "cucumber", "carrot", "tomato",
 ] as const;
+/** v3 pool: the frozen v1/v2 eight + onion, capsicum (appended, so v1/v2 indices never move). */
+export const V3_INGREDIENTS = [...BURGER_INGREDIENTS, "onion", "capsicum"] as const;
 
 export const MIN_GATE_COUNT = 1;
 export const MAX_GATE_COUNT = 200;
@@ -40,7 +50,7 @@ export const LANES = 2;
 export const PROVISIONAL_SCORE = { mathCorrect: 10, ingredient: 5, spoiled: -5 } as const;
 
 export type MathOp = (typeof MATH_OPERATIONS)[number];
-export type Ingredient = (typeof BURGER_INGREDIENTS)[number];
+export type Ingredient = (typeof V3_INGREDIENTS)[number];
 export type Lane = 0 | 1;
 
 export type MathGate = { kind: "math"; a: number; op: MathOp; b: number; lanes: [number, number]; correctLane: Lane };
@@ -157,6 +167,7 @@ function opGate(r: ReturnType<typeof createPrng>, mulLeft: { n: number }): Opera
 
 export function generateTrack(seed: bigint | number | string, rulesVersion: number, gateCount: number): Gate[] {
   if (rulesVersion === OPERATION_RULES_VERSION) return generateOperationTrack(seed, gateCount);
+  if (rulesVersion === TIERED_RULES_VERSION) return generateTieredTrack(seed, gateCount);
   if (rulesVersion !== RULES_VERSION) throw new Error("unsupported rules version");
   if (!Number.isInteger(gateCount) || gateCount < MIN_GATE_COUNT || gateCount > MAX_GATE_COUNT) throw new Error("invalid gate count");
   const r = createPrng(toSeed(seed), rulesVersion);
@@ -188,6 +199,102 @@ function generateOperationTrack(seed: bigint | number | string, gateCount: numbe
   return track;
 }
 
+/** Difficulty tier of gate i (0 early, 1 intermediate, 2 advanced): thirds of the track. */
+export function difficultyTier(i: number, gateCount: number): 0 | 1 | 2 {
+  return Math.min(2, Math.floor((3 * i) / gateCount)) as 0 | 1 | 2;
+}
+
+/**
+ * v3 tiered pair.
+ *  Early:    clear choices — +a vs +b (gap ≥3), or +a vs small −b.
+ *  Middle:   the v2 mix (×2 budget, −a vs ÷2, +a vs −b, +a vs +b).
+ *  Advanced: harder trade-offs — ×2 vs big +a, −a vs ÷2, −a vs −b (least harm), big +a vs −b.
+ */
+function tieredOpGate(r: ReturnType<typeof createPrng>, mulLeft: { n: number }, tier: 0 | 1 | 2): OperationGate {
+  const k = r.int(10);
+  let pair: [OpChoice, OpChoice];
+  if (tier === 0) {
+    const add = () => ({ op: "+" as const, v: 3 * (1 + r.int(4)) }); // +3..+12
+    if (k < 5) { const a = add(); pair = [a, { op: "+", v: a.v + 3 * (1 + r.int(2)) }]; } // +a vs +(a+3|a+6)
+    else pair = [add(), { op: "−", v: 5 * (1 + r.int(2)) }]; // −5 / −10
+  } else if (tier === 1) {
+    pair = opGate(r, mulLeft).lanes;
+  } else {
+    const bigAdd = () => ({ op: "+" as const, v: 6 * (1 + r.int(3)) }); // +6..+18
+    const sub = () => ({ op: "−" as const, v: 5 * (2 + r.int(4)) }); // −10..−25
+    if (k < 3) {
+      const a = bigAdd();
+      if (mulLeft.n > 0) { mulLeft.n--; pair = [a, { op: "×", v: 2 }]; } else pair = [a, bigAdd()];
+    } else if (k < 6) pair = [sub(), { op: "÷", v: 2 }];
+    else if (k < 8) { const a = sub(); let b = sub(); if (b.v === a.v) b = { op: "−", v: a.v === 25 ? 10 : a.v + 5 }; pair = [a, b]; }
+    else pair = [bigAdd(), sub()];
+  }
+  // v3 never offers two identical lanes (meaningless choice)
+  if (pair[0].op === pair[1].op && pair[0].v === pair[1].v) pair = [pair[0], { op: pair[1].op, v: pair[1].v + (pair[1].op === "+" ? 3 : 5) }];
+  if (tier === 1) return { kind: "op", lanes: pair };
+  if (r.int(2) === 1) pair = [pair[1], pair[0]];
+  return { kind: "op", lanes: pair };
+}
+
+function generateTieredTrack(seed: bigint | number | string, gateCount: number): Gate[] {
+  if (!Number.isInteger(gateCount) || gateCount < MIN_GATE_COUNT || gateCount > MAX_GATE_COUNT) throw new Error("invalid gate count");
+  const r = createPrng(toSeed(seed), TIERED_RULES_VERSION);
+  const mulLeft = { n: METER.maxMultipliers };
+  const N = V3_INGREDIENTS.length;
+  const track: Gate[] = [];
+  for (let i = 0; i < gateCount; i++) {
+    const k = i === 0 ? 0 : r.int(10);
+    if (k < 5) track.push(tieredOpGate(r, mulLeft, difficultyTier(i, gateCount)));
+    else if (k < 8) {
+      const x = r.int(N); const y = (x + 1 + r.int(N - 1)) % N;
+      track.push({ kind: "ingredient", lanes: [pick(V3_INGREDIENTS, x), pick(V3_INGREDIENTS, y)] });
+    } else track.push({ kind: "negative", spoiled: pick(V3_INGREDIENTS, r.int(N)), spoiledLane: r.int(2) as Lane });
+  }
+  return track;
+}
+
+/* ---------------------------- gate timing ---------------------------- */
+/** v3 per-gate interval at the first and last gate for a 30-gate run (ms). */
+export const V3_INTERVAL_START_MS = 2100;
+export const V3_INTERVAL_END_MS = 1600;
+
+/**
+ * Arrival time (ms of gameplay) of each gate at the player. v1/v2: constant
+ * (i+1)·(0.92·60 s / n) — unchanged. v3: linear ramp whose 30-gate run goes
+ * 2100 ms → 1600 ms (total 55.5 s), scaled for other counts; always < 60 s.
+ */
+export function gateSchedule(gateCount: number, rulesVersion: number): number[] {
+  const out: number[] = [];
+  if (rulesVersion !== TIERED_RULES_VERSION) {
+    const iv = (GAMEPLAY_DURATION_MS * 0.92) / gateCount;
+    for (let i = 0; i < gateCount; i++) out.push((i + 1) * iv);
+    return out;
+  }
+  const mean = (V3_INTERVAL_START_MS + V3_INTERVAL_END_MS) / 2; // 1850
+  const base = (GAMEPLAY_DURATION_MS * 0.925) / gateCount; // 1850 at n = 30
+  const swing = (V3_INTERVAL_START_MS - mean) / mean; // 0.135
+  let t = 0;
+  for (let i = 0; i < gateCount; i++) {
+    const f = gateCount === 1 ? 0 : 1 - (2 * i) / (gateCount - 1);
+    t += base * (1 + swing * f);
+    out.push(t);
+  }
+  return out;
+}
+
+/** Continuous track position (gate units) at elapsed ms, from a schedule. */
+export function trackPosition(elapsed: number, sched: readonly number[]): number {
+  if (!sched.length || elapsed <= 0) return 0;
+  let prev = 0;
+  for (let i = 0; i < sched.length; i++) {
+    const t = sched[i]!;
+    if (elapsed < t) return i + (elapsed - prev) / (t - prev);
+    prev = t;
+  }
+  const last = sched.length > 1 ? sched.at(-1)! - sched.at(-2)! : sched[0]!;
+  return sched.length + (elapsed - prev) / last;
+}
+
 /** Meter delta of one resolved gate (v2). Shared by client preview and server replay. */
 export function stepMeter(meter: number, g: Gate, lane: Lane): number {
   if (g.kind === "op") return applyOp(meter, g.lanes[lane]);
@@ -204,10 +311,11 @@ export type MeterReplayResult =
  * v2 authoritative replay. Same action contract as v1 ({gateIndex, lane, t},
  * strictly in order, once each). Any client meter/score field is ignored.
  */
-export function replayDiscountMeter(seed: bigint | number | string, gateCount: number, playerActions: unknown): MeterReplayResult {
+export function replayDiscountMeter(seed: bigint | number | string, gateCount: number, playerActions: unknown, rulesVersion: number = OPERATION_RULES_VERSION): MeterReplayResult {
   const bad = (error: string): MeterReplayResult => ({ valid: false, finalMeter: 0, peakMeter: 0, gatesPassed: 0, error });
+  if (!isMeterRules(rulesVersion)) return bad("unsupported rules version");
   let track: Gate[];
-  try { track = generateOperationTrack(seed, gateCount); } catch (e) { return bad((e as Error).message); }
+  try { track = rulesVersion === TIERED_RULES_VERSION ? generateTieredTrack(seed, gateCount) : generateOperationTrack(seed, gateCount); } catch (e) { return bad((e as Error).message); }
   if (!Array.isArray(playerActions)) return bad("malformed actions");
   if (playerActions.length > gateCount) return bad("too many actions");
   let meter: number = METER.start, peak: number = METER.start, spoiledHits = 0, lastT = -1;

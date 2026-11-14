@@ -16,7 +16,7 @@ import {
   createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
 import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
-import { OPERATION_RULES_VERSION, METER, type Ingredient, type Lane } from "@/lib/burger-boost-rules";
+import { OPERATION_RULES_VERSION, TIERED_RULES_VERSION, isMeterRules, gateSchedule, trackPosition, METER, type Ingredient, type Lane } from "@/lib/burger-boost-rules";
 import { createPauseClock, storeDiscountPreview, boostDelta, type PauseClock } from "@/lib/burger-boost-pause";
 import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
 import { createAudioEngine, pickGateSound, isMilestoneGate, type AudioEngine, type SoundEvent } from "@/lib/burger-boost-audio";
@@ -27,6 +27,7 @@ const ING: Record<Ingredient, { color: string; label: string }> = {
   sausage: { color: "#a8452c", label: "Sausage" }, sauce: { color: "#d8322a", label: "Sauce" },
   mayo: { color: "#f3ead2", label: "Mayo" }, cucumber: { color: "#2f8f4e", label: "Cucumber" },
   carrot: { color: "#ef7d22", label: "Carrot" }, tomato: { color: "#e5483a", label: "Tomato" },
+  onion: { color: "#b45c9b", label: "Onion" }, capsicum: { color: "#2f9e44", label: "Capsicum" },
 };
 
 type Screen = "start" | "playing" | "over";
@@ -110,7 +111,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const start = useCallback(() => {
     unlockAudio(); victoryPlayedRef.current = false;
     liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
-    stateRef.current = createGame(practiceSeed(), gateCount, OPERATION_RULES_VERSION); resetMascotAnim(mascot);
+    stateRef.current = createGame(practiceSeed(), gateCount, TIERED_RULES_VERSION); resetMascotAnim(mascot);
     startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current);
     audioRef.current?.play("start"); audioRef.current?.startMusic();
     setPaused(false); setResult(null); setScreen("playing");
@@ -143,7 +144,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     const css = getComputedStyle(rootRef.current ?? document.documentElement);
     const col = (v: string, f: string) => css.getPropertyValue(v).trim() || f;
     const C = { bg: col("--background", "#1c1714"), fg: col("--foreground", "#fff"), primary: col("--primary", "#f26b1d"), muted: col("--muted", "#333"), destructive: col("--destructive", "#e33") };
-    const interval = (GAMEPLAY_DURATION_MS * 0.92) / (stateRef.current?.gateCount ?? gateCount);
+    const sched = gateSchedule(stateRef.current?.gateCount ?? gateCount, stateRef.current?.rulesVersion ?? OPERATION_RULES_VERSION);
     let raf = 0; let lastHud = 0;
 
     const resize = () => {
@@ -164,22 +165,22 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       const now = startRef.current + played; // virtual time: frozen while paused
       const elapsed = Math.min(HARD_CUTOFF_MS, played);
       // resolve gates that reached the player
-      while (s.nextGate < s.gateCount && (s.nextGate + 1) * interval <= elapsed && (s.phase === "running" || s.phase === "grace")) {
+      while (s.nextGate < s.gateCount && sched[s.nextGate]! <= elapsed && (s.phase === "running" || s.phase === "grace")) {
         const before = s.meter;
         const r = passGate(s, elapsed);
         s = r.state;
         if (r.outcome) sounds.push(OUT_SOUND[r.outcome]!);
         if (isMilestoneGate(s.nextGate) && r.outcome) sounds.push("milestone");
         const d = s.meter - before, ds = boostDelta(d);
-        if (r.outcome) flashRef.current = { text: { correct: "+10 Correct!", wrong: "Wrong", collect: s.rulesVersion === 2 ? `Layer ${ds}` : "+5 Layer", spoiled: s.rulesVersion === 2 ? `Spoiled! ${ds}` : "Spoiled! −5", safe: "Dodged", boost: ds, drop: ds }[r.outcome], good: r.outcome !== "wrong" && r.outcome !== "spoiled" && r.outcome !== "drop", at: now };
+        if (r.outcome) flashRef.current = { text: { correct: "+10 Correct!", wrong: "Wrong", collect: isMeterRules(s.rulesVersion) ? `Layer ${ds}` : "+5 Layer", spoiled: isMeterRules(s.rulesVersion) ? `Spoiled! ${ds}` : "Spoiled! −5", safe: "Dodged", boost: ds, drop: ds }[r.outcome], good: r.outcome !== "wrong" && r.outcome !== "spoiled" && r.outcome !== "drop", at: now };
       }
       if (s.phase === "running" || s.phase === "grace") s = { ...s, phase: phaseAt(elapsed) === "expired" ? "expired" : s.phase === "grace" || phaseAt(elapsed) === "grace" ? "grace" : "running" };
       stateRef.current = s;
       const snd = pickGateSound(sounds); if (snd) audioRef.current?.play(snd);
-      draw(ctx, canvas, s, elapsed, interval, C, flashRef.current, now);
+      draw(ctx, canvas, s, elapsed, sched, C, flashRef.current, now);
       if (now - lastHud > 100) {
         lastHud = now;
-        setHud({ score: s.score, meter: s.meter, v2: s.rulesVersion === OPERATION_RULES_VERSION, elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
+        setHud({ score: s.score, meter: s.meter, v2: isMeterRules(s.rulesVersion), elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
       }
       if (s.phase === "finished" || s.phase === "expired") {
         const a = audioRef.current; a?.stopAll(); a?.stopMusic();
@@ -356,7 +357,7 @@ function BurgerStack({ layers }: { layers: Ingredient[] }) {
 const mascot = createMascotAnim();
 const envFrame: EnvFrame = { W: 0, H: 0, horizon: 0, playerY: 0, speed: 0, proj: () => ({ y: 0, left: 0, right: 0, scale: 0 }), C: { bg: "", fg: "", primary: "", muted: "", destructive: "" } };
 
-function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState, elapsed: number, interval: number, C: Colors, flash: { text: string; good: boolean; at: number } | null, now: number) {
+function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState, elapsed: number, sched: readonly number[], C: Colors, flash: { text: string; good: boolean; at: number } | null, now: number) {
   const dpr = cv.width / cv.getBoundingClientRect().width || 1;
   const W = cv.width / dpr, H = cv.height / dpr;
   const horizon = H * 0.12, playerY = H - 130;
@@ -370,14 +371,13 @@ function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState
   };
   // environment (sky, skyline, road, curbs, lamps, billboards) — same clock as gates
   envFrame.W = W; envFrame.H = H; envFrame.horizon = horizon; envFrame.playerY = playerY;
-  envFrame.speed = elapsed / interval; envFrame.proj = proj; envFrame.C = C;
+  const pos = trackPosition(elapsed, sched);
+  envFrame.speed = pos; envFrame.proj = proj; envFrame.C = C;
   drawEnvironment(ctx, envFrame);
 
-  // gates: gate i hits player at (i+1)*interval; visible ~4 gates ahead
-  const view = interval * 4;
+  // gates: gate i hits the player at sched[i]; visible ~4 gate-units ahead (same space as scenery)
   for (let i = Math.min(s.gateCount - 1, s.nextGate + 4); i >= s.nextGate; i--) {
-    const hit = (i + 1) * interval;
-    const d = 1 - (hit - elapsed) / view;
+    const d = 1 - (i + 1 - pos) / 4;
     if (d < 0 || d > 1.05) continue;
     drawGate(ctx, s.track[i]!, proj(d), C, now, i, s.gateCount);
   }

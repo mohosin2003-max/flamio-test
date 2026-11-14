@@ -136,7 +136,40 @@ function tomato(ctx: Ctx, r: number) {
   ctx.beginPath(); ctx.ellipse(-r * 0.45, -r * 0.5, r * 0.18, r * 0.09, -0.7, 0, Math.PI * 2); ctx.fill();
 }
 
-const ART: Record<Ingredient, (ctx: Ctx, r: number) => void> = { cheese, lettuce, sausage, sauce, mayo, cucumber, carrot, tomato };
+/** Red onion: two overlapping sliced rings with purple skin and pale inner rings. */
+function onion(ctx: Ctx, r: number) {
+  for (const [cx, cy, s] of [[-r * 0.3, r * 0.1, 0.7], [r * 0.3, -r * 0.12, 0.72]] as const) {
+    const R = r * s;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fillStyle = "#7e2a6b"; ctx.fill();
+    for (let k = 0; k < 4; k++) {
+      ctx.beginPath(); ctx.arc(cx, cy, R * (0.86 - k * 0.2), 0, Math.PI * 2);
+      ctx.lineWidth = Math.max(1, R * 0.09); ctx.strokeStyle = k % 2 ? "#e9c6e0" : "#f7e8f2"; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.14, 0, Math.PI * 2); ctx.fillStyle = "#f7e8f2"; ctx.fill();
+  }
+}
+
+/** Green capsicum: a sliced cross-section with lobed wall, white pith and seeds. */
+function capsicum(ctx: Ctx, r: number) {
+  const lobe = (R: number) => {
+    ctx.beginPath();
+    for (let i = 0; i <= 64; i++) {
+      const a = (i / 64) * Math.PI * 2, rr = R * (1 + 0.1 * Math.cos(a * 3));
+      const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+  lobe(r * 0.95); ctx.fillStyle = "#1f7a32"; ctx.fill();
+  lobe(r * 0.78); ctx.fillStyle = "#c7efb5"; ctx.fill();
+  ctx.strokeStyle = "#eef9e6"; ctx.lineWidth = Math.max(1, r * 0.08);
+  for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r * 0.72, Math.sin(a) * r * 0.72); ctx.stroke(); }
+  ctx.fillStyle = "#f3e7b0";
+  for (let i = 0; i < 7; i++) { const a = i * 0.9; ctx.beginPath(); ctx.ellipse(Math.cos(a) * r * 0.2, Math.sin(a) * r * 0.2, r * 0.06, r * 0.04, a, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.beginPath(); ctx.ellipse(-r * 0.5, -r * 0.55, r * 0.2, r * 0.08, -0.7, 0, Math.PI * 2); ctx.fill();
+}
+
+const ART: Record<Ingredient, (ctx: Ctx, r: number) => void> = { cheese, lettuce, sausage, sauce, mayo, cucumber, carrot, tomato, onion, capsicum };
 
 /** Draws the illustration for `kind` centred at (x, y). Never throws. */
 export function drawFood(ctx: Ctx, kind: Ingredient, x: number, y: number, r: number, rotten = false) {
@@ -163,6 +196,7 @@ export function drawFood(ctx: Ctx, kind: Ingredient, x: number, y: number, r: nu
 export const LAYER_COLOR: Record<Ingredient, string> = {
   cheese: "#f5b82e", lettuce: "#5fbf4a", sausage: "#a8452c", sauce: "#d8322a",
   mayo: "#f3ead2", cucumber: "#2f8f4e", carrot: "#ef7d22", tomato: "#e5483a",
+  onion: "#b45c9b", capsicum: "#2f9e44",
 };
 
 /* ------------------------------ gates ------------------------------------ */

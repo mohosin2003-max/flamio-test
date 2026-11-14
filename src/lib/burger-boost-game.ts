@@ -11,7 +11,7 @@
  * Practice scores are provisional, never submitted, and award 0% discount.
  */
 import {
-  generateTrack, simulateBurgerBoostReplay, PROVISIONAL_SCORE, RULES_VERSION, OPERATION_RULES_VERSION, METER, stepMeter, replayDiscountMeter,
+  generateTrack, simulateBurgerBoostReplay, PROVISIONAL_SCORE, RULES_VERSION, OPERATION_RULES_VERSION, isMeterRules, METER, stepMeter, replayDiscountMeter,
   GAMEPLAY_DURATION_MS, GRACE_PERIOD_MS, HARD_CUTOFF_MS, MIN_GATE_COUNT, MAX_GATE_COUNT,
   type Gate, type Ingredient, type Lane, type PlayerAction, type PublicGate,
 } from "./burger-boost-rules";
@@ -101,7 +101,7 @@ export function passGate(s: GameState, t: number): { state: GameState; outcome: 
   let { score, mathCorrect, mathWrong, spoiledHits } = s;
   let layers = s.layers;
   let outcome: GateOutcome;
-  const meter = s.rulesVersion === OPERATION_RULES_VERSION ? stepMeter(s.meter, g, lane) : s.meter;
+  const meter = isMeterRules(s.rulesVersion) ? stepMeter(s.meter, g, lane) : s.meter;
   if (g.kind === "op") {
     outcome = meter >= s.meter ? "boost" : "drop";
   } else if (g.kind === "math") {
@@ -120,8 +120,8 @@ export function passGate(s: GameState, t: number): { state: GameState; outcome: 
 
 /** Cross-check: practice score equals the shared server replay result. */
 export function replayScore(seed: bigint | string | number, s: GameState): number | null {
-  if (s.rulesVersion === OPERATION_RULES_VERSION) {
-    const m = replayDiscountMeter(seed, s.gateCount, s.actions);
+  if (isMeterRules(s.rulesVersion)) {
+    const m = replayDiscountMeter(seed, s.gateCount, s.actions, s.rulesVersion);
     return m.valid ? m.finalMeter : null;
   }
   const r = simulateBurgerBoostReplay(seed, s.gateCount, s.actions);
