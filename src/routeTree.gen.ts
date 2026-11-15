@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as BoostRouteImport } from './routes/boost'
+import { Route as BurgerBoostRouteImport } from './routes/burger-boost'
 import { Route as CartRouteImport } from './routes/cart'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as CombosRouteImport } from './routes/combos'
@@ -97,6 +98,11 @@ const AuthRoute = AuthRouteImport.update({
 const BoostRoute = BoostRouteImport.update({
   id: '/boost',
   path: '/boost',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BurgerBoostRoute = BurgerBoostRouteImport.update({
+  id: '/burger-boost',
+  path: '/burger-boost',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CartRoute = CartRouteImport.update({
@@ -480,6 +486,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/boost': typeof BoostRoute
+  '/burger-boost': typeof BurgerBoostRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/combos': typeof CombosRoute
@@ -551,6 +558,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/boost': typeof BoostRoute
+  '/burger-boost': typeof BurgerBoostRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/combos': typeof CombosRoute
@@ -622,6 +630,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/boost': typeof BoostRoute
+  '/burger-boost': typeof BurgerBoostRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/combos': typeof CombosRoute
@@ -695,6 +704,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/boost'
+    | '/burger-boost'
     | '/cart'
     | '/checkout'
     | '/combos'
@@ -766,6 +776,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/boost'
+    | '/burger-boost'
     | '/cart'
     | '/checkout'
     | '/combos'
@@ -836,6 +847,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/boost'
+    | '/burger-boost'
     | '/cart'
     | '/checkout'
     | '/combos'
@@ -909,6 +921,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   BoostRoute: typeof BoostRoute
+  BurgerBoostRoute: typeof BurgerBoostRoute
   CartRoute: typeof CartRoute
   CheckoutRoute: typeof CheckoutRoute
   CombosRoute: typeof CombosRoute
@@ -953,6 +966,13 @@ declare module '@tanstack/react-router' {
       path: '/boost'
       fullPath: '/boost'
       preLoaderRoute: typeof BoostRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/burger-boost': {
+      id: '/burger-boost'
+      path: '/burger-boost'
+      fullPath: '/burger-boost'
+      preLoaderRoute: typeof BurgerBoostRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cart': {
@@ -1579,6 +1599,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   BoostRoute: BoostRoute,
+  BurgerBoostRoute: BurgerBoostRoute,
   CartRoute: CartRoute,
   CheckoutRoute: CheckoutRoute,
   CombosRoute: CombosRoute,
