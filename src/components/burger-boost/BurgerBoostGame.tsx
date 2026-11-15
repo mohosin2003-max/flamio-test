@@ -147,10 +147,11 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     const sched = gateSchedule(stateRef.current?.gateCount ?? gateCount, stateRef.current?.rulesVersion ?? OPERATION_RULES_VERSION);
     let raf = 0; let lastHud = 0;
 
+    let cssW = 0, cssH = 0;
     const resize = () => {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const r = canvas.getBoundingClientRect();
-      canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+      cssW = r.width; cssH = r.height; canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
@@ -177,7 +178,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       if (s.phase === "running" || s.phase === "grace") s = { ...s, phase: phaseAt(elapsed) === "expired" ? "expired" : s.phase === "grace" || phaseAt(elapsed) === "grace" ? "grace" : "running" };
       stateRef.current = s;
       const snd = pickGateSound(sounds); if (snd) audioRef.current?.play(snd);
-      draw(ctx, canvas, s, elapsed, sched, C, flashRef.current, now);
+      draw(ctx, cssW, cssH, s, elapsed, sched, C, flashRef.current, now);
       if (now - lastHud > 100) {
         lastHud = now;
         setHud({ score: s.score, meter: s.meter, v2: isMeterRules(s.rulesVersion), elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
@@ -357,9 +358,7 @@ function BurgerStack({ layers }: { layers: Ingredient[] }) {
 const mascot = createMascotAnim();
 const envFrame: EnvFrame = { W: 0, H: 0, horizon: 0, playerY: 0, speed: 0, proj: () => ({ y: 0, left: 0, right: 0, scale: 0 }), C: { bg: "", fg: "", primary: "", muted: "", destructive: "" } };
 
-function draw(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, s: GameState, elapsed: number, sched: readonly number[], C: Colors, flash: { text: string; good: boolean; at: number } | null, now: number) {
-  const dpr = cv.width / cv.getBoundingClientRect().width || 1;
-  const W = cv.width / dpr, H = cv.height / dpr;
+function draw(ctx: CanvasRenderingContext2D, W: number, H: number, s: GameState, elapsed: number, sched: readonly number[], C: Colors, flash: { text: string; good: boolean; at: number } | null, now: number) {
   const horizon = H * 0.12, playerY = H - 130;
   ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
 

@@ -217,6 +217,11 @@ export function opTone(c: { op: MathOp; v: number }): "grow" | "shrink" {
   return c.op === "+" || c.op === "×" ? "grow" : "shrink";
 }
 
+/** Single neutral FLAMIO lane treatment shared by both lanes of every gate kind (never encodes the answer). */
+export const NEUTRAL_PORTAL = { frame: "#f26b1d", glow: "#ff8a3d", inner: "#23201e" } as const;
+export function lanePortalStyle(_kind: DrawableGate["kind"], _lane: Lane) { return NEUTRAL_PORTAL; }
+const NP = NEUTRAL_PORTAL;
+
 function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.max(0, r));
 }
@@ -247,7 +252,7 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       if (s > 0.3) ctx.fillText("FLAMIO BOOST", mid, gy + 6 * s);
       for (const [x, cx, c] of [[lx, cxL, gate.lanes[0]], [rx, cxR, gate.lanes[1]]] as const) {
         // Unified FLAMIO portal for both lanes — colour never reveals the better choice.
-        portal(ctx, x, top, w, h, s, "#f26b1d", "#ff8a3d", "#23201e");
+        portal(ctx, x, top, w, h, s, NP.frame, NP.glow, NP.inner);
         ctx.font = `900 ${Math.max(9, 30 * s)}px system-ui, sans-serif`;
         ctx.lineWidth = Math.max(1, 4 * s); ctx.strokeStyle = "#0b0705";
         const t = opLabel(c);
@@ -266,16 +271,16 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       }
       ctx.fillStyle = "#fff4e6"; ctx.font = `900 ${Math.max(8, 19 * s)}px system-ui, sans-serif`;
       ctx.fillText(`${gate.a} ${gate.op} ${gate.b} = ?`, mid, gy + 10 * s);
-      portal(ctx, lx, top, w, h, s, "#ff8a3d", "#ff6a00", "#3a1d0c");
-      portal(ctx, rx, top, w, h, s, "#ffc24a", "#ffae00", "#3a1d0c");
+      portal(ctx, lx, top, w, h, s, NP.frame, NP.glow, NP.inner);
+      portal(ctx, rx, top, w, h, s, NP.frame, NP.glow, NP.inner);
       ctx.font = `900 ${Math.max(9, 34 * s)}px system-ui, sans-serif`;
       ctx.lineWidth = Math.max(1, 4 * s); ctx.strokeStyle = "#1a0d05";
       for (const [cx, v] of [[cxL, gate.lanes[0]], [cxR, gate.lanes[1]]] as const) {
         ctx.strokeText(String(v), cx, cy); ctx.fillStyle = "#ffffff"; ctx.fillText(String(v), cx, cy);
       }
     } else if (gate.kind === "ingredient") {
-      portal(ctx, lx, top, w, h, s, "#f5b82e", "#f26b1d", "#2a1a10");
-      portal(ctx, rx, top, w, h, s, "#f5b82e", "#f26b1d", "#2a1a10");
+      portal(ctx, lx, top, w, h, s, NP.frame, NP.glow, NP.inner);
+      portal(ctx, rx, top, w, h, s, NP.frame, NP.glow, NP.inner);
       const r = Math.min(w, h) * 0.32;
       drawFood(ctx, gate.lanes[0], cxL, cy, r);
       drawFood(ctx, gate.lanes[1], cxR, cy, r);
@@ -283,7 +288,7 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       const bad = gate.spoiledLane === 0 ? { x: lx, cx: cxL } : { x: rx, cx: cxR };
       const good = gate.spoiledLane === 0 ? { x: rx, cx: cxR } : { x: lx, cx: cxL };
       // spoiled lane
-      portal(ctx, bad.x, top, w, h, s, "#f26b1d", "#ff8a3d", "#23201e");
+      portal(ctx, bad.x, top, w, h, s, NP.frame, NP.glow, NP.inner);
       const r = Math.min(w, h) * 0.3;
       drawFood(ctx, gate.spoiled, bad.cx, cy + 4 * s, r, true);
       ctx.strokeStyle = "rgba(180,120,255,0.7)"; ctx.lineWidth = Math.max(1, 2 * s);
@@ -299,15 +304,7 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       ctx.fillStyle = "#facc15"; ctx.fill(); ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.stroke();
       ctx.fillStyle = "#1a1a1a"; ctx.font = `900 ${Math.max(6, 11 * s)}px system-ui, sans-serif`; ctx.fillText("!", bx, by + br * 0.15);
       // safe lane
-      portal(ctx, good.x, top, w, h, s, "#f26b1d", "#ff8a3d", "#23201e");
-      ctx.fillStyle = "#ffe2b8";
-      for (let k = 0; k < 5; k++) {
-        const t = (now / 600 + k * 0.37) % 1;
-        const sx = good.x + w * (0.15 + 0.7 * ((k * 0.53) % 1)), sy = top + h * (0.2 + 0.6 * t), ss = (1 - Math.abs(t - 0.5) * 2) * 4 * s + 0.5;
-        ctx.beginPath(); ctx.moveTo(sx, sy - ss); ctx.lineTo(sx + ss * 0.3, sy); ctx.lineTo(sx, sy + ss); ctx.lineTo(sx - ss * 0.3, sy); ctx.closePath(); ctx.fill();
-      }
-      ctx.strokeStyle = "#ffd38a"; ctx.lineWidth = Math.max(1.5, 4 * s);
-      ctx.beginPath(); ctx.moveTo(good.cx - 10 * s, cy); ctx.lineTo(good.cx - 2 * s, cy + 9 * s); ctx.lineTo(good.cx + 13 * s, cy - 10 * s); ctx.stroke();
+      portal(ctx, good.x, top, w, h, s, NP.frame, NP.glow, NP.inner);
     }
 
     // milestones (visual only)
