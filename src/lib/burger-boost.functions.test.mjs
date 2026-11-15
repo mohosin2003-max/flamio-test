@@ -53,7 +53,7 @@ describe("burger boost server API (STEP 04H)", () => {
   test("every server function uses requireSupabaseAuth and context.userId", () => {
     const src = readFileSync(new URL("./burger-boost.functions.ts", import.meta.url), "utf8");
     const fns = src.split("createServerFn(").slice(1);
-    expect(fns.length).toBe(4);
+    expect(fns.length).toBe(6); // 4 session + 2 reward (Step 66), all authenticated
     for (const f of fns) {
       expect(f).toContain('{ method: "POST" }');
       expect(f).toContain(".middleware([requireSupabaseAuth])");

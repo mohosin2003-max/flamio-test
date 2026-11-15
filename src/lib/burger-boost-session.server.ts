@@ -293,7 +293,7 @@ const BB_SCHEMA = "burger_boost";
  * Real transport. Every RPC is dispatched via `supabase.schema("burger_boost").rpc(...)`;
  * there is no base-schema fallback. Errors are rethrown for `mapPersistenceError`.
  */
-export function createSupabaseBurgerBoostTransport(supabase: SupabaseSchemaClient): BurgerBoostRpcTransport {
+export function createSupabaseBurgerBoostTransport(supabase: SupabaseSchemaClient): BurgerBoostRpcTransport & { callRpc(fn: string, args: Record<string, unknown>): Promise<unknown> } {
   if (!supabase || typeof supabase.schema !== "function") {
     throw new BurgerBoostPersistenceError("persistence_unavailable");
   }
@@ -320,6 +320,8 @@ export function createSupabaseBurgerBoostTransport(supabase: SupabaseSchemaClien
     },
     async complete_session(p) { return strictBool(await rpc("complete_session", p)); },
     async transition_session(p) { return strictBool(await rpc("transition_session", p)); },
+    /** Step 66: shared single call site, reused by the reward transport. */
+    callRpc: rpc,
   };
 }
 
@@ -328,8 +330,7 @@ export function createSupabaseRewardTransport(supabase: SupabaseSchemaClient) {
   const base = createSupabaseBurgerBoostTransport(supabase);
   async function obj(fn: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     try {
-      const { data, error } = await supabase.schema(BB_SCHEMA).rpc(fn, args);
-      if (error) throw error;
+      const data = await base.callRpc(fn, args);
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new BurgerBoostPersistenceError("persistence_unavailable");
       return data as Record<string, unknown>;
     } catch (e) { throw mapPersistenceError(e); }
