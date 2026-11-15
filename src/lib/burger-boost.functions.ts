@@ -61,6 +61,8 @@ export const MSG = {
   expired: "Session time is over.",
   notDue: "Session is still running.",
   unavailable: "Unable to process game session. Please try again later.",
+  attemptUsed: "You've used today's reward try. Practice is still open.",
+  ackExpired: "The 15-second start window closed. This reward try wasn't started.",
 } as const;
 
 export type SafeSession = {
@@ -85,12 +87,20 @@ type Service = {
   submit(id: string, userId: string, payload: unknown): Promise<{ ok: boolean; status: string; error?: string; verifiedScore?: number }>;
   expire(id: string, userId: string): Promise<{ ok: boolean; status: string }>;
 };
+type RewardDeps = {
+  prepare(userId: string): Promise<{ ok: true; sessionId: string; ackDeadlineAt: number } | { ok: false; reason: string }>;
+  acknowledge(userId: string, id: string): Promise<{ ok: true; sessionId: string; rulesVersion: number; startedAt: number; expiresAt: number } | { ok: false; reason: string }>;
+  isReward(userId: string, id: string): Promise<boolean>;
+  complete(userId: string, id: string, payload: unknown): Promise<{ ok: true; verifiedScore: number; finalMeter: number; outcome: string; awardedDiscountPercent: 0 } | { ok: false; status: string; error: string }>;
+};
 type Limiter = { checkAndRecord(key: string): boolean };
 /** Server-only: builds the answer-free gate view for a session the caller owns. */
 export type PublicGateLoader = (sessionId: string, userId: string) => Promise<PublicGate[] | null>;
 export type ApiDeps = {
   service: Service; publicGates: PublicGateLoader;
   createLimiter: Limiter; submitLimiter: Limiter; callerKey: () => string;
+  /** Step 66 reward flow. Absent => reward fails closed as unavailable. */
+  reward?: RewardDeps;
 };
 
 /**
@@ -158,6 +168,13 @@ export function createBurgerBoostApi(deps: ApiDeps) {
         return { ok: false as const, status: "rate_limited", error: MSG.rateLimited };
       }
       try {
+        if (deps.reward && await deps.reward.isReward(uid, p.data.sessionId)) {
+          const rr = await deps.reward.complete(uid, p.data.sessionId, { playerActions: p.data.playerActions });
+          if (rr.ok) return { ok: true as const, status: "completed" as const, verifiedScore: rr.verifiedScore, awardedDiscountPercent: 0 as const, rewardOutcome: rr.outcome };
+          const error = rr.status === "not_found" ? MSG.notFound : rr.status === "expired" ? MSG.expired
+            : rr.status === "rejected" ? MSG.invalid : rr.status === "unavailable" ? MSG.unavailable : MSG.inactive;
+          return { ok: false as const, status: rr.status, error };
+        }
         // Only validated actions travel to the core; nothing else from the client.
         const r = await deps.service.submit(p.data.sessionId, uid, { playerActions: p.data.playerActions });
         // verifiedScore comes only from the server replay; discount is locked at 0.
@@ -172,6 +189,40 @@ export function createBurgerBoostApi(deps: ApiDeps) {
           : MSG.inactive;
         return { ok: false as const, status: r.status === "clock_anomaly" ? "unavailable" : r.status, error };
       } catch (e) { logSafe("submit", e); return { ok: false as const, status: "unavailable", error: MSG.unavailable }; }
+    },
+
+    async prepareReward(userId: unknown, input: unknown) {
+      const uid = requireUser(userId);
+      if (!uid) return { ok: false as const, error: MSG.unauthenticated };
+      if (!createSessionSchema.safeParse(input ?? {}).success) return { ok: false as const, error: MSG.invalid };
+      if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}|reward`)) return { ok: false as const, error: MSG.rateLimited };
+      if (!deps.reward) return { ok: false as const, error: MSG.unavailable };
+      try {
+        const r = await deps.reward.prepare(uid);
+        if (r.ok) return { ok: true as const, sessionId: r.sessionId, ackDeadlineAt: r.ackDeadlineAt, ackWindowMs: 15_000 };
+        return { ok: false as const, error: r.reason === "attempt_used" ? MSG.attemptUsed : MSG.unavailable };
+      } catch (e) { logSafe("prepareReward", e); return { ok: false as const, error: MSG.unavailable }; }
+    },
+
+    async acknowledgeReward(userId: unknown, input: unknown) {
+      const uid = requireUser(userId);
+      if (!uid) return { ok: false as const, error: MSG.unauthenticated };
+      const p = sessionIdSchema.safeParse(input);
+      if (!p.success) return { ok: false as const, error: MSG.notFound };
+      if (!deps.reward) return { ok: false as const, error: MSG.unavailable };
+      try {
+        const r = await deps.reward.acknowledge(uid, p.data.sessionId);
+        if (!r.ok) {
+          const error = r.reason === "ack_expired" ? MSG.ackExpired : r.reason === "attempt_used" ? MSG.attemptUsed
+            : r.reason === "not_found" ? MSG.notFound : r.reason === "invalid_state" ? MSG.inactive : MSG.unavailable;
+          return { ok: false as const, error };
+        }
+        const publicGates = await deps.publicGates(r.sessionId, uid);
+        if (!publicGates || publicGates.length !== BB_GATE_COUNT) throw new Error("gate_unavailable");
+        const session = safe({ sessionId: r.sessionId, rulesVersion: r.rulesVersion, gateCount: BB_GATE_COUNT, status: "in_progress",
+          startedAt: r.startedAt, gameplayEndsAt: r.startedAt + 60_000, expiresAt: r.expiresAt });
+        return { ok: true as const, session, publicGates };
+      } catch (e) { logSafe("acknowledgeReward", e); return { ok: false as const, error: MSG.unavailable }; }
     },
 
     async expire(userId: unknown, input: unknown) {
@@ -205,12 +256,18 @@ function serverApi() {
     const service = core.createBurgerBoostSessionService({
       repo, now: () => Date.now(), newId: () => globalThis.crypto.randomUUID(),
     });
+    const rewardMod = await import("@/lib/burger-boost-reward-service");
+    const reward = rewardMod.createRewardService({
+      transport: adapter.createSupabaseRewardTransport(supabaseAdmin), repo,
+      now: () => Date.now(), newId: () => globalThis.crypto.randomUUID(),
+    });
     return createBurgerBoostApi({
       service,
       publicGates: createPublicGateLoader(repo),
       createLimiter: rl.createRateLimiter(CREATE_LIMIT_PER_HOUR),
       submitLimiter: rl.createRateLimiter(SUBMIT_LIMIT_PER_HOUR),
       callerKey: rl.callerKey,
+      reward,
     });
   })();
   apiPromise.catch(() => { apiPromise = null; });
@@ -238,3 +295,13 @@ export const expireBurgerBoostSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => sessionIdSchema.parse(input))
   .handler(async ({ context, data }) => (await serverApi()).expire(context.userId, data));
+
+export const prepareBurgerBoostRewardSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => createSessionSchema.parse(input ?? {}))
+  .handler(async ({ context, data }) => (await serverApi()).prepareReward(context.userId, data));
+
+export const acknowledgeBurgerBoostRewardStart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => sessionIdSchema.parse(input))
+  .handler(async ({ context, data }) => (await serverApi()).acknowledgeReward(context.userId, data));

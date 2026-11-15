@@ -322,3 +322,24 @@ export function createSupabaseBurgerBoostTransport(supabase: SupabaseSchemaClien
     async transition_session(p) { return strictBool(await rpc("transition_session", p)); },
   };
 }
+
+/** Step 66: live TEST reward RPCs (jsonb results). Any non-object result fails closed. */
+export function createSupabaseRewardTransport(supabase: SupabaseSchemaClient) {
+  const base = createSupabaseBurgerBoostTransport(supabase);
+  async function obj(fn: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    try {
+      const { data, error } = await supabase.schema(BB_SCHEMA).rpc(fn, args);
+      if (error) throw error;
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new BurgerBoostPersistenceError("persistence_unavailable");
+      return data as Record<string, unknown>;
+    } catch (e) { throw mapPersistenceError(e); }
+  }
+  return {
+    prepare_reward_session: (p: { p_id: string; p_user_id: string; p_seed: string }) =>
+      obj("prepare_reward_session", { ...p, p_seed: normalizeInt8(p.p_seed) }),
+    acknowledge_reward_start: (p: { p_id: string; p_user_id: string }) => obj("acknowledge_reward_start", p),
+    complete_reward_session: (p: { p_id: string; p_user_id: string; p_final_meter: number; p_telemetry_hash: string }) =>
+      obj("complete_reward_session", p),
+    transition_session: base.transition_session,
+  };
+}
