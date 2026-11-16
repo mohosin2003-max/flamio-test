@@ -1,5 +1,5 @@
 /**
- * FLAMIO Cat mascot (procedural Canvas 2D, visual only, browser only).
+ * FLAMIO delivery rider on a classic motorcycle (procedural Canvas 2D, visual only, browser only).
  * Animation is driven by the caller's existing `now` timestamp and by
  * already-resolved game state (lane, layers, spoiledHits). It never decides
  * lanes, outcomes, score or timing.
@@ -294,201 +294,145 @@ function burger(ctx: Ctx, x: number, bottomY: number, w: number, layers: readonl
   ctx.restore();
 }
 
-/* ----------------------------- running cat -------------------------------- */
+/* ------------------------ FLAMIO delivery rider ---------------------------- */
+/*
+ * Rear-elevated three-quarter view of an original classic single-cylinder
+ * motorcycle (Royal Enfield Classic-style silhouette, no real logos) with a
+ * FLAMIO delivery rider. Unit space: ground contact at y = 0, ~130 units tall.
+ */
+const CHROME = "#d6d3d1", CHROME_DARK = "#78716c", TYRE = "#161413", PAINT = "#7f1d1d", PAINT_LIGHT = "#b91c1c";
+const JACKET = "#f26b1d", JACKET_DARK = "#c2410c", REFLECT = "#fef3c7", BOX = "#1c1917", BOX_LIGHT = "#3a3330";
 
-function arcText(ctx: Ctx, word: string, cx: number, cy: number, radius: number, spread: number) {
-  const n = word.length;
-  for (let i = 0; i < n; i++) {
-    const a = -Math.PI / 2 + (i - (n - 1) / 2) * spread;
-    ctx.save();
-    ctx.translate(cx + Math.cos(a) * radius, cy + radius + Math.sin(a) * radius);
-    ctx.rotate(a + Math.PI / 2);
-    ctx.strokeText(word[i]!, 0, 0);
-    ctx.fillText(word[i]!, 0, 0);
-    ctx.restore();
+function spokes(ctx: Ctx, cx: number, cy: number, rx: number, ry: number, angle: number) {
+  ctx.strokeStyle = CHROME_DARK; ctx.lineWidth = 0.7;
+  for (let k = 0; k < 8; k++) {
+    const a = angle + (k * Math.PI) / 4;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry); ctx.stroke();
   }
 }
 
-function drawArm(ctx: Ctx, side: -1 | 1, hx: number, hy: number) {
-  const sx = side * 19, sy = -74;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = SUIT_DARK; ctx.lineWidth = 10;
-  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo((sx + hx) / 2 + side * 4, sy + 6, hx, hy); ctx.stroke();
-  ctx.strokeStyle = SUIT; ctx.lineWidth = 7.5; ctx.stroke();
-  ctx.strokeStyle = ACCENT; ctx.lineWidth = 8;
-  ctx.beginPath(); ctx.moveTo(hx - (hx - sx) * 0.16, hy - (hy - sy) * 0.16); ctx.lineTo(hx - (hx - sx) * 0.08, hy - (hy - sy) * 0.08); ctx.stroke();
-  ctx.lineCap = "butt";
+/** Rear tyre seen from behind with scrolling tread; `roll` = wheel angle. */
+function rearTyre(ctx: Ctx, roll: number) {
+  ctx.fillStyle = TYRE; ctx.beginPath(); ctx.roundRect(-8, -36, 16, 36, 7); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.roundRect(-8, -36, 16, 36, 7); ctx.clip();
+  ctx.fillStyle = "#2b2725";
+  const off = ((roll * 6) % 6 + 6) % 6;
+  for (let y = -40 + off; y < 2; y += 6) { ctx.fillRect(-7, y, 6, 2); ctx.fillRect(1, y + 3, 6, 2); }
+  ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.fillRect(-6, -34, 3, 32);
+  ctx.restore();
 }
 
-/** Rear three-quarter running cat at (x, footY). `size` ≈ body height in px. */
-export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, size: number, layers: readonly Ingredient[], now: number) {
-  const G = grads(ctx);
+type RiderGrads = { ex: CanvasGradient; tank: CanvasGradient; jacket: CanvasGradient; box: CanvasGradient; vJacket: CanvasGradient };
+const riderCache = new WeakMap<Ctx, RiderGrads>();
+function riderGrads(ctx: Ctx): RiderGrads {
+  let g = riderCache.get(ctx);
+  if (g) return g;
+  g = {
+    ex: lin(ctx, 14, -30, 34, -14, [[0, "#a8a29e"], [0.4, "#fafaf9"], [0.75, "#c4a484"], [1, "#78716c"]]),
+    tank: lin(ctx, -26, 0, 26, 0, [[0, "#450a0a"], [0.3, PAINT_LIGHT], [0.5, "#fca5a5"], [0.7, PAINT_LIGHT], [1, "#450a0a"]]),
+    jacket: lin(ctx, -16, 0, 16, 0, [[0, JACKET_DARK], [0.45, JACKET], [0.7, "#fb923c"], [1, JACKET_DARK]]),
+    box: lin(ctx, -22, 0, 22, 0, [[0, "#0c0a09"], [0.4, BOX_LIGHT], [0.6, BOX], [1, "#0c0a09"]]),
+    vJacket: lin(ctx, -26, 0, 26, 0, [[0, JACKET_DARK], [0.45, JACKET], [0.7, "#fb923c"], [1, JACKET_DARK]]),
+  };
+  riderCache.set(ctx, g);
+  return g;
+}
+
+export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, size: number, layers: readonly Ingredient[], now: number, travel = now / 300) {
+  const RG = riderGrads(ctx);
   ctx.save();
   try {
-    const phase = (now % RUN_CYCLE_MS) / RUN_CYCLE_MS; // 0..1
-    const frame = Math.floor(phase * 4); // 4-phase cycle
-    const stride = Math.sin(phase * Math.PI * 2);
-    let bob = Math.abs(Math.cos(phase * Math.PI * 2)) * 3.5;
-
+    const u = size / 100;
     const sw = (now - a.switchAt) / SWITCH_MS;
     const dir = Math.sign(a.toX - a.fromX);
-    const bank = sw < 1 ? dir * MAX_BANK * Math.sin(Math.PI * Math.min(1, Math.max(0, sw))) : 0;
+    // bank into the lane change, then settle (smooth sine envelope)
+    const bank = sw >= 0 && sw < 1.6 ? dir * Math.sin(Math.min(1, sw / 1.6) * Math.PI) * MAX_BANK * 1.6 : 0;
+    const roll = travel * Math.PI * 2 * 1.5;
+    const thump = Math.sin(now / 38) * 0.35 + Math.sin(now / 211) * 0.5; // single-cylinder vibration + suspension
+    const ct = (now - a.collectAt) / COLLECT_MS, ft = (now - a.flinchAt) / FLINCH_MS;
+    const collecting = ct >= 0 && ct < 1.5, flinching = ft >= 0 && ft < 1;
+    const wob = flinching ? Math.sin(ft * Math.PI * 6) * 0.06 * (1 - ft) : 0;
 
-    const ct = (now - a.collectAt) / COLLECT_MS;
-    if (ct >= 0 && ct < 1) bob += Math.sin(ct * Math.PI) * 12;
-    const ft = (now - a.flinchAt) / FLINCH_MS;
-    const flinching = ft >= 0 && ft < 1;
-    const recoil = flinching ? Math.sin(ft * Math.PI) * 8 : 0;
-    const shake = flinching ? Math.sin(ft * 40) * 2 : 0;
+    // ground shadow (daylight, cast slightly right/forward)
+    ctx.fillStyle = "rgba(0,0,0,0.32)";
+    ctx.beginPath(); ctx.ellipse(x + 6 * u, footY - 2 * u, 34 * u, 9 * u, 0, 0, Math.PI * 2); ctx.fill();
 
-    const u = size / 100;
-    ctx.translate(x, footY);
-    ctx.scale(u, u);
-    ctx.translate(shake, -bob + recoil);
-    ctx.rotate(bank);
+    ctx.translate(x, footY); ctx.rotate(bank + wob); ctx.scale(u, u);
+    const by = thump; // sprung mass offset
 
-    // ground shadow
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.beginPath(); ctx.ellipse(0, bob - recoil + 2, 32, 7, 0, 0, Math.PI * 2); ctx.fill();
-
-    // tail (behind legs, swishes with stride)
-    ctx.lineCap = "round";
-    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 9;
-    ctx.beginPath(); ctx.moveTo(-4, -32);
-    ctx.bezierCurveTo(-28, -30, -34 + stride * 6, -54, -22 + stride * 9, -70); ctx.stroke();
-    ctx.strokeStyle = FUR; ctx.lineWidth = 6.5; ctx.stroke();
-    ctx.strokeStyle = CREAM; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(-23 + stride * 9, -66); ctx.lineTo(-22 + stride * 9, -70); ctx.stroke();
-
-    // legs: charcoal tights + orange boots with paw pads
-    for (const side of [-1, 1] as const) {
-      const lift = Math.max(0, stride * side) * 13;
-      const lx = side * 11;
-      ctx.fillStyle = G.leg;
-      ctx.beginPath(); ctx.moveTo(lx - 7, -34); ctx.quadraticCurveTo(lx - 9, -18 - lift, lx - 6, -8 - lift);
-      ctx.lineTo(lx + 6, -8 - lift); ctx.quadraticCurveTo(lx + 9, -18 - lift, lx + 7, -34); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = ACCENT; ctx.beginPath(); ctx.roundRect(lx - 7, -12 - lift, 14, 6, 3); ctx.fill();
-      ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(lx, -4 - lift, 8.5, 5.5, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(lx, -2.5 - lift, 4.5, 2.6, 0, 0, Math.PI * 2); ctx.fill();
-      for (const tx of [-4.5, 0, 4.5]) { ctx.beginPath(); ctx.arc(lx + tx, -6 - lift, 1.5, 0, Math.PI * 2); ctx.fill(); }
-    }
-
-    // cape: split flaps hanging from shoulders on both sides — the back stays visible
-    const flap = stride * 3 + (flinching ? Math.sin(ft * 30) * 7 : 0);
-    ctx.fillStyle = G.cape;
-    for (const side of [-1, 1] as const) {
-      const f = flap * side;
-      ctx.beginPath();
-      ctx.moveTo(side * 14, -80);
-      ctx.quadraticCurveTo(side * 34 + f, -60, side * 32 + f * 1.6, -26);
-      ctx.lineTo(side * 22 + f, -30);
-      ctx.quadraticCurveTo(side * 22, -56, side * 10, -76);
-      ctx.closePath(); ctx.fill();
-    }
-    // FLAMIO on the cape: small vertical lettering down each flap (balanced, readable)
-    ctx.save();
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "900 6px system-ui, -apple-system, sans-serif";
-    ctx.fillStyle = "#fff6c2"; ctx.strokeStyle = "#7a2400"; ctx.lineWidth = 1.4; ctx.lineJoin = "round";
-    for (const side of [-1, 1] as const) {
-      const f = flap * side;
-      const letters = MASCOT_BRANDING.cape;
-      for (let i = 0; i < letters.length; i++) {
-        const k = i / (letters.length - 1);
-        const lx = side * (24 + k * 5) + f * (0.4 + k), ly = -66 + k * 32;
-        ctx.strokeText(letters[i]!, lx, ly); ctx.fillText(letters[i]!, lx, ly);
-      }
-    }
+    // front wheel + forks (far, narrower, peeking past the tank)
+    ctx.fillStyle = TYRE; ctx.beginPath(); ctx.roundRect(-4, -78, 8, 22, 4); ctx.fill();
+    ctx.fillStyle = PAINT; ctx.beginPath(); ctx.roundRect(-6, -82, 12, 7, 3); ctx.fill();
+    // engine block + cylinder fins (lower, visible both sides)
+    ctx.save(); ctx.translate(0, by * 0.5);
+    ctx.fillStyle = "#57534e"; ctx.beginPath(); ctx.roundRect(-20, -46, 40, 18, 6); ctx.fill();
+    ctx.fillStyle = CHROME_DARK; for (let k = 0; k < 4; k++) ctx.fillRect(-18, -45 + k * 4, 36, 1.4);
+    ctx.fillStyle = CHROME; ctx.beginPath(); ctx.ellipse(-17, -34, 5, 6, 0, 0, Math.PI * 2); ctx.fill(); // crankcase cover
+    // upswept chrome exhaust, right side, with heat tint
+    ctx.fillStyle = RG.ex; ctx.beginPath(); ctx.moveTo(14, -34); ctx.quadraticCurveTo(30, -30, 32, -14); ctx.lineTo(26, -10); ctx.quadraticCurveTo(24, -24, 12, -27); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#292524"; ctx.beginPath(); ctx.ellipse(29, -11, 3.4, 2.2, -0.5, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 
-    // far (left) arm reaches around the chest — drawn behind the torso
-    const { bx, by } = BURGER_GRIP;
-    const grip = gripPoints(stride);
-    drawArm(ctx, -1, grip.left.x, grip.left.y);
+    // rear tyre + mudguard + tail lamp + plate
+    rearTyre(ctx, roll);
+    // 3/4 visible wheel side with rotating spokes
+    ctx.strokeStyle = CHROME; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.ellipse(-7, -18, 4, 16, 0, 0, Math.PI * 2); ctx.stroke();
+    spokes(ctx, -7, -18, 4, 15, roll);
+    ctx.save(); ctx.translate(0, by);
+    ctx.fillStyle = PAINT; ctx.beginPath(); ctx.moveTo(-11, -30); ctx.quadraticCurveTo(-11, -46, 0, -47); ctx.quadraticCurveTo(11, -46, 11, -30); ctx.lineTo(8, -30); ctx.quadraticCurveTo(8, -42, 0, -43); ctx.quadraticCurveTo(-8, -42, -8, -30); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#fafaf9"; ctx.fillRect(-9, -44, 18, 7); ctx.fillStyle = "#1c1917"; ctx.font = "800 4px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("ঢাকা মেট্রো", 0, -40.5);
+    ctx.fillStyle = "#ef4444"; ctx.beginPath(); ctx.ellipse(0, -50, 5, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,80,80,0.25)"; ctx.beginPath(); ctx.ellipse(0, -50, 10, 6, 0, 0, Math.PI * 2); ctx.fill();
+    // indicators
+    ctx.fillStyle = "#f59e0b"; ctx.fillRect(-15, -52, 5, 3); ctx.fillRect(10, -52, 5, 3);
 
-    // torso (athletic, tapered)
-    ctx.fillStyle = G.suit;
-    ctx.beginPath(); ctx.moveTo(-17, -32);
-    ctx.bezierCurveTo(-25, -46, -27, -70, -18, -80);
-    ctx.quadraticCurveTo(0, -85, 18, -80);
-    ctx.bezierCurveTo(27, -70, 25, -46, 17, -32);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = G.suitRim; ctx.fill();
-    // orange side panels + gold belt
-    ctx.strokeStyle = ACCENT; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(-22, -70); ctx.quadraticCurveTo(-23, -50, -17, -36); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(22, -70); ctx.quadraticCurveTo(23, -50, 17, -36); ctx.stroke();
-    ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-18, -38, 36, 4.5, 2); ctx.fill();
-    ctx.fillStyle = ACCENT; ctx.beginPath(); ctx.roundRect(-4, -38.5, 8, 5.5, 1.5); ctx.fill();
+    // fuel tank sides (teardrop, peeking out ahead of the rider)
+    ctx.fillStyle = RG.tank; ctx.beginPath(); ctx.ellipse(0, -76, 18, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.ellipse(0, -76, 14, 6, 0, 0, Math.PI * 2); ctx.stroke();
 
-    // FLAMIO — horizontal jersey lettering across the upper back, glowing
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "900 13px system-ui, -apple-system, 'Segoe UI', sans-serif";
-    ctx.lineJoin = "round"; ctx.lineWidth = 2.6; ctx.strokeStyle = "#5a1a00";
-    ctx.shadowColor = "rgba(255,140,30,0.95)"; ctx.shadowBlur = 7 * u;
-    ctx.fillStyle = G.letters;
-    arcText(ctx, MASCOT_BRANDING.jersey, 0, -64, 60, 0.115);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "800 6px system-ui, sans-serif";
-    ctx.fillText("10", 0, -50);
+    // rider: legs gripping the tank, boots on pegs
+    ctx.fillStyle = "#1e293b";
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 10, -70); ctx.quadraticCurveTo(s * 24, -64, s * 22, -50); ctx.lineTo(s * 16, -50); ctx.quadraticCurveTo(s * 16, -60, s * 6, -64); ctx.closePath(); ctx.fill(); }
+    ctx.fillStyle = "#0c0a09"; for (const s of [-1, 1]) { ctx.beginPath(); ctx.roundRect(s * 19 - 4, -52, 8, 6, 2); ctx.fill(); }
 
-
-    // head (rear 3/4: back of head + right cheek, eye and whiskers)
-    const hy = -98 + (frame % 2) * 1.2;
-    // periodic backward glance: head turns over the shoulder; body/grip unaffected
-    const glance = glanceAmount(now);
-    ctx.save();
-    if (glance > 0) { ctx.translate(-glance * 3, 0); ctx.rotate(-glance * 0.22); }
-    for (const side of [-1, 1] as const) {
-      ctx.fillStyle = FUR;
-      ctx.beginPath(); ctx.moveTo(side * 6, hy - 13); ctx.quadraticCurveTo(side * 16, hy - 32, side * 21, hy - 30); ctx.quadraticCurveTo(side * 23, hy - 16, side * 20, hy - 5); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = PINK;
-      ctx.beginPath(); ctx.moveTo(side * 10, hy - 13); ctx.quadraticCurveTo(side * 16, hy - 26, side * 19, hy - 25); ctx.quadraticCurveTo(side * 20, hy - 15, side * 18, hy - 9); ctx.closePath(); ctx.fill();
+    // handlebars + mirrors + hands (both hands on grips)
+    const sway = Math.sin(now / 420) * 0.8;
+    ctx.strokeStyle = CHROME; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-28, -90); ctx.quadraticCurveTo(0, -84, 28, -90); ctx.stroke();
+    ctx.lineWidth = 1; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 22, -89); ctx.lineTo(s * 26, -101); ctx.stroke(); ctx.fillStyle = CHROME_DARK; ctx.beginPath(); ctx.ellipse(s * 27, -103, 4, 3, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "rgba(186,230,253,0.7)"; ctx.beginPath(); ctx.ellipse(s * 27, -103, 2.8, 2, 0, 0, Math.PI * 2); ctx.fill(); }
+    // arms from shoulders to grips
+    for (const s of [-1, 1] as const) {
+      ctx.strokeStyle = JACKET_DARK; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(s * 13, -98 + sway * s * 0.3); ctx.quadraticCurveTo(s * 24, -96, s * 26, -90); ctx.stroke();
+      ctx.strokeStyle = JACKET; ctx.lineWidth = 6; ctx.stroke();
+      ctx.fillStyle = "#111827"; ctx.beginPath(); ctx.arc(s * 26.5, -89.5, 3.4, 0, Math.PI * 2); ctx.fill(); // gloves on grips
     }
-    ctx.fillStyle = G.head; ctx.beginPath(); ctx.ellipse(0, hy, 22, 19, 0, 0, Math.PI * 2); ctx.fill();
-    // tabby stripes
-    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 2.6; ctx.lineCap = "round";
-    for (const dx of [-8, 0, 8]) { ctx.beginPath(); ctx.moveTo(dx, hy - 18); ctx.quadraticCurveTo(dx * 0.9 + 1, hy - 12, dx * 0.75, hy - 8); ctx.stroke(); }
     ctx.lineCap = "butt";
-    // emerald mask band + flowing ties
-    ctx.fillStyle = G.mask;
-    ctx.beginPath(); ctx.moveTo(-22, hy - 4); ctx.quadraticCurveTo(0, hy - 7, 23, hy - 5); ctx.lineTo(23, hy + 2); ctx.quadraticCurveTo(0, hy, -22, hy + 3); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(-19, hy - 2); ctx.quadraticCurveTo(-30, hy + 2 - flap, -34, hy + 7 - flap * 0.6); ctx.lineTo(-29, hy + 1); ctx.lineTo(-33, hy - 3 - flap * 0.5); ctx.closePath(); ctx.fill();
-    // cheek + muzzle peek
-    ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(18, hy + 7, 6.5, 6.5, -0.3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#ff8fa3"; ctx.beginPath(); ctx.ellipse(23.5, hy + 4.5, 1.8, 1.3, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(60,40,30,0.8)"; ctx.lineWidth = 0.9;
-    ctx.beginPath(); ctx.moveTo(22, hy + 6); ctx.lineTo(34, hy + 3); ctx.moveTo(22, hy + 9); ctx.lineTo(34, hy + 10); ctx.stroke();
-    // eye inside the mask
-    if (flinching && ft < 0.5) {
-      ctx.strokeStyle = "#0b2a1f"; ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.moveTo(14, hy - 2); ctx.lineTo(20, hy - 1); ctx.stroke();
-    } else {
-      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(18, hy - 1.5, 3, 2.4, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#123"; ctx.beginPath(); ctx.ellipse(19.2, hy - 1.4, 1.4, 1.8, 0, 0, Math.PI * 2); ctx.fill();
-    }
 
-    ctx.restore(); // end head glance transform
+    // torso (FLAMIO jacket, back view) with reflective stripe
+    ctx.fillStyle = RG.jacket; ctx.beginPath(); ctx.moveTo(-14, -70); ctx.quadraticCurveTo(-17, -96, -11, -102); ctx.lineTo(11, -102); ctx.quadraticCurveTo(17, -96, 14, -70); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = REFLECT; ctx.fillRect(-14.5, -80, 29, 2.4);
+    ctx.fillStyle = "#fff7ed"; ctx.font = "900 6px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("FLAMIO", 0, -91);
 
-    // near (right) arm, then the burger held out in front of the chest (last 10 layers)
-    drawArm(ctx, 1, grip.right.x, grip.right.y);
-    burger(ctx, bx, by + 8, 36, layers.length > 10 ? layers.slice(-10) : layers, false);
-    // paws over the bun edges
-    ctx.fillStyle = FUR;
-    for (const side of [-1, 1] as const) {
-      const p = side < 0 ? grip.left : grip.right;
-      ctx.beginPath(); ctx.ellipse(p.x + side, p.y, 4.8, 5.5, 0, 0, Math.PI * 2); ctx.fill();
-    }
+    // helmet with visor glint (rear view)
+    const hy = -110 + sway * 0.3;
+    ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.ellipse(0, hy, 9.5, 10.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = JACKET; ctx.fillRect(-1.6, hy - 10, 3.2, 20); // racing stripe
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.ellipse(-4, hy - 5, 3, 1.6, -0.5, 0, Math.PI * 2); ctx.fill();
 
-    // collection star
-    if (ct >= 0 && ct < 1) {
-      ctx.globalAlpha = 1 - ct; ctx.fillStyle = "#ffd54a";
-      const sx = bx, sy = -86 - ct * 16;
-      ctx.beginPath();
-      for (let i = 0; i < 10; i++) { const ang = (i * Math.PI) / 5 - Math.PI / 2, rr = i % 2 ? 3.5 : 8; ctx.lineTo(sx + Math.cos(ang) * rr, sy + Math.sin(ang) * rr); }
-      ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
-    }
-    if (flinching) { ctx.fillStyle = "rgba(160,90,255,0.35)"; ctx.beginPath(); ctx.arc(0, -60, 46 * (0.6 + ft * 0.6), 0, Math.PI * 2); ctx.fill(); }
+    // large insulated FLAMIO delivery box on the rear rack (in front of rider's lower back)
+    const lid = collecting ? -Math.sin(Math.min(1, ct) * Math.PI) * 3 : 0;
+    ctx.fillStyle = "#44403c"; ctx.beginPath(); ctx.moveTo(-22, -84 + lid); ctx.lineTo(22, -84 + lid); ctx.lineTo(18, -90 + lid); ctx.lineTo(-18, -90 + lid); ctx.closePath(); ctx.fill(); // top face
+    ctx.fillStyle = RG.box; ctx.beginPath(); ctx.roundRect(-22, -84, 44, 32, 3); ctx.fill();
+    ctx.fillStyle = JACKET; ctx.fillRect(-22, -59, 44, 3);
+    ctx.fillStyle = JACKET; ctx.font = "900 10px system-ui, sans-serif"; ctx.fillText("FLAMIO", 0, -72);
+    ctx.fillStyle = "#fde68a"; ctx.font = "700 4px system-ui, sans-serif"; ctx.fillText("FOOD DELIVERY", 0, -64);
+    if (collecting) { ctx.fillStyle = `rgba(255,190,90,${0.45 * (1 - Math.min(1, ct / 1.5))})`; ctx.beginPath(); ctx.ellipse(0, -88, 26, 8, 0, 0, Math.PI * 2); ctx.fill(); }
+    // burger being built, riding on top of the box
+    const stack = layers.length > 8 ? layers.slice(-8) : layers;
+    burger(ctx, 0, -88 + lid - (collecting ? Math.sin(Math.min(1, ct) * Math.PI) * 4 : 0), 26, stack, false);
+    ctx.restore();
+
+    if (flinching) { ctx.fillStyle = `rgba(120,140,90,${0.4 * (1 - ft)})`; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(-14 + k * 14, -60 - ft * 30 - k * 6, 8 + ft * 10, 0, Math.PI * 2); ctx.fill(); } }
   } catch { /* procedural fallback */ }
   ctx.restore();
 }
@@ -498,11 +442,11 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
 export { VICTORY_MS } from "@/lib/burger-boost-victory";
 
 /**
- * Front-facing victory (or disappointed loss) scene. `t` = ms since the result
- * scene started; the pose is a pure function of `t`, so it is frame-rate safe.
+ * Front-facing result scene: the FLAMIO rider stands by the motorcycle,
+ * raises the burger, bites, chews and celebrates (or looks disappointed on a
+ * loss). Pose is a pure function of `t`, so it is frame-rate safe.
  */
 export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: readonly Ingredient[], loss = false) {
-  const G = grads(ctx);
   const p = victoryPose(t, loss);
   ctx.save();
   try {
@@ -512,82 +456,73 @@ export function drawVictory(ctx: Ctx, W: number, H: number, t: number, layers: r
     ctx.translate(W / 2, H * 0.95);
     const sc = 0.9 + 0.1 * p.appear;
     ctx.scale(u * sc, u * sc);
-    const drop = p.headDrop * 6;          // shoulders/head lower on loss
-    const bob = p.chew * 1.6 - p.cheer * 2; // chewing bob / celebration hop
+    const drop = p.headDrop * 7;
+    const bob = p.chew * 1.6 - p.cheer * 4;
 
-    ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.ellipse(0, 0, 50, 8, 0, 0, Math.PI * 2); ctx.fill();
-    // cape behind (FLAMIO lettering)
-    ctx.fillStyle = CAPE_DARK;
-    ctx.beginPath(); ctx.moveTo(-26, -72 + drop); ctx.quadraticCurveTo(-60, -30, -50, -2); ctx.lineTo(50, -2); ctx.quadraticCurveTo(60, -30, 26, -72 + drop); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = GOLD; ctx.font = "bold 7px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("FLAMIO", -40, -12); ctx.fillText("FLAMIO", 40, -12);
-    // tail
-    ctx.lineCap = "round"; ctx.strokeStyle = FUR; ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(24, -8); ctx.bezierCurveTo(54, -10, 58 - drop * 2, -40 + drop * 3, 44, -56 + drop * 5); ctx.stroke(); ctx.lineCap = "butt";
-    // body
-    const by = 7 + drop * 0.5 + bob * 0.4;
-    ctx.fillStyle = G.vSuit; ctx.beginPath(); ctx.ellipse(0, -36 + by * 0.5, 31, 36 - by * 0.5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = GOLD; ctx.beginPath(); ctx.roundRect(-27, -16, 54, 5, 2.5); ctx.fill();
-    // feet
-    for (const s of [-1, 1]) { ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(s * 16, -4, 12, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(s * 16, -3, 5, 3, 0, 0, Math.PI * 2); ctx.fill(); }
-    // jersey lettering (stays visible below the burger)
-    ctx.fillStyle = "#fff4e6"; ctx.font = "bold 9px sans-serif"; ctx.fillText("FLAMIO", 0, -22);
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.ellipse(0, 0, 70, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // motorcycle front, behind the rider on the right
+    ctx.save(); ctx.translate(40, 0);
+    ctx.fillStyle = TYRE; ctx.beginPath(); ctx.roundRect(-7, -38, 14, 38, 7); ctx.fill();
+    ctx.fillStyle = PAINT; ctx.beginPath(); ctx.roundRect(-10, -44, 20, 9, 4); ctx.fill();
+    ctx.strokeStyle = CHROME; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-6, -40); ctx.lineTo(-6, -62); ctx.moveTo(6, -40); ctx.lineTo(6, -62); ctx.stroke();
+    ctx.fillStyle = CHROME; ctx.beginPath(); ctx.arc(0, -66, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fef9c3"; ctx.beginPath(); ctx.arc(0, -66, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = CHROME; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-26, -80); ctx.quadraticCurveTo(0, -74, 26, -80); ctx.stroke();
+    ctx.restore();
 
-    // head
-    const hy = -90 + drop + bob;
-    const earDrop = p.headDrop * 10;
-    for (const side of [-1, 1] as const) {
-      ctx.fillStyle = FUR; ctx.beginPath(); ctx.moveTo(side * 8, hy - 14); ctx.quadraticCurveTo(side * (18 + earDrop), hy - 38 + earDrop * 1.6, side * (25 + earDrop), hy - 34 + earDrop * 1.8); ctx.quadraticCurveTo(side * 28, hy - 18, side * 25, hy - 6); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = PINK; ctx.beginPath(); ctx.moveTo(side * 12, hy - 14); ctx.quadraticCurveTo(side * (19 + earDrop), hy - 31 + earDrop * 1.4, side * (23 + earDrop * 0.8), hy - 29 + earDrop * 1.5); ctx.quadraticCurveTo(side * 24, hy - 18, side * 22, hy - 10); ctx.closePath(); ctx.fill();
-    }
-    ctx.fillStyle = G.vHead; ctx.beginPath(); ctx.ellipse(0, hy, 27, 23, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(0, hy + 9, 14, 10, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = MASK; ctx.beginPath(); ctx.roundRect(-23, hy - 9, 46, 11, 5.5); ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    // legs + boots
+    ctx.fillStyle = "#1e293b"; for (const s of [-1, 1]) ctx.fillRect(s * 11 - 6, -40, 12, 36);
+    ctx.fillStyle = "#0c0a09"; for (const s of [-1, 1]) { ctx.beginPath(); ctx.roundRect(s * 11 - 8, -7, 16, 7, 3); ctx.fill(); }
+    // jacket torso
+    const ty = -40 + drop * 0.4 + bob * 0.4;
+    ctx.fillStyle = riderGrads(ctx).vJacket; ctx.beginPath(); ctx.moveTo(-24, ty); ctx.quadraticCurveTo(-28, ty - 36, -18, ty - 44); ctx.lineTo(18, ty - 44); ctx.quadraticCurveTo(28, ty - 36, 24, ty); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = REFLECT; ctx.fillRect(-25, ty - 14, 50, 3);
+    ctx.fillStyle = "#fff7ed"; ctx.font = "900 8px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("FLAMIO", 0, ty - 6);
+
+    // head: open-face helmet, face visible
+    const hy = ty - 58 + drop;
+    ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.arc(0, hy, 19, Math.PI, 0); ctx.lineTo(19, hy + 8); ctx.lineTo(-19, hy + 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = JACKET; ctx.fillRect(-2, hy - 19, 4, 14);
+    ctx.fillStyle = "#c68a5e"; ctx.beginPath(); ctx.ellipse(0, hy + 6, 14, 15, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.arc(0, hy - 2, 16, Math.PI * 1.05, Math.PI * 1.95); ctx.lineTo(14, hy - 6); ctx.lineTo(-14, hy - 6); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#1c1917"; ctx.lineWidth = 2; ctx.lineCap = "round";
     for (const s of [-1, 1]) {
       ctx.beginPath();
-      if (p.sad) { ctx.arc(s * 10, hy - 6, 4, Math.PI * 0.15, Math.PI * 0.85); } // droopy downcast eyes
-      else if (p.mouthOpen > 0.5 || p.chew !== 0) { ctx.moveTo(s * 10 - 4, hy - 3); ctx.lineTo(s * 10, hy - 5); ctx.lineTo(s * 10 + 4, hy - 3); } // squeezed, savouring
-      else ctx.arc(s * 10, hy - 2, 4, Math.PI * 1.1, Math.PI * 1.9); // happy arcs
+      if (p.sad) ctx.arc(s * 6, hy + 2, 3, Math.PI * 0.15, Math.PI * 0.85);
+      else if (p.mouthOpen > 0.5 || p.chew !== 0) { ctx.moveTo(s * 6 - 3, hy + 3); ctx.lineTo(s * 6, hy + 1); ctx.lineTo(s * 6 + 3, hy + 3); }
+      else ctx.arc(s * 6, hy + 4, 3, Math.PI * 1.1, Math.PI * 1.9);
       ctx.stroke();
     }
-    if (p.sad) { ctx.lineWidth = 1.6; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 5, hy - 12); ctx.lineTo(s * 15, hy - 10); ctx.stroke(); } }
-    ctx.fillStyle = "#e86a7a"; ctx.beginPath(); ctx.moveTo(-3, hy + 5); ctx.lineTo(3, hy + 5); ctx.lineTo(0, hy + 8); ctx.fill();
-    // mouth
-    ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1.4;
-    if (p.sad) { ctx.beginPath(); ctx.arc(0, hy + 15, 4, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke(); }
-    else if (p.mouthOpen > 0.05) {
-      ctx.fillStyle = "#5a1f1a"; ctx.beginPath(); ctx.ellipse(0, hy + 11, 5, 1 + p.mouthOpen * 5, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.fillRect(-3, hy + 11 - p.mouthOpen * 5, 2, 2); ctx.fillRect(1, hy + 11 - p.mouthOpen * 5, 2, 2);
-    } else { ctx.beginPath(); ctx.arc(0, hy + 9 + p.chew * 0.8, 4 + p.cheer * 1.5, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke(); }
-    if (p.chew !== 0) { ctx.fillStyle = "rgba(255,150,150,0.5)"; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 15, hy + 7 + Math.abs(p.chew), 4, 2.5, 0, 0, Math.PI * 2); ctx.fill(); } }
-    ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 1.4;
-    for (const s of [-1, 1]) for (const dy of [6, 10]) { ctx.beginPath(); ctx.moveTo(s * 14, hy + dy); ctx.lineTo(s * 30, hy + (dy - 2 + (dy - 8)) + p.headDrop * 3); ctx.stroke(); }
-    ctx.lineCap = "butt";
+    if (p.sad) { ctx.lineWidth = 1.4; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 3, hy - 2); ctx.lineTo(s * 10, hy); ctx.stroke(); } }
+    ctx.lineWidth = 1.4;
+    if (p.sad) { ctx.beginPath(); ctx.arc(0, hy + 16, 4, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke(); }
+    else if (p.mouthOpen > 0.05) { ctx.fillStyle = "#5a1f1a"; ctx.beginPath(); ctx.ellipse(0, hy + 12, 4.5, 1 + p.mouthOpen * 4.5, 0, 0, Math.PI * 2); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(0, hy + 10 + p.chew * 0.8, 4 + p.cheer * 1.5, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke(); }
+    if (p.chew !== 0) { ctx.fillStyle = "rgba(255,140,140,0.45)"; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 9, hy + 9 + Math.abs(p.chew), 3, 2, 0, 0, Math.PI * 2); ctx.fill(); } }
 
-    // burger in front of chest; rises to the mouth for the bite
-    const restY = p.sad ? -8 : -28;
-    const byy = restY - p.lift * 44 + bob * 0.6;
+    // burger: both hands hold it; rises to mouth for the bite, held high on celebrate
+    const restY = p.sad ? -14 : -34;
+    const byy = restY - p.lift * 40 - p.cheer * 34 + bob * 0.6;
     const stack = layers.length > 10 ? layers.slice(-10) : layers;
-    const bw = 58;
-    // arms from shoulders to burger sides (drawn under burger so paws grip over it)
-    ctx.strokeStyle = SUIT; ctx.lineWidth = 9; ctx.lineCap = "round";
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 24, -58 + drop); ctx.quadraticCurveTo(s * 40, byy - 6 + p.cheer * -4, s * 30, byy - 12); ctx.stroke(); }
-    ctx.lineCap = "butt";
-    burger(ctx, 0, byy, bw, stack, false);
-    if (p.bites) {
-      const topY = byy - (22 + Math.min(12, stack.length) * 3.5 + 16) * (bw / 100);
-      ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = "#000";
-      for (const dx of [-6, 2, 10]) { ctx.beginPath(); ctx.arc(dx, topY - 1, 5.5, 0, Math.PI * 2); ctx.fill(); }
-      ctx.restore();
+    ctx.lineCap = "round";
+    for (const s of [-1, 1]) {
+      ctx.strokeStyle = JACKET_DARK; ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(s * 21, ty - 38); ctx.quadraticCurveTo(s * 34, byy - 4, s * 25, byy - 10); ctx.stroke();
+      ctx.strokeStyle = JACKET; ctx.lineWidth = 7; ctx.stroke();
     }
-    // both paws gripping the bun sides
-    ctx.fillStyle = FUR;
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 30, byy - 12, 7, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = PINK; ctx.beginPath(); ctx.ellipse(s * 30, byy - 11, 3, 2.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = FUR; }
-    // a few subtle celebration sparkles
+    ctx.lineCap = "butt";
+    ctx.save();
+    if (p.bites) { // bite cut-out clipped from the burger only (never erases the rider)
+      ctx.beginPath(); ctx.rect(-120, -260, 240, 280);
+      ctx.moveTo(2, byy - 40); ctx.arc(-6, byy - 40, 8, 0, Math.PI * 2);
+      ctx.moveTo(11, byy - 42); ctx.arc(4, byy - 42, 7, 0, Math.PI * 2);
+      ctx.clip("evenodd");
+    }
+    burger(ctx, 0, byy, 46, stack, false);
+    ctx.restore();
+    for (const s of [-1, 1]) { ctx.fillStyle = "#111827"; ctx.beginPath(); ctx.arc(s * 24, byy - 10, 4.5, 0, Math.PI * 2); ctx.fill(); }
     if (p.cheer > 0) {
-      ctx.globalAlpha = p.cheer; ctx.fillStyle = GOLD;
-      for (const [x, y] of [[-46, -110], [48, -104], [-54, -70], [56, -64]] as const) { ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x + 2, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 2, y); ctx.closePath(); ctx.fill(); }
+      ctx.fillStyle = `rgba(251,191,36,${p.cheer})`;
+      for (const [x, y] of [[-56, -120], [58, -116], [-64, -76], [66, -70], [0, -150]] as const) { ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + 2.4, y); ctx.lineTo(x, y + 6); ctx.lineTo(x - 2.4, y); ctx.closePath(); ctx.fill(); }
     }
   } catch { /* procedural fallback */ }
   ctx.restore();

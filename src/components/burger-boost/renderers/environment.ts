@@ -18,16 +18,21 @@ function depthAt(p: number, speed: number) {
 /* ------------------------------- sky ------------------------------------ */
 export function drawSky(ctx: CanvasRenderingContext2D, f: EnvFrame) {
   const g = ctx.createLinearGradient(0, 0, 0, f.horizon + 6);
-  g.addColorStop(0, "#121110");
-  g.addColorStop(0.55, "#2a1608");
-  g.addColorStop(1, "#7c2d12");
+  // Dhaka daylight: clear blue fading to warm haze at the horizon
+  g.addColorStop(0, "#3b9ad9");
+  g.addColorStop(0.6, "#9fd3f0");
+  g.addColorStop(1, "#fde9c4");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, f.W, f.horizon + 1);
   // warm glow band just above the horizon
   ctx.save();
-  ctx.globalAlpha = 0.35;
-  ctx.fillStyle = f.C.primary;
-  ctx.fillRect(0, f.horizon - 4, f.W, 4);
+  // soft sun disc + haze band
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = "#fff7d6";
+  ctx.beginPath(); ctx.arc(f.W * 0.78, f.horizon * 0.35, Math.max(6, f.horizon * 0.16), 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = "#fde68a";
+  ctx.fillRect(0, f.horizon - 5, f.W, 5);
   ctx.restore();
 }
 
@@ -63,23 +68,31 @@ export function drawSkyline(ctx: CanvasRenderingContext2D, f: EnvFrame) {
     c.scale(2, 2);
     for (const b of buildings(W)) {
       const top = Hh - Math.min(b.h, Hh - 2);
-      c.fillStyle = b.layer === 0 ? "#1f1a17" : "#141110";
+      const tones = b.layer === 0 ? ["#9fb3c8", "#a8b8c4", "#b6c2cc"] : ["#d6c7b0", "#c9b79c", "#e2d5c0", "#b9c6cf"];
+      c.fillStyle = tones[b.lit % tones.length]!;
       c.fillRect(b.x, top, b.w, Hh - top);
       if (b.layer === 1) {
-        // a few roofs get a little restaurant awning
-        if (b.lit % 5 === 0) { c.fillStyle = "#9a3412"; c.fillRect(b.x - 1, top, b.w + 2, 2); }
-        c.fillStyle = "#fbbf24";
+        // sunlit edge + shaded side for depth
+        c.fillStyle = "rgba(255,255,255,0.25)"; c.fillRect(b.x, top, 1.5, Hh - top);
+        c.fillStyle = "rgba(60,50,40,0.18)"; c.fillRect(b.x + b.w - 3, top, 3, Hh - top);
+        // windows (glass reflecting the sky)
+        c.fillStyle = "#6c8fb0";
         for (let wy = top + 3; wy < Hh - 3; wy += 4) {
-          for (let wx = b.x + 2; wx < b.x + b.w - 2; wx += 4) {
-            if (((wx * 7 + wy * 13 + b.lit) % 5) === 0) c.fillRect(wx, wy, 1.5, 1.5);
-          }
+          for (let wx = b.x + 2; wx < b.x + b.w - 2; wx += 4) c.fillRect(wx, wy, 2, 2);
+        }
+        // selected rooftops carry a FLAMIO sign
+        if (b.lit % 6 === 0 && b.w > 20 && top > 8) {
+          c.fillStyle = "#3f3a36"; c.fillRect(b.x + b.w / 2 - 0.5, top - 3, 1, 3);
+          c.fillStyle = "#f26b1d"; c.fillRect(b.x + 2, top - 8, b.w - 4, 5);
+          c.fillStyle = "#fff7ed"; c.font = "900 4px system-ui, sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
+          c.fillText("FLAMIO", b.x + b.w / 2, top - 5.4);
         }
       }
     }
     skyCache = { W, H: Hh, canvas: cv };
   }
   ctx.save();
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = 1;
   ctx.drawImage(skyCache.canvas!, 0, 0, W, Hh);
   ctx.restore();
 }
@@ -88,7 +101,7 @@ export function drawSkyline(ctx: CanvasRenderingContext2D, f: EnvFrame) {
 export function drawRoadbed(ctx: CanvasRenderingContext2D, f: EnvFrame) {
   const { W, H, proj, speed } = f;
   // ground / sidewalks
-  ctx.fillStyle = "#1a1715";
+  ctx.fillStyle = "#a8a092"; // sunlit concrete footpath
   ctx.fillRect(0, f.horizon, W, H - f.horizon);
   const top = proj(0), bot = proj(1.15);
   const g = ctx.createLinearGradient(0, top.y, 0, H);
@@ -259,14 +272,12 @@ let boards: Board[] | null = null;
 
 /** Curated sequence (exact menu.ts names) covering all five categories. */
 const BOARD_PRODUCTS = [
-  "Flamio Special Burger",
-  "Flamio Special Meat Box",
+  "Naga Fire Burger",
+  "Cheesy Blast Burger",
   "BBQ Chicken Supreme",
+  "Flamio Special Meat Box",
   "Chicken Shawarma",
-  "Oven Baked Pasta",
-  "BBQ Cheese Burst Burger",
-  "Italiano Flamio Special",
-  "Flamio Classic Burger",
+  "Flamio Special Burger",
 ] as const;
 
 function loadBoards(): Board[] {
@@ -291,7 +302,8 @@ function loadBoards(): Board[] {
 }
 
 const BOARD_EVERY = 3.5; // gate units, alternating sides
-const BOARD_W = 150, BOARD_H = 105, POST_H = 46;
+/** Giant elevated boards: set far back from the curb and high above street level. */
+const BOARD_W = 210, BOARD_H = 145, POST_H = 150, BOARD_SETBACK = 60;
 const PHOTO = 0.68;
 
 /** Largest bold font (≤ max) whose text fits maxW — shrinks instead of truncating. */
@@ -319,7 +331,7 @@ export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
     const side = (n & 1) === 0 ? 1 : -1;
     const bw = BOARD_W * s, bh = BOARD_H * s, ph = POST_H * s;
     // fully outside the road + curb (curb is 6*s wide)
-    const x = side < 0 ? p.left - 14 * s - bw : p.right + 14 * s;
+    const x = side < 0 ? p.left - BOARD_SETBACK * s - bw : p.right + BOARD_SETBACK * s;
     if (x > W || x + bw < 0) continue;
     const y = p.y - ph - bh;
     // fade in at the horizon, fade out as it sweeps past the screen edge
@@ -331,13 +343,24 @@ export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
     ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.beginPath(); ctx.ellipse(x + bw / 2, p.y, bw * 0.45, 5 * s, 0, 0, Math.PI * 2); ctx.fill();
     // posts
-    ctx.fillStyle = "#3f3a36";
-    ctx.fillRect(x + bw * 0.22 - 2.5 * s, y + bh, 5 * s, ph);
-    ctx.fillRect(x + bw * 0.78 - 2.5 * s, y + bh, 5 * s, ph);
+    // steel lattice mast
+    ctx.fillStyle = "#57534e";
+    ctx.fillRect(x + bw * 0.5 - 5 * s, y + bh, 10 * s, ph);
+    ctx.strokeStyle = "#78716c"; ctx.lineWidth = Math.max(0.6, 1.2 * s);
+    ctx.beginPath();
+    for (let k = 0; k < 5; k++) { const yy = y + bh + (ph * k) / 5; ctx.moveTo(x + bw * 0.5 - 5 * s, yy); ctx.lineTo(x + bw * 0.5 + 5 * s, yy + ph / 5); }
+    ctx.stroke();
+    ctx.fillRect(x + bw * 0.1, y + bh, bw * 0.8, 3 * s); // catwalk
+    // LED glow halo
+    ctx.fillStyle = "rgba(255,170,80,0.22)";
+    ctx.fillRect(x - 10 * s, y - 10 * s, bw + 20 * s, bh + 20 * s);
     // dark-steel frame + orange accent
     const fr = 3 * s;
     ctx.fillStyle = "#24201d";
     ctx.fillRect(x - fr, y - fr, bw + fr * 2, bh + fr * 2);
+    // FLAMIO header strip on top of the screen
+    ctx.fillStyle = "#1c1917"; ctx.fillRect(x - fr, y - fr - 16 * s, bw + fr * 2, 16 * s);
+    if (s > 0.2) { ctx.fillStyle = C.primary; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `900 ${Math.max(4, 12 * s)}px system-ui, sans-serif`; ctx.fillText("FLAMIO", x + bw / 2, y - fr - 8 * s); }
     ctx.fillStyle = C.primary;
     ctx.fillRect(x - fr, y - fr, bw + fr * 2, 2.5 * s);
 
@@ -365,7 +388,7 @@ export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
       const pad = 5 * s;
       ctx.textBaseline = "middle";
       // price pill (right)
-      const pricePx = fitFont(ctx, b.price, bw * 0.3, 13 * s, "900");
+      const pricePx = fitFont(ctx, b.price, bw * 0.3, 17 * s, "900");
       const pw = ctx.measureText(b.price).width + pad * 1.6;
       const pillH = pricePx * 1.45;
       const px = x + bw - pad - pw, py = y + photoH + (panelH - pillH) / 2;
@@ -375,9 +398,13 @@ export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
       ctx.fillText(b.price, px + pw / 2, py + pillH / 2 + 0.5 * s);
       // product name (left), full text, shrinks to fit
       ctx.textAlign = "left"; ctx.fillStyle = "#fafaf9";
-      fitFont(ctx, b.name, bw - pw - pad * 3, 11 * s, "800");
+      fitFont(ctx, b.name, bw - pw - pad * 3, 15 * s, "800");
       ctx.fillText(b.name, x + pad, y + photoH + panelH / 2);
     }
+    // subtle LED sheen sweeping across the screen
+    const sweep = ((speed * 0.6 + n * 0.37) % 1) * (bw + 40 * s) - 20 * s;
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(x + Math.max(0, sweep), y, Math.min(14 * s, Math.max(0, bw - sweep)), bh);
   }
   ctx.restore();
 }
@@ -452,8 +479,23 @@ export function drawShops(ctx: CanvasRenderingContext2D, f: EnvFrame) {
     const x = side < 0 ? p.left - 70 * s - w : p.right + 70 * s;
     if (x > W || x + w < 0) continue;
     const shop = SHOPS[n % SHOPS.length]!;
-    ctx.fillStyle = "#3f3a36"; ctx.fillRect(x, p.y - h, w, h);
-    ctx.fillStyle = "#57534e"; ctx.fillRect(x + w * 0.12, p.y - h * 0.55, w * 0.76, h * 0.55);
+    // upper commercial floors (Dhaka mixed-use block) with balconies
+    const floors = 2 + (n % 3), fh = 22 * s, top = p.y - h - 16 * s - floors * fh;
+    ctx.fillStyle = (n % 2) ? "#e7dcc8" : "#d4c3a8"; ctx.fillRect(x, top, w, floors * fh);
+    ctx.fillStyle = "rgba(70,55,40,0.22)"; ctx.fillRect(side < 0 ? x + w - 6 * s : x, top, 6 * s, floors * fh); // shaded side
+    for (let k = 0; k < floors; k++) {
+      const fy = top + k * fh;
+      ctx.fillStyle = "#7ea3c4"; ctx.fillRect(x + 8 * s, fy + 5 * s, w * 0.3, 11 * s); ctx.fillRect(x + w * 0.55, fy + 5 * s, w * 0.3, 11 * s);
+      ctx.fillStyle = "#8a7a66"; ctx.fillRect(x + 4 * s, fy + fh - 4 * s, w - 8 * s, 2 * s);
+    }
+    if (shop.en === "FLAMIO" && s > 0.25) { // rooftop FLAMIO sign
+      ctx.fillStyle = "#f26b1d"; ctx.fillRect(x + 4 * s, top - 14 * s, w - 8 * s, 12 * s);
+      ctx.fillStyle = "#fff7ed"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `900 ${Math.round(9 * s)}px system-ui, sans-serif`; ctx.fillText("FLAMIO", x + w / 2, top - 8 * s);
+    }
+    ctx.fillStyle = "#6b625a"; ctx.fillRect(x, p.y - h, w, h);
+    ctx.fillStyle = "#3f3a36"; ctx.fillRect(x + w * 0.12, p.y - h * 0.55, w * 0.76, h * 0.55);
+    // daylight shadow cast onto the footpath
+    ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.fillRect(side < 0 ? x + w : x - 10 * s, p.y - 2 * s, 10 * s, 3 * s);
     ctx.fillStyle = shop.bg; ctx.fillRect(x - 2 * s, p.y - h - 16 * s, w + 4 * s, 16 * s);
     if (s > 0.3) {
       ctx.fillStyle = "#fafaf9"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
