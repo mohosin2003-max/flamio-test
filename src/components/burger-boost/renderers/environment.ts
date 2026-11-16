@@ -330,8 +330,16 @@ export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
     const p = proj(d), s = p.scale;
     const side = (n & 1) === 0 ? 1 : -1;
     const bw = BOARD_W * s, bh = BOARD_H * s, ph = POST_H * s;
-    // fully outside the road + curb (curb is 6*s wide)
-    const x = side < 0 ? p.left - BOARD_SETBACK * s - bw : p.right + BOARD_SETBACK * s;
+    // Keep the complete left board (including its 10*s halo) on the sidewalk.
+    const rawX = side < 0 ? p.left - BOARD_SETBACK * s - bw : p.right + BOARD_SETBACK * s;
+    let x = rawX;
+    if (side < 0) {
+      const pad = Math.max(3, 10 * s);
+      const maxSafeX = Math.min(W - pad - bw, p.left - 6 * s - bw - 10 * s);
+      // No position can fit the unchanged board here without clipping or road overlap.
+      if (maxSafeX < pad) continue;
+      x = Math.min(maxSafeX, Math.max(pad, rawX));
+    }
     if (x > W || x + bw < 0) continue;
     const y = p.y - ph - bh;
     // fade in at the horizon, fade out as it sweeps past the screen edge
