@@ -9,7 +9,7 @@
  */
 export type SoundEvent =
   | "start" | "gate" | "correct" | "wrong" | "collect" | "hazard"
-  | "lane" | "gameOver" | "victory" | "milestone";
+  | "lane" | "gameOver" | "victory" | "milestone" | "horn";
 
 type Ctx = AudioContext;
 export type AudioFactory = () => Ctx | null;
@@ -102,7 +102,19 @@ function wobble(from: number, to: number, dur: number, cycles: number, depth: nu
   return pts;
 }
 
+/** Engine bus gain: the motorcycle sits above the music bed. */
+export const ENGINE_GAIN = 0.85;
+/** Single-cylinder firing rate (Hz) at idle / cruise / full throttle. */
+export const ENGINE_IDLE_HZ = 9, ENGINE_CRUISE_HZ = 13, ENGINE_BOOST_HZ = 18;
+
 export const SOUNDS: Record<SoundEvent, Note[]> = {
+  // Original dual-tone motorcycle horn ("beep-beep").
+  horn: [
+    n(0, 0.16, "square", 0.16, [[0, 415]], 0.004),
+    n(0, 0.16, "square", 0.12, [[0, 523]], 0.004),
+    n(0.2, 0.26, "square", 0.16, [[0, 415], [0.24, 405]], 0.004),
+    n(0.2, 0.26, "square", 0.12, [[0, 523], [0.24, 512]], 0.004),
+  ],
   // Race-launch whistle: rising zip, then a bright two-note flourish.
   start: [
     n(0, 0.16, "triangle", 0.30, [[0, 420], [0.14, 1250]]),
@@ -187,6 +199,41 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
   let disposed = false;
   let unsupported = false;
   const voices = new Set<OscillatorNode>();
+  // Motorcycle engine: sawtooth body + sub, amplitude-pulsed by a firing LFO.
+  let engineWanted = false;
+  let engineNodes: { osc: OscillatorNode; sub: OscillatorNode; lfo: OscillatorNode; lfoGain: GainNode; amp: GainNode; filter: BiquadFilterNode; out: GainNode } | null = null;
+  const stopEngineNodes = () => {
+    if (!engineNodes) return;
+    const e = engineNodes; engineNodes = null;
+    for (const o of [e.osc, e.sub, e.lfo]) { try { o.stop(); } catch { /* noop */ } try { o.disconnect(); } catch { /* noop */ } }
+    try { e.lfoGain.disconnect(); e.amp.disconnect(); e.filter.disconnect(); e.out.disconnect(); } catch { /* noop */ }
+  };
+  const ensureEngine = () => {
+    if (engineNodes || !engineWanted || muted || held || disposed || !ctx || !master) return;
+    try {
+      const t = ctx.currentTime;
+      const out = ctx.createGain(); out.gain.setValueAtTime(0.0001, t); out.gain.linearRampToValueAtTime(ENGINE_GAIN, t + 0.4);
+      const filter = ctx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 520; filter.Q.value = 3;
+      const amp = ctx.createGain(); amp.gain.value = 0.32;
+      const osc = ctx.createOscillator(); osc.type = "sawtooth"; osc.frequency.value = ENGINE_CRUISE_HZ * 8;
+      const sub = ctx.createOscillator(); sub.type = "square"; sub.frequency.value = ENGINE_CRUISE_HZ * 4;
+      const lfo = ctx.createOscillator(); lfo.type = "square"; lfo.frequency.value = ENGINE_CRUISE_HZ;
+      const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.28;
+      lfo.connect(lfoGain); lfoGain.connect(amp.gain);
+      osc.connect(amp); sub.connect(amp); amp.connect(filter); filter.connect(out); out.connect(master);
+      osc.start(t); sub.start(t); lfo.start(t);
+      engineNodes = { osc, sub, lfo, lfoGain, amp, filter, out };
+    } catch { engineNodes = null; }
+  };
+  const setEngineHz = (hz: number, ramp: number) => {
+    if (!engineNodes || !ctx) return;
+    try {
+      const t = ctx.currentTime, e = engineNodes;
+      for (const [param, v] of [[e.lfo.frequency, hz], [e.osc.frequency, hz * 8], [e.sub.frequency, hz * 4], [e.filter.frequency, 360 + hz * 28]] as const) {
+        param.cancelScheduledValues(t); param.setValueAtTime(param.value, t); param.linearRampToValueAtTime(v, t + ramp);
+      }
+    } catch { /* noop */ }
+  };
 
   const stopAll = () => {
     for (const o of voices) { try { o.stop(); } catch { /* already stopped */ } try { o.disconnect(); } catch { /* noop */ } }
@@ -250,6 +297,7 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
         held = false;
         if (ctx.state === "suspended") void ctx.resume().catch(() => {});
         ensureScheduler();
+        ensureEngine();
       } catch { unsupported = true; ctx = null; }
     },
     play(ev: SoundEvent) {
@@ -277,7 +325,17 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
     /** Legacy single toggle: mutes/unmutes SFX only (music has its own control). */
     setMuted(m: boolean) { muted = m; if (m) stopAll(); },
     isMuted: () => muted,
-    setSfxMuted(m: boolean) { muted = m; if (m) stopAll(); },
+    setSfxMuted(m: boolean) { muted = m; if (m) { stopAll(); stopEngineNodes(); } else ensureEngine(); },
+    /** Start the continuous motorcycle engine (idempotent). Follows the SFX mute. */
+    startEngine() { if (disposed) return; engineWanted = true; ensureEngine(); },
+    stopEngine() { engineWanted = false; stopEngineNodes(); },
+    isEngineRunning: () => engineNodes !== null,
+    /** Throttle 0 = idle, 0.5 = cruise, 1 = full boost; ramps smoothly. */
+    setThrottle(x: number) {
+      const v = Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0.5));
+      const hz = v < 0.5 ? ENGINE_IDLE_HZ + (ENGINE_CRUISE_HZ - ENGINE_IDLE_HZ) * v * 2 : ENGINE_CRUISE_HZ + (ENGINE_BOOST_HZ - ENGINE_CRUISE_HZ) * (v - 0.5) * 2;
+      setEngineHz(hz, 0.25);
+    },
     isSfxMuted: () => muted,
     setMusicMuted(m: boolean) {
       musicMuted = m;
@@ -291,14 +349,14 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
     isHeld: () => held,
     activeMusicVoices: () => musicVoices.size,
     /** Silence (pause / hidden tab). Resumed only via unlock() from a gesture. */
-    hold() { held = true; stopAll(); stopScheduler(); stopMusicVoices(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },
+    hold() { held = true; stopAll(); stopEngineNodes(); stopScheduler(); stopMusicVoices(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },
     stopAll,
     activeVoices: () => voices.size,
     hasContext: () => ctx !== null,
     hasCompressor: () => comp !== null,
     dispose() {
       if (disposed) return;
-      disposed = true; musicWanted = false; stopScheduler(); stopMusicVoices(); stopAll();
+      disposed = true; musicWanted = false; engineWanted = false; stopEngineNodes(); stopScheduler(); stopMusicVoices(); stopAll();
       try { comp?.disconnect(); sfxBus?.disconnect(); musicBus?.disconnect(); master?.disconnect(); } catch { /* noop */ }
       try { void ctx?.close().catch(() => {}); } catch { /* noop */ }
       ctx = null; master = null; comp = null; sfxBus = null; musicBus = null;

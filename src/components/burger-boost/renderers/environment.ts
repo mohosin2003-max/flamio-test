@@ -303,7 +303,7 @@ function loadBoards(): Board[] {
 
 const BOARD_EVERY = 3.5; // gate units, alternating sides
 /** Giant elevated boards: set far back from the curb and high above street level. */
-const BOARD_W = 210, BOARD_H = 145, POST_H = 150, BOARD_SETBACK = 60;
+const BOARD_W = 210, BOARD_H = 145, POST_H = 150, BOARD_SETBACK = 30;
 const PHOTO = 0.68;
 
 /** Largest bold font (≤ max) whose text fits maxW — shrinks instead of truncating. */

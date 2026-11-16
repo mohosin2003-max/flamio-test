@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX, Music } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX, Music, Megaphone } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -53,7 +53,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const liveRef = useRef<LiveSession | null>(null);
   const finalizeRef = useRef<(() => Promise<void>) | null>(null);
   const [isLive, setIsLive] = useState(false);
-  const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; text?: string } | null>(null);
+  const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; awarded?: number; text?: string } | null>(null);
   const submitFn = useServerFn(submitBurgerBoostGameplay);
   const expireFn = useServerFn(expireBurgerBoostSession);
   // Audio: one engine per mounted game, created lazily, disposed on unmount.
@@ -96,14 +96,14 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         }
         const r = await submitFn({ data: payload });
         setVerdict(r.ok && "verifiedScore" in r
-          ? { kind: "ok", score: r.verifiedScore }
+          ? { kind: "ok", score: r.verifiedScore, awarded: Number((r as { awardedDiscountPercent?: number }).awardedDiscountPercent ?? 0) || 0 }
           : { kind: "fail", text: r.error ?? "This game couldn't be verified." });
       } catch {
         setVerdict({ kind: "fail", text: "We couldn't reach the server to verify this game." });
       }
     });
     startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current); victoryPlayedRef.current = false;
-    audioRef.current?.play("start"); audioRef.current?.startMusic();
+    audioRef.current?.play("start"); audioRef.current?.startMusic(); audioRef.current?.startEngine(); audioRef.current?.setThrottle(0.5);
     setIsLive(true); setVerdict({ kind: "pending" });
     setPaused(false); setResult(null); setScreen("playing");
   }, [submitFn, expireFn]);
@@ -113,7 +113,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
     stateRef.current = createGame(practiceSeed(), gateCount, TIERED_RULES_VERSION); resetMascotAnim(mascot);
     startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current);
-    audioRef.current?.play("start"); audioRef.current?.startMusic();
+    audioRef.current?.play("start"); audioRef.current?.startMusic(); audioRef.current?.startEngine(); audioRef.current?.setThrottle(0.5);
     setPaused(false); setResult(null); setScreen("playing");
   }, [gateCount, unlockAudio]);
 
@@ -145,7 +145,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     const col = (v: string, f: string) => css.getPropertyValue(v).trim() || f;
     const C = { bg: col("--background", "#1c1714"), fg: col("--foreground", "#fff"), primary: col("--primary", "#f26b1d"), muted: col("--muted", "#333"), destructive: col("--destructive", "#e33") };
     const sched = gateSchedule(stateRef.current?.gateCount ?? gateCount, stateRef.current?.rulesVersion ?? OPERATION_RULES_VERSION);
-    let raf = 0; let lastHud = 0;
+    let raf = 0; let lastHud = 0; let revUntil = 0;
 
     let cssW = 0, cssH = 0;
     const resize = () => {
@@ -178,13 +178,16 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       if (s.phase === "running" || s.phase === "grace") s = { ...s, phase: phaseAt(elapsed) === "expired" ? "expired" : s.phase === "grace" || phaseAt(elapsed) === "grace" ? "grace" : "running" };
       stateRef.current = s;
       const snd = pickGateSound(sounds); if (snd) audioRef.current?.play(snd);
+      // engine: rev up on a gate, ease back to cruise shortly after
+      if (snd) { audioRef.current?.setThrottle(snd === "hazard" || snd === "wrong" ? 0.15 : 1); revUntil = now + 450; }
+      else if (revUntil && now > revUntil) { revUntil = 0; audioRef.current?.setThrottle(0.5); }
       draw(ctx, cssW, cssH, s, elapsed, sched, C, flashRef.current, now);
       if (now - lastHud > 100) {
         lastHud = now;
         setHud({ score: s.score, meter: s.meter, v2: isMeterRules(s.rulesVersion), elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
       }
       if (s.phase === "finished" || s.phase === "expired") {
-        const a = audioRef.current; a?.stopAll(); a?.stopMusic();
+        const a = audioRef.current; a?.stopEngine(); a?.stopAll(); a?.stopMusic();
         if (s.phase === "finished" && !liveRef.current) { victoryPlayedRef.current = true; a?.play("victory"); } else a?.play("gameOver");
         setResult(s); setScreen("over"); void finalizeRef.current?.(); return; }
       raf = requestAnimationFrame(frame);
@@ -204,7 +207,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     <div ref={rootRef} className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground">
       {screen === "playing" && (
         <>
-          <Hud live={isLive} v2={hud.v2} meter={hud.meter} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)}
+          <Hud live={isLive} v2={hud.v2} discount={isLive ? 0 : storeDiscountPreview(DRAFT_SETTINGS.ownerMax, hud.meter)} meter={hud.meter} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)}
             muted={muted} onMute={() => { const m = !muted; if (!m) unlockAudio(); audio().setSfxMuted(m); setMuted(m); }}
             musicMuted={musicMuted} onMusicMute={() => { const m = !musicMuted; if (!m) unlockAudio(); audio().setMusicMuted(m); setMusicMuted(m); }} />
           <div
@@ -217,8 +220,9 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             }}
           >
             <canvas ref={canvasRef} className="h-full w-full" aria-label="Burger Boost track" role="img" />
-            <div className="absolute inset-x-0 bottom-0 grid grid-cols-2 gap-2 p-3">
+            <div className="absolute inset-x-0 bottom-0 grid grid-cols-[1fr_auto_1fr] gap-2 p-3">
               <Button size="lg" variant="secondary" className="h-16 text-base" onPointerDown={() => setLane(0)} aria-label="Move to left lane"><ChevronLeft className="size-6" /> Left</Button>
+              <Button size="icon" variant="outline" className="size-16 rounded-full" disabled={paused} onPointerDown={() => { if (!pausedRef.current) audioRef.current?.play("horn"); }} aria-label="Sound the horn"><Megaphone className="size-6" /></Button>
               <Button size="lg" variant="secondary" className="h-16 text-base" onPointerDown={() => setLane(1)} aria-label="Move to right lane">Right <ChevronRight className="size-6" /></Button>
             </div>
             {paused && (
@@ -252,28 +256,38 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
 
       {screen === "over" && result && (
         <Overlay>
-          <h2 className="font-display text-3xl font-black">{result.phase === "expired" ? "Time’s up!" : "Finished!"}</h2>
-          {isLive ? (
-            verdict?.kind === "ok" ? (<>
-              <p className="font-display text-6xl font-black text-primary">{verdict.score}</p>
-              <p className="text-sm text-muted-foreground">verified score</p>
-            </>) : verdict?.kind === "fail" ? <p role="status" className="text-sm text-destructive">{verdict.text}</p>
-              : <p role="status" className="text-sm text-muted-foreground">Verifying your game…</p>
-          ) : (<>
-            <p className={result.meter > 0 ? "font-display text-6xl font-black text-primary" : "font-display text-6xl font-black text-destructive"}>{result.meter}</p>
-            <p className="text-sm text-muted-foreground">FLAMIO Boost Power</p>
-            <p className="text-sm">Store discount: <b>{storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter)}%</b></p>
-            {result.meter <= 0 && <p className="text-sm text-muted-foreground">Boost Power at or below 0 — in a reward game this would earn no coupon.</p>}
-          </>)}
+          {(() => {
+            const awarded = isLive && verdict?.kind === "ok" ? Math.max(0, Math.floor(verdict.awarded ?? 0)) : 0;
+            const preview = isLive ? 0 : storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter);
+            const pending = isLive && verdict?.kind === "pending";
+            const won = awarded > 0;
+            if (pending) return <p role="status" className="text-sm text-muted-foreground">Checking your game with Flamio…</p>;
+            if (isLive && verdict?.kind === "fail") return <><h2 className="font-display text-4xl font-black">YOU LOST</h2><p role="status" className="text-sm text-destructive">{verdict.text}</p><p className="font-display text-xl font-bold text-primary">TRY AGAIN</p></>;
+            if (won) return <div className="animate-in zoom-in-90 fade-in duration-500 space-y-1">
+              <h2 className="font-display text-5xl font-black text-primary">YOU WON!</h2>
+              <p className="font-display text-3xl font-black">{awarded}% DISCOUNT</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-muted-foreground">A gift from FLAMIO</p>
+            </div>;
+            if (!isLive && preview > 0) return <div className="animate-in fade-in duration-500 space-y-1">
+              <h2 className="font-display text-4xl font-black text-primary">GREAT RIDE!</h2>
+              <p className="font-display text-2xl font-black">{preview}% practice score</p>
+              <p className="text-xs text-muted-foreground">Practice games never give a real discount. Play a reward game to win one.</p>
+            </div>;
+            return <div className="animate-in fade-in duration-500 space-y-1">
+              <h2 className="font-display text-5xl font-black">YOU LOST</h2>
+              <p className="font-display text-2xl font-bold text-primary">TRY AGAIN</p>
+            </div>;
+          })()}
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
-            ? <VictoryCat layers={result.layers} loss={result.meter <= 0} />
+            ? <VictoryCat layers={result.layers} loss={isLive ? !((verdict?.awarded ?? 0) > 0) : storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter) <= 0} />
             : <BurgerStack layers={result.layers} />}
           <dl className="grid w-full grid-cols-2 gap-2 text-sm">
             <Stat label="Layers" value={result.layers.length} />
             <Stat label="Spoiled" value={result.spoiledHits} />
           </dl>
-          <p className="text-xs text-muted-foreground">{isLive ? "Saved game — score checked by Flamio. Discount: 0%." : "Practice result — not saved. No coupon."}</p>
-          <Button size="lg" className="w-full" onClick={start}><RotateCcw className="size-5" /> {isLive ? "Play practice" : "Play again"}</Button>
+          {isLive && verdict?.kind === "ok" && (verdict.awarded ?? 0) > 0
+            ? <Button asChild size="lg" className="w-full"><Link to="/account/vouchers">CLAIM &amp; USE DISCOUNT</Link></Button>
+            : <Button size="lg" className="w-full" onClick={start}><RotateCcw className="size-5" /> {isLive ? "Play practice" : "Try again"}</Button>}
           <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
       )}
@@ -281,7 +295,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   );
 }
 
-function Hud(p: { live: boolean; v2: boolean; meter: number; score: number; remaining: number; grace: boolean; graceLeft: number; stack: number; gate: number; total: number; onPause: () => void; muted: boolean; onMute: () => void; musicMuted: boolean; onMusicMute: () => void }) {
+function Hud(p: { live: boolean; v2: boolean; discount: number; meter: number; score: number; remaining: number; grace: boolean; graceLeft: number; stack: number; gate: number; total: number; onPause: () => void; muted: boolean; onMute: () => void; musicMuted: boolean; onMusicMute: () => void }) {
   const shown = Math.max(0, Math.min(100, p.meter));
   return (
     <div className="space-y-2 border-b border-border bg-card/80 px-3 py-2">
@@ -296,19 +310,18 @@ function Hud(p: { live: boolean; v2: boolean; meter: number; score: number; rema
           <Button size="icon" variant="ghost" className="size-11" onClick={p.onPause} aria-label="Pause"><Pause className="size-5" /></Button>
         </div>
       </div>
-      {p.v2 ? (
-        <div>
-          <div className="mb-1 flex items-end justify-between gap-2">
-            <div className="flex items-baseline gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">FLAMIO Boost Power</span><span className={p.meter > 0 ? "font-display text-xl font-black text-primary" : "font-display text-xl font-black text-destructive"}>{p.meter}</span></div>
-            <div className="text-right leading-none"><span className="block text-[9px] uppercase tracking-widest text-muted-foreground">Store discount</span><span className="font-display text-sm font-bold">{storeDiscountPreview(DRAFT_SETTINGS.ownerMax, p.meter)}%</span></div>
-          </div>
-          <div className="relative h-3 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={100} aria-valuenow={p.meter} aria-label="Boost power">
-            <div className={p.meter > 0 ? "absolute inset-y-0 left-0 bg-primary transition-all" : "absolute inset-y-0 left-0 bg-destructive transition-all"} style={{ width: `${p.meter > 0 ? shown : Math.min(100, -p.meter)}%` }} />
-          </div>
+      <div className="flex items-center gap-3">
+        <div className="flex min-w-[7.5rem] flex-col items-center rounded-xl border-2 border-primary bg-background px-4 py-1 shadow-lg" aria-live="polite">
+          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Discount</span>
+          <span key={p.discount} className="font-display text-3xl font-black leading-none animate-in zoom-in-75 fade-in duration-300">{p.discount}%</span>
         </div>
-      ) : (
-        <p className="text-center text-[11px] text-muted-foreground">Saved game — result is checked by Flamio after the run.</p>
-      )}
+        {p.v2 ? (
+          <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={100} aria-valuenow={p.meter} aria-label="Boost">
+            <div className="absolute inset-y-0 left-0 bg-primary transition-all" style={{ width: `${shown}%` }} />
+          </div>
+        ) : <p className="flex-1 text-[11px] text-muted-foreground">Saved game — checked by Flamio after the run.</p>}
+      </div>
+      {p.live && <p className="text-center text-[10px] text-muted-foreground">Discount shows only what Flamio has verified.</p>}
     </div>
   );
 }
@@ -341,7 +354,7 @@ function VictoryCat({ layers, loss }: { layers: Ingredient[]; loss: boolean }) {
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
   }, [layers, loss]);
-  return <canvas ref={ref} className="size-[220px]" role="img" aria-label={loss ? "FLAMIO Cat looks disappointed holding the burger" : "FLAMIO Cat bites the burger"} />;
+  return <canvas ref={ref} className="size-[220px]" role="img" aria-label={loss ? "FLAMIO rider looks disappointed holding the burger" : "FLAMIO rider bites the burger and celebrates"} />;
 }
 function BurgerStack({ layers }: { layers: Ingredient[] }) {
   return (
@@ -381,11 +394,11 @@ function draw(ctx: CanvasRenderingContext2D, W: number, H: number, s: GameState,
     drawGate(ctx, s.track[i]!, proj(d), C, now, i, s.gateCount);
   }
 
-  // FLAMIO Cat mascot (presentation only; reads already-resolved state)
+  // FLAMIO delivery rider (presentation only; reads already-resolved state)
   const p = proj(1);
   const targetX = s.lane === 0 ? (p.left + W / 2) / 2 : (p.right + W / 2) / 2;
   const laneX = updateMascot(mascot, s.lane, targetX, s.layers.length, s.spoiledHits, now);
-  drawMascot(ctx, mascot, laneX, playerY + 30, 92, s.layers, now);
+  drawMascot(ctx, mascot, laneX, playerY + 30, 92, s.layers, now, pos);
   const y = playerY - 110;
   if (flash && now - flash.at < 700) {
     ctx.globalAlpha = 1 - (now - flash.at) / 700;
