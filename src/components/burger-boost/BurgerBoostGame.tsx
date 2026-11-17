@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX, Music, Megaphone } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX, Music } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -103,7 +103,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       }
     });
     startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current); victoryPlayedRef.current = false;
-    audioRef.current?.play("start"); audioRef.current?.startMusic(); audioRef.current?.startEngine(); audioRef.current?.setThrottle(0.5);
+    audioRef.current?.play("start"); audioRef.current?.startMusic();
     setIsLive(true); setVerdict({ kind: "pending" });
     setPaused(false); setResult(null); setScreen("playing");
   }, [submitFn, expireFn]);
@@ -113,7 +113,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     liveRef.current = null; finalizeRef.current = null; setIsLive(false); setVerdict(null);
     stateRef.current = createGame(practiceSeed(), gateCount, TIERED_RULES_VERSION); resetMascotAnim(mascot);
     startRef.current = performance.now(); clockRef.current = createPauseClock(startRef.current);
-    audioRef.current?.play("start"); audioRef.current?.startMusic(); audioRef.current?.startEngine(); audioRef.current?.setThrottle(0.5);
+    audioRef.current?.play("start"); audioRef.current?.startMusic();
     setPaused(false); setResult(null); setScreen("playing");
   }, [gateCount, unlockAudio]);
 
@@ -145,7 +145,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     const col = (v: string, f: string) => css.getPropertyValue(v).trim() || f;
     const C = { bg: col("--background", "#1c1714"), fg: col("--foreground", "#fff"), primary: col("--primary", "#f26b1d"), muted: col("--muted", "#333"), destructive: col("--destructive", "#e33") };
     const sched = gateSchedule(stateRef.current?.gateCount ?? gateCount, stateRef.current?.rulesVersion ?? OPERATION_RULES_VERSION);
-    let raf = 0; let lastHud = 0; let revUntil = 0;
+    let raf = 0; let lastHud = 0;
 
     let cssW = 0, cssH = 0;
     const resize = () => {
@@ -178,16 +178,13 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       if (s.phase === "running" || s.phase === "grace") s = { ...s, phase: phaseAt(elapsed) === "expired" ? "expired" : s.phase === "grace" || phaseAt(elapsed) === "grace" ? "grace" : "running" };
       stateRef.current = s;
       const snd = pickGateSound(sounds); if (snd) audioRef.current?.play(snd);
-      // engine: rev up on a gate, ease back to cruise shortly after
-      if (snd) { audioRef.current?.setThrottle(snd === "hazard" || snd === "wrong" ? 0.15 : 1); revUntil = now + 450; }
-      else if (revUntil && now > revUntil) { revUntil = 0; audioRef.current?.setThrottle(0.5); }
       draw(ctx, cssW, cssH, s, elapsed, sched, C, flashRef.current, now);
       if (now - lastHud > 100) {
         lastHud = now;
         setHud({ score: s.score, meter: s.meter, v2: isMeterRules(s.rulesVersion), elapsed, stack: stackPercent(s), gate: s.nextGate, layers: s.layers });
       }
       if (s.phase === "finished" || s.phase === "expired") {
-        const a = audioRef.current; a?.stopEngine(); a?.stopAll(); a?.stopMusic();
+        const a = audioRef.current; a?.stopAll(); a?.stopMusic();
         if (s.phase === "finished" && !liveRef.current) { victoryPlayedRef.current = true; a?.play("victory"); } else a?.play("gameOver");
         setResult(s); setScreen("over"); void finalizeRef.current?.(); return; }
       raf = requestAnimationFrame(frame);
@@ -207,7 +204,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     <div ref={rootRef} className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground">
       {screen === "playing" && (
         <>
-          <Hud live={isLive} v2={hud.v2} discount={isLive ? 0 : storeDiscountPreview(DRAFT_SETTINGS.ownerMax, hud.meter)} meter={hud.meter} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)}
+          <Hud live={isLive} v2={hud.v2} discount={storeDiscountPreview(DRAFT_SETTINGS.ownerMax, hud.meter)} meter={hud.meter} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)}
             muted={muted} onMute={() => { const m = !muted; if (!m) unlockAudio(); audio().setSfxMuted(m); setMuted(m); }}
             musicMuted={musicMuted} onMusicMute={() => { const m = !musicMuted; if (!m) unlockAudio(); audio().setMusicMuted(m); setMusicMuted(m); }} />
           <div
@@ -220,9 +217,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             }}
           >
             <canvas ref={canvasRef} className="h-full w-full" aria-label="Burger Boost track" role="img" />
-            <div className="absolute inset-x-0 bottom-0 grid grid-cols-[1fr_auto_1fr] gap-2 p-3">
+            <div className="absolute inset-x-0 bottom-0 grid grid-cols-2 gap-2 p-3">
               <Button size="lg" variant="secondary" className="h-16 text-base" onPointerDown={() => setLane(0)} aria-label="Move to left lane"><ChevronLeft className="size-6" /> Left</Button>
-              <Button size="icon" variant="outline" className="size-16 rounded-full" disabled={paused} onPointerDown={() => { if (!pausedRef.current) audioRef.current?.play("horn"); }} aria-label="Sound the horn"><Megaphone className="size-6" /></Button>
               <Button size="lg" variant="secondary" className="h-16 text-base" onPointerDown={() => setLane(1)} aria-label="Move to right lane">Right <ChevronRight className="size-6" /></Button>
             </div>
             {paused && (

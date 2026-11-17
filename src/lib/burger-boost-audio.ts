@@ -9,7 +9,7 @@
  */
 export type SoundEvent =
   | "start" | "gate" | "correct" | "wrong" | "collect" | "hazard"
-  | "lane" | "gameOver" | "victory" | "milestone" | "horn";
+  | "lane" | "gameOver" | "victory" | "milestone";
 
 type Ctx = AudioContext;
 export type AudioFactory = () => Ctx | null;
@@ -27,7 +27,7 @@ export const BGM_BASS_OCTAVE = 2;
 /** Sound-effects bus gain. */
 export const SFX_GAIN = 1;
 /** Background music tempo. */
-export const BGM_BPM = 128;
+export const BGM_BPM = 140;
 /** One step = an eighth note at BGM_BPM (seconds). */
 export const BGM_STEP_SEC = 60 / BGM_BPM / 2;
 /** Max simultaneous music oscillators (separate from the SFX cap). */
@@ -42,25 +42,20 @@ export function isMilestoneGate(passedGates: number): boolean {
 }
 
 /**
- * Original pentatonic loop (C-major pentatonic: C D E G A), 32 eighth-note
- * steps = 4 bars of 4/4. `lead`/`bass` are Hz or 0 (rest). Not derived from
- * any existing commercial song.
+ * Original driving arcade-racer loop in A minor (Am – F – C – G), 32
+ * eighth-note steps = 4 bars of 4/4. Pulsing octave bass on every step, a
+ * syncopated square lead and an off-beat hi-hat tick. `lead`/`bass`/`hat` are
+ * Hz or 0 (rest). Composed for this game; not derived from any existing song.
  */
-const C4 = 261.63, D4 = 293.66, E4 = 329.63, G4 = 392.0, A4 = 440.0, C5 = 523.25, D5 = 587.33, E5 = 659.25;
-const C3 = 130.81, G2 = 98.0, A2 = 110.0, E3 = 164.81;
-export const BGM_PATTERN: ReadonlyArray<{ lead: number; bass: number }> = [
-  // bar 1
-  { lead: E4, bass: C3 }, { lead: 0, bass: 0 }, { lead: G4, bass: 0 }, { lead: A4, bass: C3 },
-  { lead: G4, bass: 0 }, { lead: 0, bass: 0 }, { lead: E4, bass: C3 }, { lead: D4, bass: 0 },
-  // bar 2
-  { lead: C4, bass: A2 }, { lead: 0, bass: 0 }, { lead: D4, bass: 0 }, { lead: E4, bass: A2 },
-  { lead: G4, bass: 0 }, { lead: 0, bass: 0 }, { lead: E4, bass: A2 }, { lead: 0, bass: 0 },
-  // bar 3
-  { lead: A4, bass: G2 }, { lead: 0, bass: 0 }, { lead: C5, bass: 0 }, { lead: D5, bass: G2 },
-  { lead: C5, bass: 0 }, { lead: A4, bass: 0 }, { lead: G4, bass: G2 }, { lead: 0, bass: 0 },
-  // bar 4
-  { lead: E5, bass: E3 }, { lead: D5, bass: 0 }, { lead: C5, bass: 0 }, { lead: A4, bass: E3 },
-  { lead: G4, bass: 0 }, { lead: E4, bass: 0 }, { lead: D4, bass: C3 }, { lead: 0, bass: 0 },
+const A4 = 440.0, B4 = 493.88, C5 = 523.25, D5 = 587.33, E5 = 659.25, F5 = 698.46, G5 = 783.99, A5 = 880.0;
+const BA = 110.0, BF = 174.61, BC = 130.81, BG = 98.0;
+const HAT = 2400;
+const bar = (b: number, lead: number[]) => lead.map((l, i) => ({ lead: l, bass: i % 2 === 0 ? b : b * 2, hat: i % 2 === 1 ? HAT : 0 }));
+export const BGM_PATTERN: ReadonlyArray<{ lead: number; bass: number; hat: number }> = [
+  ...bar(BA, [A4, 0, C5, E5, 0, D5, C5, B4]),
+  ...bar(BF, [A4, 0, C5, F5, 0, E5, C5, 0]),
+  ...bar(BC, [G5, 0, E5, C5, 0, D5, E5, G5]),
+  ...bar(BG, [A5, 0, G5, E5, D5, 0, B4, 0]),
 ];
 
 export type TimerApi = { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
@@ -102,19 +97,7 @@ function wobble(from: number, to: number, dur: number, cycles: number, depth: nu
   return pts;
 }
 
-/** Engine bus gain: the motorcycle sits above the music bed. */
-export const ENGINE_GAIN = 0.85;
-/** Single-cylinder firing rate (Hz) at idle / cruise / full throttle. */
-export const ENGINE_IDLE_HZ = 9, ENGINE_CRUISE_HZ = 13, ENGINE_BOOST_HZ = 18;
-
 export const SOUNDS: Record<SoundEvent, Note[]> = {
-  // Original dual-tone motorcycle horn ("beep-beep").
-  horn: [
-    n(0, 0.16, "square", 0.16, [[0, 415]], 0.004),
-    n(0, 0.16, "square", 0.12, [[0, 523]], 0.004),
-    n(0.2, 0.26, "square", 0.16, [[0, 415], [0.24, 405]], 0.004),
-    n(0.2, 0.26, "square", 0.12, [[0, 523], [0.24, 512]], 0.004),
-  ],
   // Race-launch whistle: rising zip, then a bright two-note flourish.
   start: [
     n(0, 0.16, "triangle", 0.30, [[0, 420], [0.14, 1250]]),
@@ -199,42 +182,6 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
   let disposed = false;
   let unsupported = false;
   const voices = new Set<OscillatorNode>();
-  // Motorcycle engine: sawtooth body + sub, amplitude-pulsed by a firing LFO.
-  let engineWanted = false;
-  let engineNodes: { osc: OscillatorNode; sub: OscillatorNode; lfo: OscillatorNode; lfoGain: GainNode; amp: GainNode; filter: BiquadFilterNode; out: GainNode } | null = null;
-  const stopEngineNodes = () => {
-    if (!engineNodes) return;
-    const e = engineNodes; engineNodes = null;
-    for (const o of [e.osc, e.sub, e.lfo]) { try { o.stop(); } catch { /* noop */ } try { o.disconnect(); } catch { /* noop */ } }
-    try { e.lfoGain.disconnect(); e.amp.disconnect(); e.filter.disconnect(); e.out.disconnect(); } catch { /* noop */ }
-  };
-  const ensureEngine = () => {
-    if (engineNodes || !engineWanted || muted || held || disposed || !ctx || !master) return;
-    try {
-      const t = ctx.currentTime;
-      const out = ctx.createGain(); out.gain.setValueAtTime(0.0001, t); out.gain.linearRampToValueAtTime(ENGINE_GAIN, t + 0.4);
-      const filter = ctx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 520; filter.Q.value = 3;
-      const amp = ctx.createGain(); amp.gain.value = 0.32;
-      const osc = ctx.createOscillator(); osc.type = "sawtooth"; osc.frequency.value = ENGINE_CRUISE_HZ * 8;
-      const sub = ctx.createOscillator(); sub.type = "square"; sub.frequency.value = ENGINE_CRUISE_HZ * 4;
-      const lfo = ctx.createOscillator(); lfo.type = "square"; lfo.frequency.value = ENGINE_CRUISE_HZ;
-      const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.28;
-      lfo.connect(lfoGain); lfoGain.connect(amp.gain);
-      osc.connect(amp); sub.connect(amp); amp.connect(filter); filter.connect(out); out.connect(master);
-      osc.start(t); sub.start(t); lfo.start(t);
-      engineNodes = { osc, sub, lfo, lfoGain, amp, filter, out };
-    } catch { engineNodes = null; }
-  };
-  const setEngineHz = (hz: number, ramp: number) => {
-    if (!engineNodes || !ctx) return;
-    try {
-      const t = ctx.currentTime, e = engineNodes;
-      for (const [param, v] of [[e.lfo.frequency, hz], [e.osc.frequency, hz * 8], [e.sub.frequency, hz * 4], [e.filter.frequency, 360 + hz * 28]] as const) {
-        param.cancelScheduledValues(t); param.setValueAtTime(param.value, t); param.linearRampToValueAtTime(v, t + ramp);
-      }
-    } catch { /* noop */ }
-  };
-
   const stopAll = () => {
     for (const o of voices) { try { o.stop(); } catch { /* already stopped */ } try { o.disconnect(); } catch { /* noop */ } }
     voices.clear();
@@ -263,8 +210,9 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
       if (nextStepTime < ctx.currentTime) nextStepTime = ctx.currentTime + 0.05;
       while (nextStepTime < horizon) {
         const st = BGM_PATTERN[step % BGM_PATTERN.length]!;
-        if (st.bass) musicVoice(st.bass * BGM_BASS_OCTAVE, nextStepTime, BGM_STEP_SEC * 1.8, "triangle", BGM_BASS_VOL);
+        if (st.bass) musicVoice(st.bass * BGM_BASS_OCTAVE, nextStepTime, BGM_STEP_SEC * 0.95, "triangle", BGM_BASS_VOL);
         if (st.lead) musicVoice(st.lead, nextStepTime, BGM_STEP_SEC * 0.9, "square", BGM_LEAD_VOL);
+        if (st.hat) musicVoice(st.hat, nextStepTime, 0.03, "triangle", BGM_LEAD_VOL * 0.35);
         nextStepTime += BGM_STEP_SEC; step++;
       }
     } catch { /* music must never break gameplay */ }
@@ -297,7 +245,6 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
         held = false;
         if (ctx.state === "suspended") void ctx.resume().catch(() => {});
         ensureScheduler();
-        ensureEngine();
       } catch { unsupported = true; ctx = null; }
     },
     play(ev: SoundEvent) {
@@ -325,17 +272,7 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
     /** Legacy single toggle: mutes/unmutes SFX only (music has its own control). */
     setMuted(m: boolean) { muted = m; if (m) stopAll(); },
     isMuted: () => muted,
-    setSfxMuted(m: boolean) { muted = m; if (m) { stopAll(); stopEngineNodes(); } else ensureEngine(); },
-    /** Start the continuous motorcycle engine (idempotent). Follows the SFX mute. */
-    startEngine() { if (disposed) return; engineWanted = true; ensureEngine(); },
-    stopEngine() { engineWanted = false; stopEngineNodes(); },
-    isEngineRunning: () => engineNodes !== null,
-    /** Throttle 0 = idle, 0.5 = cruise, 1 = full boost; ramps smoothly. */
-    setThrottle(x: number) {
-      const v = Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0.5));
-      const hz = v < 0.5 ? ENGINE_IDLE_HZ + (ENGINE_CRUISE_HZ - ENGINE_IDLE_HZ) * v * 2 : ENGINE_CRUISE_HZ + (ENGINE_BOOST_HZ - ENGINE_CRUISE_HZ) * (v - 0.5) * 2;
-      setEngineHz(hz, 0.25);
-    },
+    setSfxMuted(m: boolean) { muted = m; if (m) stopAll(); },
     isSfxMuted: () => muted,
     setMusicMuted(m: boolean) {
       musicMuted = m;
@@ -349,14 +286,14 @@ export function createAudioEngine(factory: AudioFactory = defaultFactory, timers
     isHeld: () => held,
     activeMusicVoices: () => musicVoices.size,
     /** Silence (pause / hidden tab). Resumed only via unlock() from a gesture. */
-    hold() { held = true; stopAll(); stopEngineNodes(); stopScheduler(); stopMusicVoices(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },
+    hold() { held = true; stopAll(); stopScheduler(); stopMusicVoices(); try { if (ctx?.state === "running") void ctx.suspend().catch(() => {}); } catch { /* noop */ } },
     stopAll,
     activeVoices: () => voices.size,
     hasContext: () => ctx !== null,
     hasCompressor: () => comp !== null,
     dispose() {
       if (disposed) return;
-      disposed = true; musicWanted = false; engineWanted = false; stopEngineNodes(); stopScheduler(); stopMusicVoices(); stopAll();
+      disposed = true; musicWanted = false; stopScheduler(); stopMusicVoices(); stopAll();
       try { comp?.disconnect(); sfxBus?.disconnect(); musicBus?.disconnect(); master?.disconnect(); } catch { /* noop */ }
       try { void ctx?.close().catch(() => {}); } catch { /* noop */ }
       ctx = null; master = null; comp = null; sfxBus = null; musicBus = null;
