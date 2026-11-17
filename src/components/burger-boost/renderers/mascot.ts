@@ -1,5 +1,5 @@
 /**
- * FLAMIO delivery rider on a classic motorcycle (procedural Canvas 2D, visual only, browser only).
+ * FLAMIO Cat riding a classic motorcycle (procedural Canvas 2D, visual only, browser only).
  * Animation is driven by the caller's existing `now` timestamp and by
  * already-resolved game state (lane, layers, spoiledHits). It never decides
  * lanes, outcomes, score or timing.
@@ -390,41 +390,69 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
     ctx.fillStyle = RG.tank; ctx.beginPath(); ctx.ellipse(0, -76, 18, 9, 0, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.ellipse(0, -76, 14, 6, 0, 0, Math.PI * 2); ctx.stroke();
 
-    // rider: legs gripping the tank, boots on pegs
-    ctx.fillStyle = "#1e293b";
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 10, -70); ctx.quadraticCurveTo(s * 24, -64, s * 22, -50); ctx.lineTo(s * 16, -50); ctx.quadraticCurveTo(s * 16, -60, s * 6, -64); ctx.closePath(); ctx.fill(); }
-    ctx.fillStyle = "#0c0a09"; for (const s of [-1, 1]) { ctx.beginPath(); ctx.roundRect(s * 19 - 4, -52, 8, 6, 2); ctx.fill(); }
+    // FLAMIO Cat rider: furry hind legs hugging the tank, paws resting on the pegs
+    for (const sd of [-1, 1]) {
+      ctx.fillStyle = FUR_DARK; ctx.beginPath(); ctx.moveTo(sd * 10, -70); ctx.quadraticCurveTo(sd * 24, -64, sd * 22, -50); ctx.lineTo(sd * 16, -50); ctx.quadraticCurveTo(sd * 16, -60, sd * 6, -64); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = FUR; ctx.beginPath(); ctx.moveTo(sd * 11, -69); ctx.quadraticCurveTo(sd * 21, -64, sd * 20, -53); ctx.lineTo(sd * 17, -53); ctx.quadraticCurveTo(sd * 17, -61, sd * 8, -65); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(sd * 19, -49.5, 4.5, 3, 0, 0, Math.PI * 2); ctx.fill(); // hind paw on peg
+    }
 
-    // handlebars + mirrors + hands (both hands on grips)
+    // handlebars + mirrors
     const sway = Math.sin(now / 420) * 0.8;
     ctx.strokeStyle = CHROME; ctx.lineWidth = 2.2; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(-28, -90); ctx.quadraticCurveTo(0, -84, 28, -90); ctx.stroke();
-    ctx.lineWidth = 1; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 22, -89); ctx.lineTo(s * 26, -101); ctx.stroke(); ctx.fillStyle = CHROME_DARK; ctx.beginPath(); ctx.ellipse(s * 27, -103, 4, 3, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "rgba(186,230,253,0.7)"; ctx.beginPath(); ctx.ellipse(s * 27, -103, 2.8, 2, 0, 0, Math.PI * 2); ctx.fill(); }
-    // arms: shoulders -> bent elbows (out and down) -> gloves wrapped on the grips
-    for (const s of [-1, 1] as const) {
-      const sy = -97 + sway * s * 0.3, ex = s * 25, ey = -93 + sway * s * 0.2;
-      ctx.strokeStyle = JACKET_DARK; ctx.lineWidth = 7.5; ctx.beginPath(); ctx.moveTo(s * 12, sy); ctx.lineTo(ex, ey); ctx.lineTo(s * 26, -89.5); ctx.stroke();
-      ctx.strokeStyle = JACKET; ctx.lineWidth = 5.5; ctx.stroke();
-      ctx.fillStyle = "#111827"; ctx.beginPath(); ctx.ellipse(s * 26.5, -89.5, 3.8, 3, 0, 0, Math.PI * 2); ctx.fill(); // gloves on grips
-      ctx.fillStyle = "#374151"; ctx.fillRect(s * 26.5 - 1.5, -91.5, 3, 1.2); // knuckle fold
+    ctx.lineWidth = 1; for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sd * 22, -89); ctx.lineTo(sd * 26, -101); ctx.stroke(); ctx.fillStyle = CHROME_DARK; ctx.beginPath(); ctx.ellipse(sd * 27, -103, 4, 3, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "rgba(186,230,253,0.7)"; ctx.beginPath(); ctx.ellipse(sd * 27, -103, 2.8, 2, 0, 0, Math.PI * 2); ctx.fill(); }
+    // furry front legs: jacket sleeve at the shoulder, orange fur forearm, paw wrapped on each grip
+    for (const sd of [-1, 1] as const) {
+      const sy = -97 + sway * sd * 0.3, ex = sd * 25, ey = -93 + sway * sd * 0.2;
+      ctx.strokeStyle = JACKET_DARK; ctx.lineWidth = 7.5; ctx.beginPath(); ctx.moveTo(sd * 12, sy); ctx.lineTo(sd * 19, (sy + ey) / 2); ctx.stroke();
+      ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 6.5; ctx.beginPath(); ctx.moveTo(sd * 18, (sy + ey) / 2); ctx.lineTo(ex, ey); ctx.lineTo(sd * 26, -89.5); ctx.stroke();
+      ctx.strokeStyle = FUR; ctx.lineWidth = 4.5; ctx.stroke();
+      // paw gripping the bar: cream pad cupping the grip + toe beans over the top
+      ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(sd * 26.5, -89.5, 4.2, 3.4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(sd * 26.5, -88.4, 3, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = FUR_DARK; for (const k of [-1.6, 0, 1.6]) ctx.fillRect(sd * 26.5 + k - 0.3, -92.6, 0.6, 2);
     }
     ctx.lineCap = "butt";
 
-    // seat cushion the rider sits on
+    // seat cushion the cat sits on
     ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.ellipse(0, -69, 16, 4.5, 0, 0, Math.PI * 2); ctx.fill();
-    // torso (FLAMIO jacket, back view), leaning forward into the ride
+    // torso: FLAMIO delivery jacket (back view), leaning forward into the ride
     ctx.save(); ctx.translate(0, -70); ctx.scale(1, 0.94); ctx.translate(0, 70);
     ctx.fillStyle = RG.jacket; ctx.beginPath(); ctx.moveTo(-14, -70); ctx.quadraticCurveTo(-17, -96, -11, -102); ctx.lineTo(11, -102); ctx.quadraticCurveTo(17, -96, 14, -70); ctx.closePath(); ctx.fill();
     ctx.fillStyle = REFLECT; ctx.fillRect(-14.5, -80, 29, 2.4);
     ctx.fillStyle = "#fff7ed"; ctx.font = "900 6px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("FLAMIO", 0, -91);
-
     ctx.restore();
-    // helmet with visor glint (rear view); head counter-leans to stay level in a bank
-    const hy = -106 + sway * 0.3;
-    ctx.save(); ctx.translate(0, hy); ctx.rotate(-bank * 0.5); ctx.translate(0, -hy);
-    ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.ellipse(0, hy, 9.5, 10.5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = JACKET; ctx.fillRect(-1.6, hy - 10, 3.2, 20); // racing stripe
-    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.ellipse(-4, hy - 5, 3, 1.6, -0.5, 0, Math.PI * 2); ctx.fill();
+
+    // cat head (seen from behind, turning to glance back now and then), counter-leaning to stay level
+    const hy = -108 + sway * 0.3, look = glanceAmount(now);
+    ctx.save(); ctx.translate(0, hy); ctx.rotate(-bank * 0.5);
+    // ears (outer fur + pink inner)
+    for (const sd of [-1, 1]) {
+      ctx.fillStyle = FUR_DARK; ctx.beginPath(); ctx.moveTo(sd * 3, -8); ctx.lineTo(sd * 10, -17); ctx.lineTo(sd * 11, -4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = PINK; ctx.beginPath(); ctx.moveTo(sd * 5, -8); ctx.lineTo(sd * 9.5, -14); ctx.lineTo(sd * 9.5, -6); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = FUR; ctx.beginPath(); ctx.ellipse(0, 0, 11, 10, 0, 0, Math.PI * 2); ctx.fill();
+    // tabby stripes on the back of the head
+    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 1.4; ctx.lineCap = "round";
+    for (const k of [-4, 0, 4]) { ctx.beginPath(); ctx.moveTo(k, -2); ctx.lineTo(k * 1.2, 6); ctx.stroke(); }
+    // whiskers poking out past the cheeks
+    ctx.strokeStyle = "rgba(255,250,240,0.9)"; ctx.lineWidth = 0.7;
+    for (const sd of [-1, 1]) for (const wy of [3, 5.5]) { ctx.beginPath(); ctx.moveTo(sd * 9, wy); ctx.lineTo(sd * 18, wy - 1 + (wy - 4)); ctx.stroke(); }
+    // turned face during a glance: cream muzzle + focused eye on the right cheek
+    if (look > 0.05) {
+      ctx.globalAlpha = look;
+      ctx.fillStyle = CREAM; ctx.beginPath(); ctx.ellipse(8, 4, 4.5, 3.4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#1c1917"; ctx.beginPath(); ctx.ellipse(7, -1.5, 1.6, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(7.5, -2.3, 0.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = PINK; ctx.beginPath(); ctx.arc(11, 3.2, 1, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.lineCap = "butt";
+    // FLAMIO delivery cap between the ears
+    ctx.fillStyle = JACKET; ctx.beginPath(); ctx.ellipse(0, -6, 7.5, 4.5, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = JACKET_DARK; ctx.fillRect(-7.5, -6.5, 15, 1.6);
+    ctx.fillStyle = "#fff7ed"; ctx.font = "900 3px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("FLAMIO", 0, -8.5);
     ctx.restore();
 
     // large insulated FLAMIO delivery box on the rear rack (in front of rider's lower back)
@@ -434,10 +462,21 @@ export function drawMascot(ctx: Ctx, a: MascotAnim, x: number, footY: number, si
     ctx.fillStyle = JACKET; ctx.fillRect(-22, -59, 44, 3);
     ctx.fillStyle = JACKET; ctx.font = "900 10px system-ui, sans-serif"; ctx.fillText("FLAMIO", 0, -72);
     ctx.fillStyle = "#fde68a"; ctx.font = "700 4px system-ui, sans-serif"; ctx.fillText("FOOD DELIVERY", 0, -64);
+    ctx.fillStyle = REFLECT; ctx.fillRect(-22, -81, 44, 1.4); ctx.fillRect(-22, -55, 44, 1.4);
+    ctx.fillStyle = CHROME; ctx.fillRect(-12, -85, 4, 3); ctx.fillRect(8, -85, 4, 3); // latches
     if (collecting) { ctx.fillStyle = `rgba(255,190,90,${0.45 * (1 - Math.min(1, ct / 1.5))})`; ctx.beginPath(); ctx.ellipse(0, -88, 26, 8, 0, 0, Math.PI * 2); ctx.fill(); }
     // burger being built, riding on top of the box
     const stack = layers.length > 8 ? layers.slice(-8) : layers;
     burger(ctx, 0, -88 + lid - (collecting ? Math.sin(Math.min(1, ct) * Math.PI) * 4 : 0), 26, stack, false);
+    // striped tabby tail: out from under the seat on the right, curling up beside the box (never over it)
+    const swish = Math.sin(now / 260) * 3;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 5.5;
+    ctx.beginPath(); ctx.moveTo(22, -56); ctx.quadraticCurveTo(32, -58, 30 + swish * 0.4, -78); ctx.quadraticCurveTo(30 + swish, -88, 26 + swish, -92); ctx.stroke();
+    ctx.strokeStyle = FUR; ctx.lineWidth = 3.8; ctx.stroke();
+    ctx.strokeStyle = FUR_DARK; ctx.lineWidth = 1.2;
+    for (const ty of [-70, -78, -86]) { ctx.beginPath(); ctx.moveTo(27 + swish * 0.4, ty); ctx.lineTo(33 + swish * 0.6, ty - 1); ctx.stroke(); }
+    ctx.lineCap = "butt";
     ctx.restore();
 
     if (flinching) { ctx.fillStyle = `rgba(120,140,90,${0.4 * (1 - ft)})`; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(-14 + k * 14, -60 - ft * 30 - k * 6, 8 + ft * 10, 0, Math.PI * 2); ctx.fill(); } }
