@@ -2,6 +2,17 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 
+import {
+  IDEMPOTENCY_KEY_RE,
+  IdempotencyLedger,
+  applyAuthoritativePrices,
+  assertNoCouponWithReward,
+  assertRewardCheckoutAllowed,
+  requestFingerprint,
+} from "@/lib/order-pricing";
+
+const placeOrderLedger = new IdempotencyLedger();
+
 /**
  * Order persistence. Orders hold customer PII, so the tables have no public
  * policies at all — every read and write goes through these server functions.
@@ -114,6 +125,14 @@ const placeOrderSchema = z.object({
   channel: z.enum(["online", "counter"]).default("online"),
   /** Optional scheduled pre-order slot (ISO). Re-validated on the server. */
   scheduledFor: z.string().datetime({ offset: true }).nullable().optional(),
+  /** Step 4B: per-attempt request id so a retried submit never creates a second order. */
+  idempotencyKey: z.string().regex(IDEMPOTENCY_KEY_RE).nullable().optional(),
+  /**
+   * Step 4B Reward Mode: server-issued reservation id. The discount is never
+   * taken from the browser; it is priced inside the atomic database function.
+   * Blocked while RELEASE_LOCKS.checkout is false.
+   */
+  reservationId: z.string().uuid().nullable().optional(),
 });
 
 export type PlaceOrderInput = z.infer<typeof placeOrderSchema>;
@@ -134,11 +153,21 @@ function orderCode(date: Date): string {
 export const placeOrder = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => placeOrderSchema.parse(input))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { getOptionalUserId } = await import("@/lib/auth.server");
-
-    // Signed-in customers own their orders; guests keep placing orders freely.
     const userId = await getOptionalUserId();
+    // TEST business rule: coupon + Burger Boost reward = reject (never stack).
+    assertNoCouponWithReward(data.couponCode, data.reservationId);
+    if (!data.idempotencyKey) return placeOrderOnce(data, userId);
+    return placeOrderLedger.run(
+      userId ?? "guest",
+      data.idempotencyKey,
+      requestFingerprint(data),
+      () => placeOrderOnce(data, userId),
+    );
+  });
+
+async function placeOrderOnce(data: PlaceOrderInput, userId: string | null) {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // Only an authorized counter user may record a counter sale; anything else
     // from the browser is treated as a normal online order.
@@ -188,7 +217,39 @@ export const placeOrder = createServerFn({ method: "POST" })
     // menu, then re-priced here. Availability, selection rules and combo prices
     // are decided by the server; anything sent by the browser is ignored.
     const { validateComboItems } = await import("@/lib/combos.server");
-    const items = await validateComboItems(data.items);
+    let items = await validateComboItems(data.items);
+
+    // Step 4B financial authority: online non-combo lines are re-priced from
+    // the database. A browser-sent unitPrice is never used for online orders.
+    if (channel === "online") {
+      const plain = items.filter((i) => !i.comboKey);
+      const productIds = [...new Set(plain.map((i) => i.productId))];
+      const variantIds = [...new Set(plain.map((i) => i.variantId).filter(Boolean))] as string[];
+      const [{ data: productRows, error: pErr }, { data: variantRows, error: vErr }] = await Promise.all([
+        productIds.length
+          ? supabaseAdmin.from("products").select("id, base_price, is_available").in("id", productIds)
+          : Promise.resolve({ data: [], error: null }),
+        variantIds.length
+          ? supabaseAdmin
+              .from("product_variants")
+              .select("id, product_id, name, price, is_available")
+              .in("id", variantIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (pErr || vErr) {
+        console.error("Menu price lookup failed", pErr ?? vErr);
+        throw new Error("We couldn't load menu prices. Please try again.");
+      }
+      items = applyAuthoritativePrices(items, productRows ?? [], variantRows ?? []);
+    }
+
+    // Step 4B Reward Mode: a reservation routes to the atomic database
+    // function. callAtomicRewardOrder refuses while the checkout release lock
+    // is closed, so this always stops here today.
+    if (data.reservationId) {
+      if (channel !== "online" || !userId) throw new Error("Burger Boost rewards apply to signed-in online orders only.");
+      assertRewardCheckoutAllowed();
+    }
 
     // Persistent Counter Sale price (products.counter_price), read from the
     // database and enforced here for every counter sale (Owner and Staff).
@@ -403,7 +464,7 @@ export const placeOrder = createServerFn({ method: "POST" })
     }
 
     return { id: inserted.id, code: inserted.code, createdAt: inserted.created_at };
-  });
+}
 
 export const getOrder = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) =>

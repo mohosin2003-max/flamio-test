@@ -1,7 +1,7 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Pencil, Trash2 } from "lucide-react";
 
@@ -100,6 +100,9 @@ function CheckoutPage() {
 
   const [placed, setPlaced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // One request id per order attempt: a retry after a lost reply reuses it,
+  // so the server returns the original order instead of creating a second.
+  const idempotencyKeyRef = useRef<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const enabledMethods = paymentMethods.filter((m) => m.isEnabled);
   const [method, setMethod] = useState(enabledMethods[0]?.id ?? "cash_on_delivery");
@@ -218,6 +221,9 @@ function CheckoutPage() {
   const [coupon, setCoupon] = useState<{ code: string; discount: number } | null>(null);
   const [couponChecking, setCouponChecking] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
+  useEffect(() => {
+    idempotencyKeyRef.current = null; // order contents changed: new attempt
+  }, [lines, fulfillment, scheduledFor, coupon]);
 
   const discount = coupon ? Math.min(coupon.discount, subtotal) : 0;
 
@@ -420,9 +426,13 @@ function CheckoutPage() {
             }
           }
 
+          if (!idempotencyKeyRef.current) {
+            idempotencyKeyRef.current = crypto.randomUUID().replace(/-/g, "");
+          }
           try {
             const created = await submitOrder({
               data: {
+                idempotencyKey: idempotencyKeyRef.current,
                 fulfillment,
                 paymentMethod: method,
                 paymentLabel:
@@ -464,6 +474,7 @@ function CheckoutPage() {
 
             // Orders live in the database only — nothing private is kept on the device.
 
+            idempotencyKeyRef.current = null;
             setPlaced(true);
             clear();
             toast.success(scheduledFor ? "Order scheduled" : "Order placed");
