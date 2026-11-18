@@ -440,16 +440,21 @@ export const ownerUpdateOrderStatus = createServerFn({ method: "POST" })
       throw new Error("Order status can only move forward one step.");
     }
 
-    const { error } = await supabaseAdmin
+    const { data: updatedRows, error } = await supabaseAdmin
       .from("orders")
       .update({ status: data.status })
       .eq("id", data.orderId)
-      .eq("status", order.status);
+      .eq("status", order.status)
+      .select("id, status");
 
     if (error) {
       console.error("Owner status update failed", error);
       throw new Error("We couldn't update this order. Please try again.");
     }
+    // Compare-and-set: zero rows means another actor (e.g. a cancellation)
+    // changed the order first. Never report success for a lost race.
+    const { assertStatusUpdateApplied } = await import("@/lib/order-status-cas");
+    assertStatusUpdateApplied(updatedRows, data.status);
     return { ok: true, status: data.status };
   });
 
