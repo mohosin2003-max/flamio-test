@@ -15,6 +15,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { createClient } from "@supabase/supabase-js";
+import { publicRewardSettings } from "@/lib/burger-boost-settings";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateTrack, sanitizeGates, type PublicGate } from "@/lib/burger-boost-rules";
@@ -275,6 +277,29 @@ function serverApi() {
 }
 
 /* --------------------------- server functions --------------------------- */
+
+/** Public scalar only, through the draft's narrow read-only RPC and anon grants. */
+export const getBurgerBoostPublicSettings = createServerFn({ method: "GET" })
+  .handler(async () => {
+    try {
+      const url = process.env["SUPABASE_URL"];
+      const key = process.env["SUPABASE_PUBLISHABLE_KEY"] ?? process.env["SUPABASE_ANON_KEY"];
+      if (!url || !key) return publicRewardSettings(null);
+      const client = createClient(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          if (key.startsWith("sb_") && headers.get("Authorization") === `Bearer ${key}`) headers.delete("Authorization");
+          headers.set("apikey", key);
+          return fetch(input, { ...init, headers });
+        } },
+      });
+      const { data, error } = await client.schema("burger_boost").rpc("get_public_owner_max");
+      return publicRewardSettings(error ? null : data);
+    } catch {
+      return publicRewardSettings(null);
+    }
+  });
 
 export const createBurgerBoostSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

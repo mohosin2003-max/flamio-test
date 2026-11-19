@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, VolumeX, Mu
 
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
+import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { drawEnvironment } from "@/components/burger-boost/renderers/environment";
@@ -15,10 +16,9 @@ import {
   DEFAULT_GATE_COUNT, GAMEPLAY_DURATION_MS, HARD_CUTOFF_MS,
   createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
-import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
+import { submitBurgerBoostGameplay, expireBurgerBoostSession, getBurgerBoostPublicSettings } from "@/lib/burger-boost.functions";
 import { OPERATION_RULES_VERSION, TIERED_RULES_VERSION, isMeterRules, gateSchedule, trackPosition, METER, type Ingredient, type Lane } from "@/lib/burger-boost-rules";
 import { createPauseClock, storeDiscountPreview, boostDelta, type PauseClock } from "@/lib/burger-boost-pause";
-import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
 import { createAudioEngine, pickGateSound, isMilestoneGate, type AudioEngine, type SoundEvent } from "@/lib/burger-boost-audio";
 
 /** Ingredient art colors (food colors, canvas only). */
@@ -33,6 +33,9 @@ const ING: Record<Ingredient, { color: string; label: string }> = {
 type Screen = "start" | "playing" | "over";
 
 export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?: number }) {
+  const fetchSettings = useServerFn(getBurgerBoostPublicSettings);
+  const settingsQuery = useQuery({ queryKey: ["burger-boost", "public-settings"], queryFn: () => fetchSettings(), staleTime: 30_000 });
+  const ownerMax = settingsQuery.data?.ownerMax ?? 0;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<GameState | null>(null);
@@ -86,7 +89,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     if (!g) { setVerdict({ kind: "fail", text: "This saved game couldn't be loaded." }); return; }
     liveRef.current = live; stateRef.current = g; resetMascotAnim(mascot);
     finalizeRef.current = once(async () => {
-      const s = stateRef.current!;
+      const s = stateRef.current;
+      if (!s) return;
       const payload = buildLiveSubmission(live.sessionId, s);
       try {
         if (!payload) {
@@ -139,8 +143,9 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   // Game loop. Pause freezes the arcade clock (gates, timer, meter, mascot); server expiry is unaffected.
   useEffect(() => {
     if (screen !== "playing") return;
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
     const css = getComputedStyle(rootRef.current ?? document.documentElement);
     const col = (v: string, f: string) => css.getPropertyValue(v).trim() || f;
     const C = { bg: col("--background", "#1c1714"), fg: col("--foreground", "#fff"), primary: col("--primary", "#f26b1d"), muted: col("--muted", "#333"), destructive: col("--destructive", "#e33") };
@@ -160,17 +165,19 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     const OUT_SOUND: Record<string, SoundEvent> = { correct: "correct", wrong: "wrong", collect: "collect", spoiled: "hazard", safe: "gate", boost: "correct", drop: "wrong" };
     const frame = (realNow: number) => {
       if (pausedRef.current) { raf = requestAnimationFrame(frame); return; }
-      let s = stateRef.current!;
+      let s = stateRef.current;
+      if (!s) return;
       const sounds: SoundEvent[] = [];
       const played = clockRef.current.elapsed(realNow);
       const now = startRef.current + played; // virtual time: frozen while paused
       const elapsed = Math.min(HARD_CUTOFF_MS, played);
       // resolve gates that reached the player
-      while (s.nextGate < s.gateCount && sched[s.nextGate]! <= elapsed && (s.phase === "running" || s.phase === "grace")) {
+      while (s.nextGate < s.gateCount && (sched[s.nextGate] ?? Infinity) <= elapsed && (s.phase === "running" || s.phase === "grace")) {
         const before = s.meter;
         const r = passGate(s, elapsed);
         s = r.state;
-        if (r.outcome) sounds.push(OUT_SOUND[r.outcome]!);
+        const outcomeSound = r.outcome ? OUT_SOUND[r.outcome] : undefined;
+        if (outcomeSound) sounds.push(outcomeSound);
         if (isMilestoneGate(s.nextGate) && r.outcome) sounds.push("milestone");
         const d = s.meter - before, ds = boostDelta(d);
         if (r.outcome) flashRef.current = { text: { correct: "+10 Correct!", wrong: "Wrong", collect: isMeterRules(s.rulesVersion) ? `Layer ${ds}` : "+5 Layer", spoiled: isMeterRules(s.rulesVersion) ? `Spoiled! ${ds}` : "Spoiled! −5", safe: "Dodged", boost: ds, drop: ds }[r.outcome], good: r.outcome !== "wrong" && r.outcome !== "spoiled" && r.outcome !== "drop", at: now };
@@ -204,7 +211,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
     <div ref={rootRef} className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground">
       {screen === "playing" && (
         <>
-          <Hud live={isLive} v2={hud.v2} discount={storeDiscountPreview(DRAFT_SETTINGS.ownerMax, hud.meter)} meter={hud.meter} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)}
+          <Hud live={isLive} v2={hud.v2} discount={isLive ? 0 : storeDiscountPreview(ownerMax, hud.meter)} meter={hud.meter} score={hud.score} remaining={remaining} grace={grace} graceLeft={graceLeft} stack={hud.stack} gate={hud.gate} total={stateRef.current?.gateCount ?? gateCount} onPause={() => setPaused(true)}
             muted={muted} onMute={() => { const m = !muted; if (!m) unlockAudio(); audio().setSfxMuted(m); setMuted(m); }}
             musicMuted={musicMuted} onMusicMute={() => { const m = !musicMuted; if (!m) unlockAudio(); audio().setMusicMuted(m); setMusicMuted(m); }} />
           <div
@@ -254,7 +261,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         <Overlay>
           {(() => {
             const awarded = isLive && verdict?.kind === "ok" ? Math.max(0, Math.floor(verdict.awarded ?? 0)) : 0;
-            const preview = isLive ? 0 : storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter);
+            const preview = isLive ? 0 : storeDiscountPreview(ownerMax, result.meter);
             const pending = isLive && verdict?.kind === "pending";
             const won = awarded > 0;
             if (pending) return <p role="status" className="text-sm text-muted-foreground">Checking your game with Flamio…</p>;
@@ -275,7 +282,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             </div>;
           })()}
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
-            ? <VictoryCat layers={result.layers} loss={isLive ? !((verdict?.awarded ?? 0) > 0) : storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter) <= 0} />
+            ? <VictoryCat layers={result.layers} loss={isLive ? !((verdict?.awarded ?? 0) > 0) : storeDiscountPreview(ownerMax, result.meter) <= 0} />
             : <BurgerStack layers={result.layers} />}
           <dl className="grid w-full grid-cols-2 gap-2 text-sm">
             <Stat label="Layers" value={result.layers.length} />
@@ -387,7 +394,8 @@ function draw(ctx: CanvasRenderingContext2D, W: number, H: number, s: GameState,
   for (let i = Math.min(s.gateCount - 1, s.nextGate + 4); i >= s.nextGate; i--) {
     const d = 1 - (i + 1 - pos) / 4;
     if (d < 0 || d > 1.05) continue;
-    drawGate(ctx, s.track[i]!, proj(d), C, now, i, s.gateCount);
+    const gate = s.track[i];
+    if (gate) drawGate(ctx, gate, proj(d), C, now, i, s.gateCount);
   }
 
   // FLAMIO delivery rider (presentation only; reads already-resolved state)

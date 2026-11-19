@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyAuthoritativePrices, assertNoCouponWithReward, assertRewardCheckoutAllowed, IdempotencyLedger, requestFingerprint,
+  orderIdempotencyColumns, checkoutRewardSearch,
 } from "./order-pricing.ts";
 import { RELEASE_LOCKS } from "./burger-boost-reward-flow.ts";
 import { callAtomicRewardOrder, buildAtomicOrderArgs, mapAtomicOrderResult } from "./burger-boost-atomic-order.ts";
@@ -13,6 +14,24 @@ const variants = [{ id: "v1", product_id: "p1", name: "Double", price: 620, is_a
 const line = (o) => ({ productId: "p1", productName: "Burger", variantId: null, variantName: null, unitPrice: 1, comboKey: null, ...o });
 const key = "a".repeat(32);
 const ref = (id) => ({ id, code: "FLM-" + id, createdAt: "t" });
+
+describe("inactive schema and reservation pass-through contracts", () => {
+  test("order insert always includes the intended idempotency_key column", () => {
+    expect(orderIdempotencyColumns(key)).toEqual({ idempotency_key: key });
+    expect(orderIdempotencyColumns(undefined)).toEqual({ idempotency_key: null });
+    expect(() => orderIdempotencyColumns("short")).toThrow();
+  });
+  test("checkout passes a UUID reservation unchanged and rejects forged ids", () => {
+    const reservationId = "11111111-1111-1111-1111-111111111111";
+    expect(checkoutRewardSearch({ reservationId })).toEqual({ reservationId });
+    expect(checkoutRewardSearch({})).toEqual({ reservationId: null });
+    expect(() => checkoutRewardSearch({ reservationId: "forged" })).toThrow();
+  });
+  test("changing reservation changes the order-attempt fingerprint", () => {
+    const input = { fulfillment: "pickup", items: [] };
+    expect(requestFingerprint({ ...input, reservationId: "a" })).not.toBe(requestFingerprint({ ...input, reservationId: "b" }));
+  });
+});
 
 describe("server price authority [contract]", () => {
   test("tampered unitPrice is replaced by base_price", () => {

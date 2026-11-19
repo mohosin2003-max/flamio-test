@@ -14,3 +14,5 @@
 - Home install UI is isolated in InstallAppBanner; it consumes browser install events without registering or changing service workers, keeping notification delivery independent.
 - Keep shared staff navigation eagerly imported by the root layout so a separate lazy navigation download cannot replace the entire workspace with a route error.
 - Client access shape comes only from `serializeOwnerAccess` (src/lib/access-shape.ts): `isOwner` means the real Owner role, `hasWorkspaceAccess` gates the workspace — mixing them hid My Duty from Staff.
+- Burger Boost public settings use a narrow read-only owner-max RPC through a server publishable client; Owner settings RPCs require a verified Owner role through the authenticated client before loading privileged transport.
+- Step 4B order inserts always send the intended idempotency column and fail visibly on an unapplied schema; the in-memory ledger is not a database-level guarantee.

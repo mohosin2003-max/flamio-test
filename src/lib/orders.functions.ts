@@ -9,6 +9,7 @@ import {
   assertNoCouponWithReward,
   assertRewardCheckoutAllowed,
   requestFingerprint,
+  orderIdempotencyColumns,
 } from "@/lib/order-pricing";
 
 const placeOrderLedger = new IdempotencyLedger();
@@ -347,6 +348,7 @@ async function placeOrderOnce(data: PlaceOrderInput, userId: string | null) {
       const { data: row, error } = await supabaseAdmin
         .from("orders")
         .insert({
+          ...orderIdempotencyColumns(data.idempotencyKey),
           code: orderCode(new Date()),
           user_id: userId,
           channel,
@@ -384,6 +386,9 @@ async function placeOrderOnce(data: PlaceOrderInput, userId: string | null) {
 
       if (error) {
         lastError = error;
+        if (error.code === "42703" || error.code === "PGRST204") {
+          throw new Error("Order placement is unavailable until the approved order schema update is applied.");
+        }
         // 23505 = duplicate order code; regenerate and retry.
         if (error.code !== "23505") break;
         continue;

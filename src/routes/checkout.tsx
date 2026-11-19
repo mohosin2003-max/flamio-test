@@ -28,6 +28,7 @@ import { formatBDT } from "@/lib/format";
 import { checkCoupon } from "@/lib/coupons.functions";
 import { saveOrder, type PlacedOrder } from "@/lib/orders";
 import { placeOrder } from "@/lib/orders.functions";
+import { checkoutRewardSearch } from "@/lib/order-pricing";
 import { canScheduleNow, formatScheduled, isOpenAt, listSlots } from "@/lib/opening-hours";
 import { getPublicHours } from "@/lib/scheduling.functions";
 import { ScheduleDialog } from "@/components/checkout/ScheduleDialog";
@@ -40,6 +41,7 @@ import type { CustomerAddress, FulfillmentType } from "@/types/menu";
 const MAP_FALLBACK = { lat: 24.4449, lng: 90.7766 };
 
 export const Route = createFileRoute("/checkout")({
+  validateSearch: checkoutRewardSearch,
   head: () => ({
     meta: [
       { title: "Checkout — Flamio" },
@@ -52,6 +54,8 @@ export const Route = createFileRoute("/checkout")({
         property: "og:description",
         content: "Confirm your delivery details and place your Flamio order.",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   loader: ({ context }) => context.queryClient.ensureQueryData(deliveryQueryOptions()),
@@ -59,6 +63,7 @@ export const Route = createFileRoute("/checkout")({
 });
 
 function CheckoutPage() {
+  const { reservationId } = Route.useSearch();
   const { lines, subtotal, isHydrated, clear } = useCart();
   const { profile, isAuthenticated } = useAuth();
   const { isStaffOnly } = useDashboardAccess();
@@ -223,7 +228,7 @@ function CheckoutPage() {
   const [couponError, setCouponError] = useState<string | null>(null);
   useEffect(() => {
     idempotencyKeyRef.current = null; // order contents changed: new attempt
-  }, [lines, fulfillment, scheduledFor, coupon]);
+  }, [lines, fulfillment, scheduledFor, coupon, reservationId]);
 
   const discount = coupon ? Math.min(coupon.discount, subtotal) : 0;
 
@@ -271,10 +276,10 @@ function CheckoutPage() {
 
   const locationQuote = useQuery({
     queryKey: ["delivery-location-quote", point?.lat, point?.lng, subtotal, discount],
-    queryFn: () =>
-      quoteLocation({
-        data: { latitude: point!.lat, longitude: point!.lng, subtotal, discount },
-      }),
+    queryFn: () => {
+      if (!point) throw new Error("Select a delivery location.");
+      return quoteLocation({ data: { latitude: point.lat, longitude: point.lng, subtotal, discount } });
+    },
     enabled: radiusMode && fulfillment === "delivery" && point !== null,
   });
 
@@ -405,7 +410,7 @@ function CheckoutPage() {
             setSubmitting(false);
             await navigate({
               to: "/auth",
-              search: { redirect: "/checkout", from: "checkout" } as never,
+              search: { redirect: reservationId ? `/checkout?reservationId=${encodeURIComponent(reservationId)}` : "/checkout", from: "checkout" } as never,
             });
             return;
           }
@@ -433,6 +438,7 @@ function CheckoutPage() {
             const created = await submitOrder({
               data: {
                 idempotencyKey: idempotencyKeyRef.current,
+                reservationId,
                 fulfillment,
                 paymentMethod: method,
                 paymentLabel:

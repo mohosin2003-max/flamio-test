@@ -57,6 +57,20 @@ export function applyAuthoritativePrices<T extends PriceableLine>(
 
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
 
+export function orderIdempotencyColumns(key: string | null | undefined): Record<string, string | null> {
+  if (key != null && !IDEMPOTENCY_KEY_RE.test(key)) throw new Error("Invalid order request id.");
+  return { idempotency_key: key ?? null };
+}
+
+export function checkoutRewardSearch(input: Record<string, unknown>): { reservationId?: string | null } {
+  const value = input.reservationId;
+  if (value == null || value === "") return { reservationId: null };
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    throw new Error("Invalid reward reservation.");
+  }
+  return { reservationId: value };
+}
+
 export function assertNoCouponWithReward(couponCode: string | null | undefined, reservationId: string | null | undefined) {
   if (couponCode && reservationId) {
     throw new Error("A Burger Boost reward can't be combined with a coupon.");

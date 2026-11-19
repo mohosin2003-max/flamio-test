@@ -1,13 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Lock } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { getBurgerBoostOwnerOverview } from "@/lib/burger-boost-owner.functions";
+import { getBurgerBoostOwnerOverview, getOwnerRewardSettings, updateOwnerRewardSettings } from "@/lib/burger-boost-owner.functions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
+import { REWARD_BOUNDS, type RewardSettings } from "@/lib/burger-boost-reward";
 
 export const Route = createFileRoute("/_authenticated/owner/burger-boost")({
   head: () => ({
@@ -36,7 +43,7 @@ function OwnerBurgerBoost() {
     <div className="mx-auto w-full max-w-4xl space-y-4 p-4">
       <header>
         <h1 className="font-display text-2xl font-bold">FLAMIO Burger Boost</h1>
-        <p className="text-sm text-muted-foreground">Read-only for now. Settings can't be saved until the game's database is installed.</p>
+        <p className="text-sm text-muted-foreground">TEST management · reward checkout and coupon issuance remain locked.</p>
       </header>
 
       <Card><CardContent className="flex items-center justify-between gap-4 p-4">
@@ -64,29 +71,7 @@ function OwnerBurgerBoost() {
         <p className="text-sm capitalize">Ingredients / spoiled: {d.ingredients.join(", ")}</p>
       </CardContent></Card>
 
-      <Card><CardContent className="space-y-3 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <p className="font-semibold">Reward settings (draft)</p>
-          <Badge variant="outline"><Lock className="mr-1 size-3" />Not saved</Badge>
-        </div>
-        <p className="text-sm text-muted-foreground">These are starting values only. They can't be changed or saved until you approve the game's database update and release.</p>
-        <dl className="grid gap-3 sm:grid-cols-2">
-          {([
-            ["Top discount (full winners)", `${d.rewardDraft.values.ownerMax}%`, `0–${d.rewardDraft.bounds.maxDiscount.max}%`],
-            ["Discount for extra winners", `${d.rewardDraft.values.partialMax}%`, "0% up to the top discount"],
-            ["Full winners per day", String(d.rewardDraft.values.dailyFullLimit), `0–${d.rewardDraft.bounds.winnersPerDay.max}`],
-            ["Extra winners per day", String(d.rewardDraft.values.dailyPartialLimit), `0–${d.rewardDraft.bounds.winnersPerDay.max}`],
-            ["Minimum order", `৳${d.rewardDraft.values.minOrderBdt}`, `৳0–৳${d.rewardDraft.bounds.minOrderBdt.max}`],
-            ["Gates per game", String(d.rewardDraft.values.gateCount), `${d.rewardDraft.bounds.gateCount.min}–${d.rewardDraft.bounds.gateCount.max}`],
-          ] as const).map(([label, value, range]) => (
-            <div key={label} className="rounded-md border border-border p-3">
-              <dt className="text-xs text-muted-foreground">{label}</dt>
-              <dd className="text-lg font-bold">{value}</dd>
-              <dd className="text-xs text-muted-foreground">Allowed {range}</dd>
-            </div>
-          ))}
-        </dl>
-      </CardContent></Card>
+      <RewardSettingsForm />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card><CardContent className="p-4"><p className="font-semibold">Today's winners &amp; slots left</p><p className="text-sm text-muted-foreground">Unavailable — {d.usage.reason}</p></CardContent></Card>
@@ -99,4 +84,57 @@ function OwnerBurgerBoost() {
       </div>
     </div>
   );
+}
+
+function RewardSettingsForm() {
+  const fetchSettings = useServerFn(getOwnerRewardSettings);
+  const saveSettings = useServerFn(updateOwnerRewardSettings);
+  const queryClient = useQueryClient();
+  const q = useQuery({ queryKey: ["owner", "burger-boost", "settings"], queryFn: () => fetchSettings(), retry: false });
+  const [form, setForm] = useState<RewardSettings>({ ...DRAFT_SETTINGS });
+  useEffect(() => {
+    if (q.data?.settings) setForm(q.data.settings);
+  }, [q.data]);
+  const mutation = useMutation({
+    mutationFn: (settings: RewardSettings) => saveSettings({ data: settings }),
+    onSuccess: (value) => {
+      queryClient.setQueryData(["owner", "burger-boost", "settings"], value);
+      void queryClient.invalidateQueries({ queryKey: ["burger-boost", "public-settings"] });
+      toast.success("Reward settings saved");
+    },
+  });
+  const available = q.data?.available === true;
+  const usage = q.data?.usage;
+  const fields: { key: keyof RewardSettings; label: string; min: number; max: number }[] = [
+    { key: "ownerMax", label: "Top discount (%)", ...REWARD_BOUNDS.maxDiscount },
+    { key: "partialMax", label: "Extra-winner discount (%)", min: 0, max: form.ownerMax },
+    { key: "dailyFullLimit", label: "Full winners per day", ...REWARD_BOUNDS.winnersPerDay },
+    { key: "dailyPartialLimit", label: "Extra winners per day", ...REWARD_BOUNDS.winnersPerDay },
+    { key: "minOrderBdt", label: "Minimum eligible food order (৳)", ...REWARD_BOUNDS.minOrderBdt },
+    { key: "gateCount", label: "Gates per game", ...REWARD_BOUNDS.gateCount },
+  ];
+  return <section className="space-y-4 border-y border-border py-5">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h2 className="font-semibold">Reward settings</h2>
+      <Badge variant="outline">{available ? "Saved settings" : "Unavailable · not saved"}</Badge>
+    </div>
+    {q.isPending ? <Skeleton className="h-32 w-full" /> : <>
+      {!available && <p role="status" className="text-sm text-muted-foreground">{q.error ? "Owner settings access could not be verified." : "The approved TEST database update is pending. Starting values below are not saved."}</p>}
+      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (available && !mutation.isPending) mutation.mutate(form); }}>
+        <fieldset disabled={!available || mutation.isPending} className="grid gap-4 sm:grid-cols-2">
+          {fields.map(({ key, label, min, max }) => <div key={key} className="space-y-2">
+            <Label htmlFor={`bb-${key}`}>{label}</Label>
+            <Input id={`bb-${key}`} type="number" required step={1} min={min} max={max} value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.valueAsNumber }))} />
+          </div>)}
+        </fieldset>
+        <p className="text-sm text-muted-foreground">Reservation validity: 30 minutes · checkout locked · coupons locked</p>
+        {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+        <Button type="submit" disabled={!available || mutation.isPending}>{mutation.isPending ? "Saving…" : "Save settings"}</Button>
+      </form>
+      {usage && <dl className="grid gap-3 sm:grid-cols-2">
+        <div><dt className="text-sm text-muted-foreground">Full winners · {usage.date}</dt><dd>{usage.fullUsed} used · {usage.fullReserved} reserved · {Math.max(0, form.dailyFullLimit - usage.fullUsed - usage.fullReserved)} slots left</dd></div>
+        <div><dt className="text-sm text-muted-foreground">Extra winners · {usage.date}</dt><dd>{usage.partialUsed} used · {usage.partialReserved} reserved · {Math.max(0, form.dailyPartialLimit - usage.partialUsed - usage.partialReserved)} slots left</dd></div>
+      </dl>}
+    </>}
+  </section>;
 }

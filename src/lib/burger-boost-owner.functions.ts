@@ -6,6 +6,7 @@
  * as unavailable rather than zero.
  */
 import { createServerFn } from "@tanstack/react-start";
+import { assertRewardSettingsOwner, ownerSettingsArgs, parseOwnerRewardSettings, unavailableOwnerSettings, type RewardSettingsTransport } from "@/lib/burger-boost-settings";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
@@ -36,4 +37,36 @@ export const getBurgerBoostOwnerOverview = createServerFn({ method: "GET" })
     const { assertPermission } = await import("@/lib/owner.server");
     await assertPermission(context.userId, "challenges", "view");
     return buildOwnerOverview();
+  });
+
+export const getOwnerRewardSettings = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: roles, error: roleError } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId);
+    if (roleError) throw new Error("Unable to verify Owner access.");
+    assertRewardSettingsOwner(roles ?? []);
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const transport = supabaseAdmin as unknown as RewardSettingsTransport;
+      const { data, error } = await transport.schema("burger_boost").rpc("get_owner_settings");
+      return error ? unavailableOwnerSettings : parseOwnerRewardSettings(data);
+    } catch {
+      return unavailableOwnerSettings;
+    }
+  });
+
+export const updateOwnerRewardSettings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => ownerSettingsArgs(input))
+  .handler(async ({ context, data: args }) => {
+    const { data: roles, error: roleError } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId);
+    if (roleError) throw new Error("Unable to verify Owner access.");
+    assertRewardSettingsOwner(roles ?? []);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const transport = supabaseAdmin as unknown as RewardSettingsTransport;
+    const { data, error } = await transport.schema("burger_boost").rpc("update_settings", args);
+    if (error) throw new Error("Reward settings could not be saved. The approved database update may still be pending.");
+    const result = parseOwnerRewardSettings(data);
+    if (!result.available) throw new Error("Reward settings returned an invalid response.");
+    return result;
   });
