@@ -9,7 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { getBurgerBoostOwnerOverview, getOwnerRewardSettings, updateOwnerRewardSettings } from "@/lib/burger-boost-owner.functions";
+import {
+  getBurgerBoostOwnerOverview,
+  getOwnerRewardSettings,
+  updateOwnerRewardSettings,
+} from "@/lib/burger-boost-owner.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,52 +39,100 @@ function OwnerBurgerBoost() {
   const fetchOverview = useServerFn(getBurgerBoostOwnerOverview);
   const q = useQuery({ queryKey: ["owner", "burger-boost"], queryFn: () => fetchOverview() });
 
-  if (q.isPending) return <div className="space-y-3 p-4"><Skeleton className="h-8 w-56" /><Skeleton className="h-40 w-full" /></div>;
-  if (q.error || !q.data) return <p className="p-4 text-sm text-destructive">You don't have access to Burger Boost management.</p>;
+  if (q.isPending)
+    return (
+      <div className="space-y-3 p-4">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  if (q.error || !q.data)
+    return (
+      <p className="p-4 text-sm text-destructive">
+        You don't have access to Burger Boost management.
+      </p>
+    );
   const d = q.data;
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-4 p-4">
       <header>
         <h1 className="font-display text-2xl font-bold">FLAMIO Burger Boost</h1>
-        <p className="text-sm text-muted-foreground">TEST management · reward checkout and coupon issuance remain locked.</p>
+        <p className="text-sm text-muted-foreground">
+          TEST management · reward checkout and coupon issuance remain locked.
+        </p>
       </header>
 
-      <Card><CardContent className="flex items-center justify-between gap-4 p-4">
-        <div>
-          <p className="font-semibold">Game status</p>
-          <p className="text-sm text-muted-foreground">Locked off. Rewards {d.discountPercent}% · checkout {d.checkoutEnabled ? "on" : "off"}.</p>
-        </div>
-        <div className="flex items-center gap-2"><Lock className="size-4 text-muted-foreground" /><Switch checked={d.gameEnabled} disabled aria-label="Game enabled (locked)" /></div>
-      </CardContent></Card>
+      <Card>
+        <CardContent className="flex items-center justify-between gap-4 p-4">
+          <div>
+            <p className="font-semibold">Game status</p>
+            <p className="text-sm text-muted-foreground">
+              Locked off. Rewards {d.discountPercent}% · checkout {d.checkoutEnabled ? "on" : "off"}
+              .
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Lock className="size-4 text-muted-foreground" />
+            <Switch checked={d.gameEnabled} disabled aria-label="Game enabled (locked)" />
+          </div>
+        </CardContent>
+      </Card>
 
-      <Card><CardContent className="space-y-1 p-4">
-        <p className="font-semibold">Gates per game</p>
-        <p className="text-3xl font-black">{d.gateCount.current}</p>
-        <p className="text-sm text-muted-foreground">Allowed range {d.gateCount.min}–{d.gateCount.max}. Customers can't change this. Not editable yet (no saved settings).</p>
-      </CardContent></Card>
+      <Card>
+        <CardContent className="space-y-1 p-4">
+          <p className="font-semibold">Gates per game</p>
+          <p className="text-3xl font-black">{d.gateCount.current}</p>
+          <p className="text-sm text-muted-foreground">
+            Allowed range {d.gateCount.min}–{d.gateCount.max}. Customers can't change this. Not
+            editable yet (no saved settings).
+          </p>
+        </CardContent>
+      </Card>
 
-      <Card><CardContent className="space-y-3 p-4">
-        <p className="font-semibold">Gate mix</p>
-        <div className="flex flex-wrap gap-2">
-          <Badge>Math {d.distribution.math}%</Badge>
-          <Badge variant="secondary">Ingredient {d.distribution.ingredient}%</Badge>
-          <Badge variant="destructive">Spoiled {d.distribution.negative}%</Badge>
-        </div>
-        <p className="text-sm">Math: {d.mathOperations.join("  ")}</p>
-        <p className="text-sm capitalize">Ingredients / spoiled: {d.ingredients.join(", ")}</p>
-      </CardContent></Card>
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <p className="font-semibold">Gate mix</p>
+          <div className="flex flex-wrap gap-2">
+            <Badge>Math {d.distribution.math}%</Badge>
+            <Badge variant="secondary">Ingredient {d.distribution.ingredient}%</Badge>
+            <Badge variant="destructive">Spoiled {d.distribution.negative}%</Badge>
+          </div>
+          <p className="text-sm">Math: {d.mathOperations.join("  ")}</p>
+          <p className="text-sm capitalize">Ingredients / spoiled: {d.ingredients.join(", ")}</p>
+        </CardContent>
+      </Card>
 
       <RewardSettingsForm />
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card><CardContent className="p-4"><p className="font-semibold">Today's winners &amp; slots left</p><p className="text-sm text-muted-foreground">Unavailable — {d.usage.reason}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="font-semibold">Reward history</p><p className="text-sm text-muted-foreground">Unavailable — {d.rewardHistory.reason}</p></CardContent></Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="font-semibold">Today's winners &amp; slots left</p>
+            <p className="text-sm text-muted-foreground">Unavailable — {d.usage.reason}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="font-semibold">Reward history</p>
+            <p className="text-sm text-muted-foreground">Unavailable — {d.rewardHistory.reason}</p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card><CardContent className="p-4"><p className="font-semibold">Game analytics</p><p className="text-sm text-muted-foreground">Unavailable — {d.analytics.reason}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="font-semibold">Activity log</p><p className="text-sm text-muted-foreground">Unavailable — {d.audit.reason}</p></CardContent></Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="font-semibold">Game analytics</p>
+            <p className="text-sm text-muted-foreground">Unavailable — {d.analytics.reason}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="font-semibold">Activity log</p>
+            <p className="text-sm text-muted-foreground">Unavailable — {d.audit.reason}</p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
@@ -90,7 +142,11 @@ function RewardSettingsForm() {
   const fetchSettings = useServerFn(getOwnerRewardSettings);
   const saveSettings = useServerFn(updateOwnerRewardSettings);
   const queryClient = useQueryClient();
-  const q = useQuery({ queryKey: ["owner", "burger-boost", "settings"], queryFn: () => fetchSettings(), retry: false });
+  const q = useQuery({
+    queryKey: ["owner", "burger-boost", "settings"],
+    queryFn: () => fetchSettings(),
+    retry: false,
+  });
   const [form, setForm] = useState<RewardSettings>({ ...DRAFT_SETTINGS });
   useEffect(() => {
     if (q.data?.settings) setForm(q.data.settings);
@@ -113,28 +169,86 @@ function RewardSettingsForm() {
     { key: "minOrderBdt", label: "Minimum eligible food order (৳)", ...REWARD_BOUNDS.minOrderBdt },
     { key: "gateCount", label: "Gates per game", ...REWARD_BOUNDS.gateCount },
   ];
-  return <section className="space-y-4 border-y border-border py-5">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 className="font-semibold">Reward settings</h2>
-      <Badge variant="outline">{available ? "Saved settings" : "Unavailable · not saved"}</Badge>
-    </div>
-    {q.isPending ? <Skeleton className="h-32 w-full" /> : <>
-      {!available && <p role="status" className="text-sm text-muted-foreground">{q.error ? "Owner settings access could not be verified." : "The approved TEST database update is pending. Starting values below are not saved."}</p>}
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (available && !mutation.isPending) mutation.mutate(form); }}>
-        <fieldset disabled={!available || mutation.isPending} className="grid gap-4 sm:grid-cols-2">
-          {fields.map(({ key, label, min, max }) => <div key={key} className="space-y-2">
-            <Label htmlFor={`bb-${key}`}>{label}</Label>
-            <Input id={`bb-${key}`} type="number" required step={1} min={min} max={max} value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.valueAsNumber }))} />
-          </div>)}
-        </fieldset>
-        <p className="text-sm text-muted-foreground">Reservation validity: 30 minutes · checkout locked · coupons locked</p>
-        {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
-        <Button type="submit" disabled={!available || mutation.isPending}>{mutation.isPending ? "Saving…" : "Save settings"}</Button>
-      </form>
-      {usage && <dl className="grid gap-3 sm:grid-cols-2">
-        <div><dt className="text-sm text-muted-foreground">Full winners · {usage.date}</dt><dd>{usage.fullUsed} used · {usage.fullReserved} reserved · {Math.max(0, form.dailyFullLimit - usage.fullUsed - usage.fullReserved)} slots left</dd></div>
-        <div><dt className="text-sm text-muted-foreground">Extra winners · {usage.date}</dt><dd>{usage.partialUsed} used · {usage.partialReserved} reserved · {Math.max(0, form.dailyPartialLimit - usage.partialUsed - usage.partialReserved)} slots left</dd></div>
-      </dl>}
-    </>}
-  </section>;
+  return (
+    <section className="space-y-4 border-y border-border py-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">Reward settings</h2>
+        <Badge variant="outline">{available ? "Saved settings" : "Unavailable · not saved"}</Badge>
+      </div>
+      {q.isPending ? (
+        <Skeleton className="h-32 w-full" />
+      ) : (
+        <>
+          {!available && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {q.error
+                ? "Owner settings access could not be verified."
+                : "The approved TEST database update is pending. Starting values below are not saved."}
+            </p>
+          )}
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (available && !mutation.isPending) mutation.mutate(form);
+            }}
+          >
+            <fieldset
+              disabled={!available || mutation.isPending}
+              className="grid gap-4 sm:grid-cols-2"
+            >
+              {fields.map(({ key, label, min, max }) => (
+                <div key={key} className="space-y-2">
+                  <Label htmlFor={`bb-${key}`}>{label}</Label>
+                  <Input
+                    id={`bb-${key}`}
+                    type="number"
+                    required
+                    step={1}
+                    min={min}
+                    max={max}
+                    value={form[key]}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, [key]: event.target.valueAsNumber }))
+                    }
+                  />
+                </div>
+              ))}
+            </fieldset>
+            <p className="text-sm text-muted-foreground">
+              Reservation validity: 30 minutes · checkout locked · coupons locked
+            </p>
+            {mutation.error && (
+              <p role="alert" className="text-sm text-destructive">
+                {mutation.error.message}
+              </p>
+            )}
+            <Button type="submit" disabled={!available || mutation.isPending}>
+              {mutation.isPending ? "Saving…" : "Save settings"}
+            </Button>
+          </form>
+          {usage && (
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <dt className="text-sm text-muted-foreground">Full winners · {usage.date}</dt>
+                <dd>
+                  {usage.fullUsed} used · {usage.fullReserved} reserved ·{" "}
+                  {Math.max(0, form.dailyFullLimit - usage.fullUsed - usage.fullReserved)} slots
+                  left
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">Extra winners · {usage.date}</dt>
+                <dd>
+                  {usage.partialUsed} used · {usage.partialReserved} reserved ·{" "}
+                  {Math.max(0, form.dailyPartialLimit - usage.partialUsed - usage.partialReserved)}{" "}
+                  slots left
+                </dd>
+              </div>
+            </dl>
+          )}
+        </>
+      )}
+    </section>
+  );
 }

@@ -6,12 +6,23 @@
  * as unavailable rather than zero.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { assertRewardSettingsOwner, ownerSettingsArgs, parseOwnerRewardSettings, unavailableOwnerSettings, type RewardSettingsTransport } from "@/lib/burger-boost-settings";
+import {
+  assertRewardSettingsOwner,
+  ownerSettingsArgs,
+  parseOwnerRewardSettings,
+  unavailableOwnerSettings,
+  type RewardSettingsTransport,
+} from "@/lib/burger-boost-settings";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
 import { REWARD_BOUNDS } from "@/lib/burger-boost-reward";
-import { BURGER_INGREDIENTS, MATH_OPERATIONS, MAX_GATE_COUNT, MIN_GATE_COUNT } from "@/lib/burger-boost-rules";
+import {
+  BURGER_INGREDIENTS,
+  MATH_OPERATIONS,
+  MAX_GATE_COUNT,
+  MIN_GATE_COUNT,
+} from "@/lib/burger-boost-rules";
 
 export function buildOwnerOverview() {
   return {
@@ -24,9 +35,19 @@ export function buildOwnerOverview() {
     ingredients: [...BURGER_INGREDIENTS],
     analytics: { available: false as const, reason: "Burger Boost database not installed yet." },
     /** Draft defaults only — nothing is saved; the settings table has no such columns yet. */
-    rewardDraft: { values: { ...DRAFT_SETTINGS }, bounds: REWARD_BOUNDS, persisted: false as const },
-    usage: { available: false as const, reason: "Daily winner counts need the approved database update." },
-    rewardHistory: { available: false as const, reason: "No coupons can be issued while the release lock is on." },
+    rewardDraft: {
+      values: { ...DRAFT_SETTINGS },
+      bounds: REWARD_BOUNDS,
+      persisted: false as const,
+    },
+    usage: {
+      available: false as const,
+      reason: "Daily winner counts need the approved database update.",
+    },
+    rewardHistory: {
+      available: false as const,
+      reason: "No coupons can be issued while the release lock is on.",
+    },
     audit: { available: false as const, reason: "Burger Boost database not installed yet." },
   };
 }
@@ -42,7 +63,10 @@ export const getBurgerBoostOwnerOverview = createServerFn({ method: "GET" })
 export const getOwnerRewardSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: roles, error: roleError } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId);
+    const { data: roles, error: roleError } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
     if (roleError) throw new Error("Unable to verify Owner access.");
     assertRewardSettingsOwner(roles ?? []);
     try {
@@ -59,13 +83,19 @@ export const updateOwnerRewardSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => ownerSettingsArgs(input))
   .handler(async ({ context, data: args }) => {
-    const { data: roles, error: roleError } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId);
+    const { data: roles, error: roleError } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
     if (roleError) throw new Error("Unable to verify Owner access.");
     assertRewardSettingsOwner(roles ?? []);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const transport = supabaseAdmin as unknown as RewardSettingsTransport;
     const { data, error } = await transport.schema("burger_boost").rpc("update_settings", args);
-    if (error) throw new Error("Reward settings could not be saved. The approved database update may still be pending.");
+    if (error)
+      throw new Error(
+        "Reward settings could not be saved. The approved database update may still be pending.",
+      );
     const result = parseOwnerRewardSettings(data);
     if (!result.available) throw new Error("Reward settings returned an invalid response.");
     return result;

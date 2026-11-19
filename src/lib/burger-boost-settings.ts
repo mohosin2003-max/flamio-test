@@ -3,8 +3,10 @@ import { validateRewardSettings, type RewardSettings } from "./burger-boost-rewa
 /** Inactive schema contract: generated database types still describe the applied schema. */
 export type RewardSettingsTransport = {
   schema(name: "burger_boost"): {
-    rpc(name: "get_owner_settings" | "update_settings", args?: ReturnType<typeof ownerSettingsArgs>):
-      PromiseLike<{ data: unknown; error: unknown }>;
+    rpc(
+      name: "get_owner_settings" | "update_settings",
+      args?: ReturnType<typeof ownerSettingsArgs>,
+    ): PromiseLike<{ data: unknown; error: unknown }>;
   };
 };
 
@@ -12,9 +14,7 @@ export type RewardSettingsTransport = {
 export function publicRewardSettings(value: unknown): { ownerMax: number } {
   return {
     ownerMax:
-      typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 50
-        ? value
-        : 0,
+      typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 50 ? value : 0,
   };
 }
 
@@ -40,7 +40,13 @@ export type OwnerRewardSettings = {
   available: boolean;
   settings: RewardSettings | null;
   claimExpiryMinutes: number;
-  usage: { date: string; fullUsed: number; fullReserved: number; partialUsed: number; partialReserved: number } | null;
+  usage: {
+    date: string;
+    fullUsed: number;
+    fullReserved: number;
+    partialUsed: number;
+    partialReserved: number;
+  } | null;
 };
 
 export const unavailableOwnerSettings: OwnerRewardSettings = {
@@ -62,8 +68,12 @@ export function parseOwnerRewardSettings(value: unknown): OwnerRewardSettings {
     gateCount: row.gate_count,
   });
   const counters = [row.full_used, row.full_reserved, row.partial_used, row.partial_reserved];
-  if (!check.ok || row.claim_expiry_minutes !== 30 || typeof row.dhaka_date !== "string" ||
-      !counters.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0)) {
+  if (
+    !check.ok ||
+    row.claim_expiry_minutes !== 30 ||
+    typeof row.dhaka_date !== "string" ||
+    !counters.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0)
+  ) {
     return unavailableOwnerSettings;
   }
   return {

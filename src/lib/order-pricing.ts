@@ -47,7 +47,9 @@ export function applyAuthoritativePrices<T extends PriceableLine>(
     if (line.variantId) {
       const v = byVariant.get(line.variantId);
       if (!v || v.product_id !== line.productId || !v.is_available) {
-        throw new Error(`${line.productName} option is no longer available. Please update your cart.`);
+        throw new Error(
+          `${line.productName} option is no longer available. Please update your cart.`,
+        );
       }
       return { ...line, unitPrice: Number(v.price), variantName: v.name };
     }
@@ -57,21 +59,31 @@ export function applyAuthoritativePrices<T extends PriceableLine>(
 
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
 
-export function orderIdempotencyColumns(key: string | null | undefined): Record<string, string | null> {
+export function orderIdempotencyColumns(
+  key: string | null | undefined,
+): Record<string, string | null> {
   if (key != null && !IDEMPOTENCY_KEY_RE.test(key)) throw new Error("Invalid order request id.");
   return { idempotency_key: key ?? null };
 }
 
-export function checkoutRewardSearch(input: Record<string, unknown>): { reservationId?: string | null } {
+export function checkoutRewardSearch(input: Record<string, unknown>): {
+  reservationId?: string | null;
+} {
   const value = input.reservationId;
   if (value == null || value === "") return { reservationId: null };
-  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  ) {
     throw new Error("Invalid reward reservation.");
   }
   return { reservationId: value };
 }
 
-export function assertNoCouponWithReward(couponCode: string | null | undefined, reservationId: string | null | undefined) {
+export function assertNoCouponWithReward(
+  couponCode: string | null | undefined,
+  reservationId: string | null | undefined,
+) {
   if (couponCode && reservationId) {
     throw new Error("A Burger Boost reward can't be combined with a coupon.");
   }
@@ -83,13 +95,24 @@ export function requestFingerprint(input: {
   couponCode?: string | null | undefined;
   reservationId?: string | null | undefined;
   scheduledFor?: string | null | undefined;
-  items: readonly { productId: string; variantId: string | null; quantity: number; comboKey?: string | null | undefined }[];
+  items: readonly {
+    productId: string;
+    variantId: string | null;
+    quantity: number;
+    comboKey?: string | null | undefined;
+  }[];
 }): string {
   const items = input.items
     .map((i) => `${i.productId}|${i.variantId ?? ""}|${i.quantity}|${i.comboKey ?? ""}`)
     .sort()
     .join(",");
-  return [input.fulfillment, input.couponCode ?? "", input.reservationId ?? "", input.scheduledFor ?? "", items].join("#");
+  return [
+    input.fulfillment,
+    input.couponCode ?? "",
+    input.reservationId ?? "",
+    input.scheduledFor ?? "",
+    items,
+  ].join("#");
 }
 
 export type PlacedOrderRef = { id: string; code: string; createdAt: string };
@@ -112,12 +135,15 @@ export class IdempotencyLedger {
     fingerprint: string,
     work: () => Promise<PlacedOrderRef>,
   ): Promise<PlacedOrderRef> {
-    if (!IDEMPOTENCY_KEY_RE.test(key)) return Promise.reject(new Error("Invalid order request id."));
+    if (!IDEMPOTENCY_KEY_RE.test(key))
+      return Promise.reject(new Error("Invalid order request id."));
     const id = `${scope}:${key}`;
     const existing = this.entries.get(id);
     if (existing) {
       if (existing.fingerprint !== fingerprint) {
-        return Promise.reject(new Error("This order request was already used for a different order."));
+        return Promise.reject(
+          new Error("This order request was already used for a different order."),
+        );
       }
       return existing.promise;
     }

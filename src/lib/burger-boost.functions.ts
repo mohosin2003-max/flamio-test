@@ -35,7 +35,11 @@ export const sessionIdSchema = z.object({ sessionId: uuid }).strict();
 
 const actionSchema = z
   .object({
-    gateIndex: z.number().int().min(0).max(BB_GATE_COUNT - 1),
+    gateIndex: z
+      .number()
+      .int()
+      .min(0)
+      .max(BB_GATE_COUNT - 1),
     lane: z.union([z.literal(0), z.literal(1)]),
     t: z.number().int().min(0).max(BB_HARD_CUTOFF_MS),
   })
@@ -48,7 +52,10 @@ export const submitSchema = z
       .array(actionSchema)
       .length(BB_GATE_COUNT)
       .refine((a) => a.every((x, i) => x.gateIndex === i), "actions out of order")
-      .refine((a) => a.every((x, i) => i === 0 || x.t >= (a[i - 1]?.t ?? 0)), "timing out of order"),
+      .refine(
+        (a) => a.every((x, i) => i === 0 || x.t >= (a[i - 1]?.t ?? 0)),
+        "timing out of order",
+      ),
   })
   .strict();
 
@@ -68,15 +75,25 @@ export const MSG = {
 } as const;
 
 export type SafeSession = {
-  sessionId: string; rulesVersion: number; gateCount: number; status: string;
-  startedAt: number; gameplayEndsAt: number; expiresAt: number;
+  sessionId: string;
+  rulesVersion: number;
+  gateCount: number;
+  status: string;
+  startedAt: number;
+  gameplayEndsAt: number;
+  expiresAt: number;
 };
 
 /** Explicit allow-list copy: never spreads a server object to the client. */
 function safe(d: SafeSession): SafeSession {
   return {
-    sessionId: d.sessionId, rulesVersion: d.rulesVersion, gateCount: d.gateCount, status: d.status,
-    startedAt: d.startedAt, gameplayEndsAt: d.gameplayEndsAt, expiresAt: d.expiresAt,
+    sessionId: d.sessionId,
+    rulesVersion: d.rulesVersion,
+    gateCount: d.gateCount,
+    status: d.status,
+    startedAt: d.startedAt,
+    gameplayEndsAt: d.gameplayEndsAt,
+    expiresAt: d.expiresAt,
   };
 }
 
@@ -84,23 +101,55 @@ function safe(d: SafeSession): SafeSession {
 
 type Service = {
   start(userId: string): Promise<SafeSession>;
-  startPractice?(userId: string): Promise<{ ok: true; session: SafeSession } | { ok: false; reason: string }>;
+  startPractice?(
+    userId: string,
+  ): Promise<{ ok: true; session: SafeSession } | { ok: false; reason: string }>;
   get(id: string, userId: string): Promise<SafeSession | null>;
-  submit(id: string, userId: string, payload: unknown): Promise<{ ok: boolean; status: string; error?: string; verifiedScore?: number }>;
+  submit(
+    id: string,
+    userId: string,
+    payload: unknown,
+  ): Promise<{ ok: boolean; status: string; error?: string; verifiedScore?: number }>;
   expire(id: string, userId: string): Promise<{ ok: boolean; status: string }>;
 };
 type RewardDeps = {
-  prepare(userId: string): Promise<{ ok: true; sessionId: string; ackDeadlineAt: number } | { ok: false; reason: string }>;
-  acknowledge(userId: string, id: string): Promise<{ ok: true; sessionId: string; rulesVersion: number; startedAt: number; expiresAt: number } | { ok: false; reason: string }>;
+  prepare(
+    userId: string,
+  ): Promise<
+    { ok: true; sessionId: string; ackDeadlineAt: number } | { ok: false; reason: string }
+  >;
+  acknowledge(
+    userId: string,
+    id: string,
+  ): Promise<
+    | { ok: true; sessionId: string; rulesVersion: number; startedAt: number; expiresAt: number }
+    | { ok: false; reason: string }
+  >;
   isReward(userId: string, id: string): Promise<boolean>;
-  complete(userId: string, id: string, payload: unknown): Promise<{ ok: true; verifiedScore: number; finalMeter: number; outcome: string; awardedDiscountPercent: 0 } | { ok: false; status: string; error: string }>;
+  complete(
+    userId: string,
+    id: string,
+    payload: unknown,
+  ): Promise<
+    | {
+        ok: true;
+        verifiedScore: number;
+        finalMeter: number;
+        outcome: string;
+        awardedDiscountPercent: 0;
+      }
+    | { ok: false; status: string; error: string }
+  >;
 };
 type Limiter = { checkAndRecord(key: string): boolean };
 /** Server-only: builds the answer-free gate view for a session the caller owns. */
 export type PublicGateLoader = (sessionId: string, userId: string) => Promise<PublicGate[] | null>;
 export type ApiDeps = {
-  service: Service; publicGates: PublicGateLoader;
-  createLimiter: Limiter; submitLimiter: Limiter; callerKey: () => string;
+  service: Service;
+  publicGates: PublicGateLoader;
+  createLimiter: Limiter;
+  submitLimiter: Limiter;
+  callerKey: () => string;
   /** Step 66 reward flow. Absent => reward fails closed as unavailable. */
   reward?: RewardDeps;
 };
@@ -136,18 +185,25 @@ export function createBurgerBoostApi(deps: ApiDeps) {
     async create(userId: unknown, input: unknown) {
       const uid = requireUser(userId);
       if (!uid) return { ok: false as const, error: MSG.unauthenticated };
-      if (!createSessionSchema.safeParse(input ?? {}).success) return { ok: false as const, error: MSG.invalid };
-      if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}`)) return { ok: false as const, error: MSG.rateLimited };
+      if (!createSessionSchema.safeParse(input ?? {}).success)
+        return { ok: false as const, error: MSG.invalid };
+      if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}`))
+        return { ok: false as const, error: MSG.rateLimited };
       try {
         // Step 64K: saved games are persisted PRACTICE sessions (v3). Reward stays locked.
-        if (typeof deps.service.startPractice !== "function") throw new Error("practice_unavailable");
+        if (typeof deps.service.startPractice !== "function")
+          throw new Error("practice_unavailable");
         const started = await deps.service.startPractice(uid);
         if (!started.ok) throw new Error("practice_unavailable");
         const session = safe(started.session);
         const publicGates = await deps.publicGates(session.sessionId, uid);
-        if (!publicGates || publicGates.length !== BB_GATE_COUNT) throw new Error("gate_unavailable");
+        if (!publicGates || publicGates.length !== BB_GATE_COUNT)
+          throw new Error("gate_unavailable");
         return { ok: true as const, session, publicGates };
-      } catch (e) { logSafe("create", e); return { ok: false as const, error: MSG.unavailable }; }
+      } catch (e) {
+        logSafe("create", e);
+        return { ok: false as const, error: MSG.unavailable };
+      }
     },
 
     async get(userId: unknown, input: unknown) {
@@ -157,53 +213,110 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       if (!p.success) return { ok: false as const, error: MSG.notFound };
       try {
         const s = await deps.service.get(p.data.sessionId, uid);
-        return s ? { ok: true as const, session: safe(s) } : { ok: false as const, error: MSG.notFound };
-      } catch (e) { logSafe("get", e); return { ok: false as const, error: MSG.unavailable }; }
+        return s
+          ? { ok: true as const, session: safe(s) }
+          : { ok: false as const, error: MSG.notFound };
+      } catch (e) {
+        logSafe("get", e);
+        return { ok: false as const, error: MSG.unavailable };
+      }
     },
 
     async submit(userId: unknown, input: unknown) {
       const uid = requireUser(userId);
-      if (!uid) return { ok: false as const, status: "unauthenticated", error: MSG.unauthenticated };
+      if (!uid)
+        return { ok: false as const, status: "unauthenticated", error: MSG.unauthenticated };
       const p = submitSchema.safeParse(input);
       if (!p.success) return { ok: false as const, status: "invalid_input", error: MSG.invalid };
       if (deps.submitLimiter.checkAndRecord(`${deps.callerKey()}|${uid}`)) {
         return { ok: false as const, status: "rate_limited", error: MSG.rateLimited };
       }
       try {
-        if (deps.reward && await deps.reward.isReward(uid, p.data.sessionId)) {
-          const rr = await deps.reward.complete(uid, p.data.sessionId, { playerActions: p.data.playerActions });
-          if (rr.ok) return { ok: true as const, status: "completed" as const, verifiedScore: rr.verifiedScore, awardedDiscountPercent: 0 as const, rewardOutcome: rr.outcome };
-          const error = rr.status === "not_found" ? MSG.notFound : rr.status === "expired" ? MSG.expired
-            : rr.status === "rejected" ? MSG.invalid : rr.status === "unavailable" ? MSG.unavailable : MSG.inactive;
+        if (deps.reward && (await deps.reward.isReward(uid, p.data.sessionId))) {
+          const rr = await deps.reward.complete(uid, p.data.sessionId, {
+            playerActions: p.data.playerActions,
+          });
+          if (rr.ok)
+            return {
+              ok: true as const,
+              status: "completed" as const,
+              verifiedScore: rr.verifiedScore,
+              awardedDiscountPercent: 0 as const,
+              rewardOutcome: rr.outcome,
+            };
+          const error =
+            rr.status === "not_found"
+              ? MSG.notFound
+              : rr.status === "expired"
+                ? MSG.expired
+                : rr.status === "rejected"
+                  ? MSG.invalid
+                  : rr.status === "unavailable"
+                    ? MSG.unavailable
+                    : MSG.inactive;
           return { ok: false as const, status: rr.status, error };
         }
         // Only validated actions travel to the core; nothing else from the client.
-        const r = await deps.service.submit(p.data.sessionId, uid, { playerActions: p.data.playerActions });
+        const r = await deps.service.submit(p.data.sessionId, uid, {
+          playerActions: p.data.playerActions,
+        });
         // verifiedScore comes only from the server replay; discount is locked at 0.
         if (r.ok) {
-          if (typeof r.verifiedScore !== "number" || !Number.isFinite(r.verifiedScore)) throw new Error("score_missing");
-          return { ok: true as const, status: "completed" as const, verifiedScore: r.verifiedScore, awardedDiscountPercent: 0 as const };
+          if (typeof r.verifiedScore !== "number" || !Number.isFinite(r.verifiedScore))
+            throw new Error("score_missing");
+          return {
+            ok: true as const,
+            status: "completed" as const,
+            verifiedScore: r.verifiedScore,
+            awardedDiscountPercent: 0 as const,
+          };
         }
-        const error = r.status === "not_found" ? MSG.notFound
-          : r.status === "expired" ? MSG.expired
-          : r.status === "rejected" ? MSG.invalid
-          : r.status === "clock_anomaly" ? MSG.unavailable
-          : MSG.inactive;
-        return { ok: false as const, status: r.status === "clock_anomaly" ? "unavailable" : r.status, error };
-      } catch (e) { logSafe("submit", e); return { ok: false as const, status: "unavailable", error: MSG.unavailable }; }
+        const error =
+          r.status === "not_found"
+            ? MSG.notFound
+            : r.status === "expired"
+              ? MSG.expired
+              : r.status === "rejected"
+                ? MSG.invalid
+                : r.status === "clock_anomaly"
+                  ? MSG.unavailable
+                  : MSG.inactive;
+        return {
+          ok: false as const,
+          status: r.status === "clock_anomaly" ? "unavailable" : r.status,
+          error,
+        };
+      } catch (e) {
+        logSafe("submit", e);
+        return { ok: false as const, status: "unavailable", error: MSG.unavailable };
+      }
     },
 
     async prepareReward(userId: unknown, input: unknown) {
       const uid = requireUser(userId);
       if (!uid) return { ok: false as const, error: MSG.unauthenticated };
-      if (!createSessionSchema.safeParse(input ?? {}).success) return { ok: false as const, error: MSG.invalid };
-      if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}|reward`)) return { ok: false as const, error: MSG.rateLimited };
+      if (!createSessionSchema.safeParse(input ?? {}).success)
+        return { ok: false as const, error: MSG.invalid };
+      if (deps.createLimiter.checkAndRecord(`${deps.callerKey()}|${uid}|reward`))
+        return { ok: false as const, error: MSG.rateLimited };
       if (!deps.reward) return { ok: false as const, error: MSG.unavailable };
       try {
         const r = await deps.reward.prepare(uid);
-        if (r.ok) return { ok: true as const, sessionId: r.sessionId, ackDeadlineAt: r.ackDeadlineAt, ackWindowMs: 15_000 };
-        return { ok: false as const, error: r.reason === "attempt_used" ? MSG.attemptUsed : MSG.unavailable };
-      } catch (e) { logSafe("prepareReward", e); return { ok: false as const, error: MSG.unavailable }; }
+        if (r.ok)
+          return {
+            ok: true as const,
+            sessionId: r.sessionId,
+            ackDeadlineAt: r.ackDeadlineAt,
+            ackWindowMs: 15_000,
+          };
+        return {
+          ok: false as const,
+          error: r.reason === "attempt_used" ? MSG.attemptUsed : MSG.unavailable,
+        };
+      } catch (e) {
+        logSafe("prepareReward", e);
+        return { ok: false as const, error: MSG.unavailable };
+      }
     },
 
     async acknowledgeReward(userId: unknown, input: unknown) {
@@ -215,16 +328,35 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       try {
         const r = await deps.reward.acknowledge(uid, p.data.sessionId);
         if (!r.ok) {
-          const error = r.reason === "ack_expired" ? MSG.ackExpired : r.reason === "attempt_used" ? MSG.attemptUsed
-            : r.reason === "not_found" ? MSG.notFound : r.reason === "invalid_state" ? MSG.inactive : MSG.unavailable;
+          const error =
+            r.reason === "ack_expired"
+              ? MSG.ackExpired
+              : r.reason === "attempt_used"
+                ? MSG.attemptUsed
+                : r.reason === "not_found"
+                  ? MSG.notFound
+                  : r.reason === "invalid_state"
+                    ? MSG.inactive
+                    : MSG.unavailable;
           return { ok: false as const, error };
         }
         const publicGates = await deps.publicGates(r.sessionId, uid);
-        if (!publicGates || publicGates.length !== BB_GATE_COUNT) throw new Error("gate_unavailable");
-        const session = safe({ sessionId: r.sessionId, rulesVersion: r.rulesVersion, gateCount: BB_GATE_COUNT, status: "in_progress",
-          startedAt: r.startedAt, gameplayEndsAt: r.startedAt + 60_000, expiresAt: r.expiresAt });
+        if (!publicGates || publicGates.length !== BB_GATE_COUNT)
+          throw new Error("gate_unavailable");
+        const session = safe({
+          sessionId: r.sessionId,
+          rulesVersion: r.rulesVersion,
+          gateCount: BB_GATE_COUNT,
+          status: "in_progress",
+          startedAt: r.startedAt,
+          gameplayEndsAt: r.startedAt + 60_000,
+          expiresAt: r.expiresAt,
+        });
         return { ok: true as const, session, publicGates };
-      } catch (e) { logSafe("acknowledgeReward", e); return { ok: false as const, error: MSG.unavailable }; }
+      } catch (e) {
+        logSafe("acknowledgeReward", e);
+        return { ok: false as const, error: MSG.unavailable };
+      }
     },
 
     async expire(userId: unknown, input: unknown) {
@@ -235,8 +367,19 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       try {
         const r = await deps.service.expire(p.data.sessionId, uid);
         if (r.ok) return { ok: true as const, status: "expired" as const };
-        return { ok: false as const, error: r.status === "not_found" ? MSG.notFound : r.status === "not_due" ? MSG.notDue : MSG.inactive };
-      } catch (e) { logSafe("expire", e); return { ok: false as const, error: MSG.unavailable }; }
+        return {
+          ok: false as const,
+          error:
+            r.status === "not_found"
+              ? MSG.notFound
+              : r.status === "not_due"
+                ? MSG.notDue
+                : MSG.inactive,
+        };
+      } catch (e) {
+        logSafe("expire", e);
+        return { ok: false as const, error: MSG.unavailable };
+      }
     },
   };
 }
@@ -256,12 +399,16 @@ function serverApi() {
     const transport = adapter.createSupabaseBurgerBoostTransport(supabaseAdmin);
     const repo = adapter.createBurgerBoostSessionRepository({ transport });
     const service = core.createBurgerBoostSessionService({
-      repo, now: () => Date.now(), newId: () => globalThis.crypto.randomUUID(),
+      repo,
+      now: () => Date.now(),
+      newId: () => globalThis.crypto.randomUUID(),
     });
     const rewardMod = await import("@/lib/burger-boost-reward-service");
     const reward = rewardMod.createRewardService({
-      transport: adapter.createSupabaseRewardTransport(supabaseAdmin), repo,
-      now: () => Date.now(), newId: () => globalThis.crypto.randomUUID(),
+      transport: adapter.createSupabaseRewardTransport(supabaseAdmin),
+      repo,
+      now: () => Date.now(),
+      newId: () => globalThis.crypto.randomUUID(),
     });
     return createBurgerBoostApi({
       service,
@@ -272,34 +419,38 @@ function serverApi() {
       reward,
     });
   })();
-  apiPromise.catch(() => { apiPromise = null; });
+  apiPromise.catch(() => {
+    apiPromise = null;
+  });
   return apiPromise;
 }
 
 /* --------------------------- server functions --------------------------- */
 
 /** Public scalar only, through the draft's narrow read-only RPC and anon grants. */
-export const getBurgerBoostPublicSettings = createServerFn({ method: "GET" })
-  .handler(async () => {
-    try {
-      const url = process.env["SUPABASE_URL"];
-      const key = process.env["SUPABASE_PUBLISHABLE_KEY"] ?? process.env["SUPABASE_ANON_KEY"];
-      if (!url || !key) return publicRewardSettings(null);
-      const client = createClient(url, key, {
-        auth: { persistSession: false, autoRefreshToken: false },
-        global: { fetch: (input, init) => {
+export const getBurgerBoostPublicSettings = createServerFn({ method: "GET" }).handler(async () => {
+  try {
+    const url = process.env["SUPABASE_URL"];
+    const key = process.env["SUPABASE_PUBLISHABLE_KEY"] ?? process.env["SUPABASE_ANON_KEY"];
+    if (!url || !key) return publicRewardSettings(null);
+    const client = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        fetch: (input, init) => {
           const headers = new Headers(init?.headers);
-          if (key.startsWith("sb_") && headers.get("Authorization") === `Bearer ${key}`) headers.delete("Authorization");
+          if (key.startsWith("sb_") && headers.get("Authorization") === `Bearer ${key}`)
+            headers.delete("Authorization");
           headers.set("apikey", key);
           return fetch(input, { ...init, headers });
-        } },
-      });
-      const { data, error } = await client.schema("burger_boost").rpc("get_public_owner_max");
-      return publicRewardSettings(error ? null : data);
-    } catch {
-      return publicRewardSettings(null);
-    }
-  });
+        },
+      },
+    });
+    const { data, error } = await client.schema("burger_boost").rpc("get_public_owner_max");
+    return publicRewardSettings(error ? null : data);
+  } catch {
+    return publicRewardSettings(null);
+  }
+});
 
 export const createBurgerBoostSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -329,4 +480,6 @@ export const prepareBurgerBoostRewardSession = createServerFn({ method: "POST" }
 export const acknowledgeBurgerBoostRewardStart = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => sessionIdSchema.parse(input))
-  .handler(async ({ context, data }) => (await serverApi()).acknowledgeReward(context.userId, data));
+  .handler(async ({ context, data }) =>
+    (await serverApi()).acknowledgeReward(context.userId, data),
+  );

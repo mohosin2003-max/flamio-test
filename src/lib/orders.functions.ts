@@ -62,11 +62,7 @@ function lookupCallerKey(): string {
 }
 
 /** Records one attempt; returns true when the key is over its limit. */
-function recordAndCheckLimit(
-  log: Map<string, number[]>,
-  key: string,
-  max: number,
-): boolean {
+function recordAndCheckLimit(log: Map<string, number[]>, key: string, max: number): boolean {
   const now = Date.now();
   // Bound memory: drop the whole log if it grows past the cap.
   if (log.size > MAX_TRACKED_LOOKUP_KEYS) log.clear();
@@ -168,67 +164,73 @@ export const placeOrder = createServerFn({ method: "POST" })
   });
 
 async function placeOrderOnce(data: PlaceOrderInput, userId: string | null) {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // Only an authorized counter user may record a counter sale; anything else
-    // from the browser is treated as a normal online order.
-    let channel: "online" | "counter" = "online";
-    if (data.channel === "counter") {
-      if (!userId) throw new Error("Please sign in to record a counter sale.");
-      const { assertPermission } = await import("@/lib/owner.server");
-      await assertPermission(userId, "pos");
-      channel = "counter";
-    } else if (!userId) {
-      // Online customer orders require a signed-in account (session verified server-side).
-      throw new Error("Please sign in or create an account to place your order.");
-    } else {
-      // Staff accounts use the counter till, not the customer cart.
-      const { getAccessProfile } = await import("@/lib/owner.server");
-      const access = await getAccessProfile(userId);
-      if (access.isStaff || access.isManager) {
-        throw new Error("Owner and staff accounts can't place customer orders. Use Counter sale instead.");
-      }
+  // Only an authorized counter user may record a counter sale; anything else
+  // from the browser is treated as a normal online order.
+  let channel: "online" | "counter" = "online";
+  if (data.channel === "counter") {
+    if (!userId) throw new Error("Please sign in to record a counter sale.");
+    const { assertPermission } = await import("@/lib/owner.server");
+    await assertPermission(userId, "pos");
+    channel = "counter";
+  } else if (!userId) {
+    // Online customer orders require a signed-in account (session verified server-side).
+    throw new Error("Please sign in or create an account to place your order.");
+  } else {
+    // Staff accounts use the counter till, not the customer cart.
+    const { getAccessProfile } = await import("@/lib/owner.server");
+    const access = await getAccessProfile(userId);
+    if (access.isStaff || access.isManager) {
+      throw new Error(
+        "Owner and staff accounts can't place customer orders. Use Counter sale instead.",
+      );
     }
+  }
 
-    // Opening hours (Asia/Dhaka) are authoritative here. Counter sales are
-    // never affected; online orders need an open restaurant or a valid slot.
-    let scheduledFor: string | null = null;
-    let scheduledActivateAt: string | null = null;
-    if (channel === "online") {
-      const { loadHoursSettings } = await import("@/lib/opening-hours.server");
-      const { isOpenAt, isValidSlot, canScheduleNow } = await import("@/lib/opening-hours");
-      const hours = await loadHoursSettings();
-      if (data.scheduledFor) {
-        if (!canScheduleNow(hours)) throw new Error("Scheduled orders aren't available right now.");
-        if (hours.paymentRequired) {
-          throw new Error("Online payment is required for scheduled orders and isn't available yet.");
-        }
-        if (!isValidSlot(hours, data.scheduledFor)) {
-          throw new Error("That time slot is no longer available. Please pick another time.");
-        }
-        const at = new Date(data.scheduledFor).getTime();
-        scheduledFor = new Date(at).toISOString();
-        scheduledActivateAt = new Date(at - hours.prepMinutes * 60_000).toISOString();
-      } else if (!isOpenAt(hours)) {
-        throw new Error("We're closed right now. You can schedule this order for later.");
+  // Opening hours (Asia/Dhaka) are authoritative here. Counter sales are
+  // never affected; online orders need an open restaurant or a valid slot.
+  let scheduledFor: string | null = null;
+  let scheduledActivateAt: string | null = null;
+  if (channel === "online") {
+    const { loadHoursSettings } = await import("@/lib/opening-hours.server");
+    const { isOpenAt, isValidSlot, canScheduleNow } = await import("@/lib/opening-hours");
+    const hours = await loadHoursSettings();
+    if (data.scheduledFor) {
+      if (!canScheduleNow(hours)) throw new Error("Scheduled orders aren't available right now.");
+      if (hours.paymentRequired) {
+        throw new Error("Online payment is required for scheduled orders and isn't available yet.");
       }
+      if (!isValidSlot(hours, data.scheduledFor)) {
+        throw new Error("That time slot is no longer available. Please pick another time.");
+      }
+      const at = new Date(data.scheduledFor).getTime();
+      scheduledFor = new Date(at).toISOString();
+      scheduledActivateAt = new Date(at - hours.prepMinutes * 60_000).toISOString();
+    } else if (!isOpenAt(hours)) {
+      throw new Error("We're closed right now. You can schedule this order for later.");
     }
+  }
 
-    // Combo lines are re-checked against the owner's configuration and the live
-    // menu, then re-priced here. Availability, selection rules and combo prices
-    // are decided by the server; anything sent by the browser is ignored.
-    const { validateComboItems } = await import("@/lib/combos.server");
-    let items = await validateComboItems(data.items);
+  // Combo lines are re-checked against the owner's configuration and the live
+  // menu, then re-priced here. Availability, selection rules and combo prices
+  // are decided by the server; anything sent by the browser is ignored.
+  const { validateComboItems } = await import("@/lib/combos.server");
+  let items = await validateComboItems(data.items);
 
-    // Step 4B financial authority: online non-combo lines are re-priced from
-    // the database. A browser-sent unitPrice is never used for online orders.
-    if (channel === "online") {
-      const plain = items.filter((i) => !i.comboKey);
-      const productIds = [...new Set(plain.map((i) => i.productId))];
-      const variantIds = [...new Set(plain.map((i) => i.variantId).filter(Boolean))] as string[];
-      const [{ data: productRows, error: pErr }, { data: variantRows, error: vErr }] = await Promise.all([
+  // Step 4B financial authority: online non-combo lines are re-priced from
+  // the database. A browser-sent unitPrice is never used for online orders.
+  if (channel === "online") {
+    const plain = items.filter((i) => !i.comboKey);
+    const productIds = [...new Set(plain.map((i) => i.productId))];
+    const variantIds = [...new Set(plain.map((i) => i.variantId).filter(Boolean))] as string[];
+    const [{ data: productRows, error: pErr }, { data: variantRows, error: vErr }] =
+      await Promise.all([
         productIds.length
-          ? supabaseAdmin.from("products").select("id, base_price, is_available").in("id", productIds)
+          ? supabaseAdmin
+              .from("products")
+              .select("id, base_price, is_available")
+              .in("id", productIds)
           : Promise.resolve({ data: [], error: null }),
         variantIds.length
           ? supabaseAdmin
@@ -237,238 +239,243 @@ async function placeOrderOnce(data: PlaceOrderInput, userId: string | null) {
               .in("id", variantIds)
           : Promise.resolve({ data: [], error: null }),
       ]);
-      if (pErr || vErr) {
-        console.error("Menu price lookup failed", pErr ?? vErr);
-        throw new Error("We couldn't load menu prices. Please try again.");
+    if (pErr || vErr) {
+      console.error("Menu price lookup failed", pErr ?? vErr);
+      throw new Error("We couldn't load menu prices. Please try again.");
+    }
+    items = applyAuthoritativePrices(items, productRows ?? [], variantRows ?? []);
+  }
+
+  // Step 4B Reward Mode: a reservation routes to the atomic database
+  // function. callAtomicRewardOrder refuses while the checkout release lock
+  // is closed, so this always stops here today.
+  if (data.reservationId) {
+    if (channel !== "online" || !userId)
+      throw new Error("Burger Boost rewards apply to signed-in online orders only.");
+    assertRewardCheckoutAllowed();
+  }
+
+  // Persistent Counter Sale price (products.counter_price), read from the
+  // database and enforced here for every counter sale (Owner and Staff).
+  // Online orders never reach this; empty means the normal menu price.
+  if (channel === "counter") {
+    const ids = [
+      ...new Set(items.filter((i) => !i.comboKey && !i.variantId).map((i) => i.productId)),
+    ];
+    if (ids.length > 0) {
+      const { data: priced, error: priceError } = await supabaseAdmin
+        .from("products")
+        .select("id, counter_price")
+        .in("id", ids);
+      if (priceError) {
+        console.error("Counter price lookup failed", priceError);
+        throw new Error("We couldn't load Counter Sale prices. Please try again.");
       }
-      items = applyAuthoritativePrices(items, productRows ?? [], variantRows ?? []);
-    }
-
-    // Step 4B Reward Mode: a reservation routes to the atomic database
-    // function. callAtomicRewardOrder refuses while the checkout release lock
-    // is closed, so this always stops here today.
-    if (data.reservationId) {
-      if (channel !== "online" || !userId) throw new Error("Burger Boost rewards apply to signed-in online orders only.");
-      assertRewardCheckoutAllowed();
-    }
-
-    // Persistent Counter Sale price (products.counter_price), read from the
-    // database and enforced here for every counter sale (Owner and Staff).
-    // Online orders never reach this; empty means the normal menu price.
-    if (channel === "counter") {
-      const ids = [...new Set(items.filter((i) => !i.comboKey && !i.variantId).map((i) => i.productId))];
-      if (ids.length > 0) {
-        const { data: priced, error: priceError } = await supabaseAdmin
-          .from("products")
-          .select("id, counter_price")
-          .in("id", ids);
-        if (priceError) {
-          console.error("Counter price lookup failed", priceError);
-          throw new Error("We couldn't load Counter Sale prices. Please try again.");
-        }
-        const byId = new Map((priced ?? []).map((p) => [p.id, p.counter_price]));
-        for (const item of items) {
-          const cp = byId.get(item.productId);
-          if (cp != null && !item.comboKey && !item.variantId) item.unitPrice = Number(cp);
-        }
+      const byId = new Map((priced ?? []).map((p) => [p.id, p.counter_price]));
+      for (const item of items) {
+        const cp = byId.get(item.productId);
+        if (cp != null && !item.comboKey && !item.variantId) item.unitPrice = Number(cp);
       }
     }
+  }
 
-    // Recompute money server-side; never trust totals from the browser.
-    const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-    // Coupons are validated and priced on the server only.
-    let couponCode: string | null = null;
-    /**
-     * A manual discount is only ever entered at the counter till, which is
-     * authorized above with the `pos` permission. A customer order can only be
-     * discounted by a coupon, which is re-priced on the server below, so a
-     * discount sent from the browser is ignored for online orders.
-     */
-    let discount = channel === "counter" ? Math.min(data.discount, subtotal) : 0;
-    if (data.couponCode) {
-      const { couponDiscountFor, loadCouponByCode } = await import("@/lib/coupons.functions");
-      const coupon = await loadCouponByCode(data.couponCode);
-      if (!coupon) throw new Error("That coupon code isn't valid.");
-      const result = couponDiscountFor(coupon, subtotal);
-      if ("error" in result) throw new Error(result.error);
-      discount = result.discount;
-      couponCode = coupon.code;
+  // Recompute money server-side; never trust totals from the browser.
+  const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  // Coupons are validated and priced on the server only.
+  let couponCode: string | null = null;
+  /**
+   * A manual discount is only ever entered at the counter till, which is
+   * authorized above with the `pos` permission. A customer order can only be
+   * discounted by a coupon, which is re-priced on the server below, so a
+   * discount sent from the browser is ignored for online orders.
+   */
+  let discount = channel === "counter" ? Math.min(data.discount, subtotal) : 0;
+  if (data.couponCode) {
+    const { couponDiscountFor, loadCouponByCode } = await import("@/lib/coupons.functions");
+    const coupon = await loadCouponByCode(data.couponCode);
+    if (!coupon) throw new Error("That coupon code isn't valid.");
+    const result = couponDiscountFor(coupon, subtotal);
+    if ("error" in result) throw new Error(result.error);
+    discount = result.discount;
+    couponCode = coupon.code;
+  }
+  const isDelivery = data.fulfillment === "delivery";
+
+  if (isDelivery && !data.addressLine) {
+    throw new Error("A delivery address is required.");
+  }
+
+  // Distance-based delivery: when the owner has configured radius zones the
+  // charge, zone and estimated time are recalculated here from the pinned
+  // coordinates. Anything sent by the browser is ignored. With no radius
+  // zones configured this block is inert and the original area-based
+  // behaviour is used unchanged.
+  let deliveryCharge = isDelivery ? data.deliveryCharge : 0;
+  let zoneId = isDelivery ? data.zoneId : null;
+  let zoneName = isDelivery ? data.zoneName : null;
+  let estimatedTime = data.estimatedTime;
+  let distanceM: number | null = null;
+  let latitude = isDelivery ? data.latitude : null;
+  let longitude = isDelivery ? data.longitude : null;
+
+  if (isDelivery) {
+    const { resolveLocationDelivery } = await import("@/lib/delivery.server");
+    const located = await resolveLocationDelivery({
+      latitude: data.latitude,
+      longitude: data.longitude,
+      subtotal,
+      discount,
+    });
+    if (located.radiusMode) {
+      if (!located.available) {
+        throw new Error(located.message ?? "We can't deliver to that location.");
+      }
+      if (!located.meetsMinimumOrder) {
+        throw new Error(`The minimum order for delivery is ${located.minimumOrder}.`);
+      }
+      deliveryCharge = located.charge;
+      zoneId = located.zoneSlug;
+      zoneName = located.zoneName;
+      estimatedTime = located.estimatedTime;
+      distanceM = located.distanceM;
     }
-    const isDelivery = data.fulfillment === "delivery";
+  } else {
+    latitude = null;
+    longitude = null;
+  }
 
-    if (isDelivery && !data.addressLine) {
-      throw new Error("A delivery address is required.");
-    }
+  const total = Math.max(subtotal - discount, 0) + deliveryCharge;
 
-    // Distance-based delivery: when the owner has configured radius zones the
-    // charge, zone and estimated time are recalculated here from the pinned
-    // coordinates. Anything sent by the browser is ignored. With no radius
-    // zones configured this block is inert and the original area-based
-    // behaviour is used unchanged.
-    let deliveryCharge = isDelivery ? data.deliveryCharge : 0;
-    let zoneId = isDelivery ? data.zoneId : null;
-    let zoneName = isDelivery ? data.zoneName : null;
-    let estimatedTime = data.estimatedTime;
-    let distanceM: number | null = null;
-    let latitude = isDelivery ? data.latitude : null;
-    let longitude = isDelivery ? data.longitude : null;
+  let inserted: { id: string; code: string; created_at: string } | null = null;
+  let lastError: unknown = null;
 
-    if (isDelivery) {
-      const { resolveLocationDelivery } = await import("@/lib/delivery.server");
-      const located = await resolveLocationDelivery({
-        latitude: data.latitude,
-        longitude: data.longitude,
+  for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
+    const { data: row, error } = await supabaseAdmin
+      .from("orders")
+      .insert({
+        ...orderIdempotencyColumns(data.idempotencyKey),
+        code: orderCode(new Date()),
+        user_id: userId,
+        channel,
+        // Counter sales are confirmed/sold the moment the bill is completed.
+        status: channel === "counter" ? "completed" : scheduledFor ? "scheduled" : "placed",
+        ...({
+          order_kind: scheduledFor ? "scheduled" : "regular",
+          scheduled_for: scheduledFor,
+          scheduled_activate_at: scheduledActivateAt,
+        } as Record<string, unknown>),
+        fulfillment: data.fulfillment,
+        payment_method: data.paymentMethod,
+        payment_label: data.paymentLabel,
+        customer_name: data.customerName,
+        customer_phone: data.customerPhone,
+        address_line: isDelivery ? data.addressLine : null,
+        area: isDelivery ? data.area : null,
+        landmark: isDelivery ? data.landmark : null,
+        delivery_notes: data.deliveryNotes,
+        zone_id: zoneId,
+        zone_name: zoneName,
+        latitude,
+        longitude,
+        distance_m: distanceM,
+        estimated_time: estimatedTime,
+        pickup_note: isDelivery ? null : data.pickupNote,
         subtotal,
         discount,
-      });
-      if (located.radiusMode) {
-        if (!located.available) {
-          throw new Error(located.message ?? "We can't deliver to that location.");
-        }
-        if (!located.meetsMinimumOrder) {
-          throw new Error(`The minimum order for delivery is ${located.minimumOrder}.`);
-        }
-        deliveryCharge = located.charge;
-        zoneId = located.zoneSlug;
-        zoneName = located.zoneName;
-        estimatedTime = located.estimatedTime;
-        distanceM = located.distanceM;
+        delivery_charge: deliveryCharge,
+        total,
+        coupon_code: couponCode,
+      })
+      .select("id, code, created_at")
+      .single();
+
+    if (error) {
+      lastError = error;
+      if (error.code === "42703" || error.code === "PGRST204") {
+        throw new Error(
+          "Order placement is unavailable until the approved order schema update is applied.",
+        );
       }
-    } else {
-      latitude = null;
-      longitude = null;
+      // 23505 = duplicate order code; regenerate and retry.
+      if (error.code !== "23505") break;
+      continue;
     }
+    inserted = row;
+  }
 
-    const total = Math.max(subtotal - discount, 0) + deliveryCharge;
+  if (!inserted) {
+    console.error("Order insert failed", lastError);
+    throw new Error("We couldn't save your order. Please try again.");
+  }
 
-    let inserted: { id: string; code: string; created_at: string } | null = null;
-    let lastError: unknown = null;
+  const { error: itemsError } = await supabaseAdmin.from("order_items").insert(
+    items.map((i) => ({
+      order_id: inserted.id,
+      product_id: i.productId,
+      product_slug: i.productSlug,
+      product_name: i.productName,
+      variant_id: i.variantId,
+      variant_name: i.variantName,
+      unit_price: i.unitPrice,
+      quantity: i.quantity,
+      image_url: i.imageUrl,
+      combo_name: i.comboName ?? null,
+      combo_key: i.comboKey ?? null,
+    })),
+  );
 
-    for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
-      const { data: row, error } = await supabaseAdmin
-        .from("orders")
-        .insert({
-          ...orderIdempotencyColumns(data.idempotencyKey),
-          code: orderCode(new Date()),
-          user_id: userId,
-          channel,
-          // Counter sales are confirmed/sold the moment the bill is completed.
-          status: channel === "counter" ? "completed" : scheduledFor ? "scheduled" : "placed",
-          ...({
-            order_kind: scheduledFor ? "scheduled" : "regular",
-            scheduled_for: scheduledFor,
-            scheduled_activate_at: scheduledActivateAt,
-          } as Record<string, unknown>),
-          fulfillment: data.fulfillment,
-          payment_method: data.paymentMethod,
-          payment_label: data.paymentLabel,
-          customer_name: data.customerName,
-          customer_phone: data.customerPhone,
-          address_line: isDelivery ? data.addressLine : null,
-          area: isDelivery ? data.area : null,
-          landmark: isDelivery ? data.landmark : null,
-          delivery_notes: data.deliveryNotes,
-          zone_id: zoneId,
-          zone_name: zoneName,
-          latitude,
-          longitude,
-          distance_m: distanceM,
-          estimated_time: estimatedTime,
-          pickup_note: isDelivery ? null : data.pickupNote,
-          subtotal,
-          discount,
-          delivery_charge: deliveryCharge,
-          total,
-          coupon_code: couponCode,
-        })
-        .select("id, code, created_at")
-        .single();
+  if (itemsError) {
+    console.error("Order items insert failed", itemsError);
+    await supabaseAdmin.from("orders").delete().eq("id", inserted.id);
+    throw new Error("We couldn't save your order items. Please try again.");
+  }
 
-      if (error) {
-        lastError = error;
-        if (error.code === "42703" || error.code === "PGRST204") {
-          throw new Error("Order placement is unavailable until the approved order schema update is applied.");
-        }
-        // 23505 = duplicate order code; regenerate and retry.
-        if (error.code !== "23505") break;
-        continue;
-      }
-      inserted = row;
-    }
-
-    if (!inserted) {
-      console.error("Order insert failed", lastError);
-      throw new Error("We couldn't save your order. Please try again.");
-    }
-
-    const { error: itemsError } = await supabaseAdmin.from("order_items").insert(
-      items.map((i) => ({
-        order_id: inserted.id,
-        product_id: i.productId,
-        product_slug: i.productSlug,
-        product_name: i.productName,
-        variant_id: i.variantId,
-        variant_name: i.variantName,
-        unit_price: i.unitPrice,
-        quantity: i.quantity,
-        image_url: i.imageUrl,
-        combo_name: i.comboName ?? null,
-        combo_key: i.comboKey ?? null,
-      })),
-    );
-
-    if (itemsError) {
-      console.error("Order items insert failed", itemsError);
-      await supabaseAdmin.from("orders").delete().eq("id", inserted.id);
-      throw new Error("We couldn't save your order items. Please try again.");
-    }
-
-    // Count the coupon once, after the order is safely stored.
-    if (couponCode) {
-      const { data: couponRow } = await supabaseAdmin
-        .from("coupons")
-        .select("id, times_used")
-        .eq("code", couponCode)
-        .maybeSingle();
-      if (couponRow) {
-        await supabaseAdmin
-          .from("coupons")
-          .update({ times_used: couponRow.times_used + 1 })
-          .eq("id", couponRow.id);
-      }
-    }
-
-    // Ingredient stock is consumed only after the order and its items are
-    // safely stored. The DB function is idempotent per order, so a retry can
-    // never reduce stock twice, and failures here never block the order.
-    // In Simple mode the restaurant only tracks purchases, so automatic
-    // deduction is skipped for new orders. Advanced mode (the default) keeps
-    // the existing behaviour untouched.
-    const { data: settingsRow } = await supabaseAdmin
-      .from("restaurant_settings")
-      .select("inventory_mode")
-      .order("created_at")
-      .limit(1)
+  // Count the coupon once, after the order is safely stored.
+  if (couponCode) {
+    const { data: couponRow } = await supabaseAdmin
+      .from("coupons")
+      .select("id, times_used")
+      .eq("code", couponCode)
       .maybeSingle();
-
-    if (settingsRow?.inventory_mode !== "simple") {
-      const { error: stockError } = await supabaseAdmin.rpc("consume_inventory_for_order", {
-        _order_id: inserted.id,
-      });
-      if (stockError) console.error("Inventory consumption failed", stockError);
+    if (couponRow) {
+      await supabaseAdmin
+        .from("coupons")
+        .update({ times_used: couponRow.times_used + 1 })
+        .eq("id", couponRow.id);
     }
+  }
 
-    // The database already queued the staff new-order alert (and its
-    // escalation timer). Run the due queue now so the alert is instant instead
-    // of waiting for the next scheduled run. Never blocks the order.
-    try {
-      const { dispatchDueNotificationJobs } = await import("@/lib/push.server");
-      await dispatchDueNotificationJobs(10);
-    } catch (notifyError) {
-      console.error("New order alert failed", notifyError);
-    }
+  // Ingredient stock is consumed only after the order and its items are
+  // safely stored. The DB function is idempotent per order, so a retry can
+  // never reduce stock twice, and failures here never block the order.
+  // In Simple mode the restaurant only tracks purchases, so automatic
+  // deduction is skipped for new orders. Advanced mode (the default) keeps
+  // the existing behaviour untouched.
+  const { data: settingsRow } = await supabaseAdmin
+    .from("restaurant_settings")
+    .select("inventory_mode")
+    .order("created_at")
+    .limit(1)
+    .maybeSingle();
 
-    return { id: inserted.id, code: inserted.code, createdAt: inserted.created_at };
+  if (settingsRow?.inventory_mode !== "simple") {
+    const { error: stockError } = await supabaseAdmin.rpc("consume_inventory_for_order", {
+      _order_id: inserted.id,
+    });
+    if (stockError) console.error("Inventory consumption failed", stockError);
+  }
+
+  // The database already queued the staff new-order alert (and its
+  // escalation timer). Run the due queue now so the alert is instant instead
+  // of waiting for the next scheduled run. Never blocks the order.
+  try {
+    const { dispatchDueNotificationJobs } = await import("@/lib/push.server");
+    await dispatchDueNotificationJobs(10);
+  } catch (notifyError) {
+    console.error("New order alert failed", notifyError);
+  }
+
+  return { id: inserted.id, code: inserted.code, createdAt: inserted.created_at };
 }
 
 export const getOrder = createServerFn({ method: "GET" })
@@ -486,8 +493,9 @@ export const getOrder = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { getOptionalUserId } = await import("@/lib/auth.server");
 
-    const isUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.orderId);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      data.orderId,
+    );
 
     const { data: order, error } = await supabaseAdmin
       .from("orders")
@@ -520,7 +528,10 @@ export const getOrder = createServerFn({ method: "GET" })
         return { requiresPhone: true as const };
       }
       const orderKey = (order.code ?? order.id).toLowerCase();
-      if ((orderFailureLog.get(orderKey) ?? []).filter((t) => Date.now() - t < LOOKUP_WINDOW_MS).length >= MAX_FAILED_ATTEMPTS_PER_ORDER) {
+      if (
+        (orderFailureLog.get(orderKey) ?? []).filter((t) => Date.now() - t < LOOKUP_WINDOW_MS)
+          .length >= MAX_FAILED_ATTEMPTS_PER_ORDER
+      ) {
         return { requiresPhone: true as const };
       }
       const digits = (order.customer_phone ?? "").replace(/\D/g, "");
@@ -551,7 +562,8 @@ export const getOrder = createServerFn({ method: "GET" })
       paymentLabel: order.payment_label,
       orderKind: ((order as Record<string, unknown>)["order_kind"] as string | null) ?? "regular",
       scheduledFor: ((order as Record<string, unknown>)["scheduled_for"] as string | null) ?? null,
-      paymentStatus: ((order as Record<string, unknown>)["payment_status"] as string | null) ?? "unpaid",
+      paymentStatus:
+        ((order as Record<string, unknown>)["payment_status"] as string | null) ?? "unpaid",
       customerName: order.customer_name,
       customerPhone: order.customer_phone,
       addressLine: order.address_line,

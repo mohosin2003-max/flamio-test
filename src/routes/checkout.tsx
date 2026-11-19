@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Pencil, Trash2 } from "lucide-react";
 
-
 import { MapPicker } from "@/components/map/MapPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,10 +31,13 @@ import { checkoutRewardSearch } from "@/lib/order-pricing";
 import { canScheduleNow, formatScheduled, isOpenAt, listSlots } from "@/lib/opening-hours";
 import { getPublicHours } from "@/lib/scheduling.functions";
 import { ScheduleDialog } from "@/components/checkout/ScheduleDialog";
-import { clearPendingCheckout, readPendingCheckout, savePendingCheckout } from "@/lib/pending-checkout";
+import {
+  clearPendingCheckout,
+  readPendingCheckout,
+  savePendingCheckout,
+} from "@/lib/pending-checkout";
 import { cn } from "@/lib/utils";
 import type { CustomerAddress, FulfillmentType } from "@/types/menu";
-
 
 /** Only used before the owner has placed the restaurant on the map. */
 const MAP_FALLBACK = { lat: 24.4449, lng: 90.7766 };
@@ -82,14 +84,22 @@ function CheckoutPage() {
 
   // Opening hours (Asia/Dhaka). The server re-checks everything on submit.
   const fetchHours = useServerFn(getPublicHours);
-  const hoursQuery = useQuery({ queryKey: ["public-hours"], queryFn: () => fetchHours(), refetchInterval: 60_000, staleTime: 30_000 });
+  const hoursQuery = useQuery({
+    queryKey: ["public-hours"],
+    queryFn: () => fetchHours(),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
   const hours = hoursQuery.data ?? null;
   const [scheduledFor, setScheduledFor] = useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [closedPromptShown, setClosedPromptShown] = useState(false);
   const restaurantOpen = hours ? isOpenAt(hours) : true;
   const scheduleAllowed = hours ? canScheduleNow(hours) : false;
-  const slots = useMemo(() => (hours && scheduleAllowed ? listSlots(hours) : []), [hours, scheduleAllowed, hoursQuery.dataUpdatedAt]);
+  const slots = useMemo(
+    () => (hours && scheduleAllowed ? listSlots(hours) : []),
+    [hours, scheduleAllowed, hoursQuery.dataUpdatedAt],
+  );
   const closedWithoutSlot = !restaurantOpen && !scheduledFor;
   useEffect(() => {
     if (hours && !restaurantOpen && !scheduledFor && !closedPromptShown) {
@@ -111,7 +121,6 @@ function CheckoutPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const enabledMethods = paymentMethods.filter((m) => m.isEnabled);
   const [method, setMethod] = useState(enabledMethods[0]?.id ?? "cash_on_delivery");
-
 
   const [fulfillment, setFulfillment] = useState<FulfillmentType>(
     settings.isDeliveryEnabled ? "delivery" : "pickup",
@@ -215,7 +224,6 @@ function CheckoutPage() {
     }));
   }, [profile]);
 
-
   /**
    * Coupons. The code is only ever priced by the existing `checkCoupon` server
    * function, and `placeOrder` re-validates it, so the browser never decides
@@ -278,7 +286,9 @@ function CheckoutPage() {
     queryKey: ["delivery-location-quote", point?.lat, point?.lng, subtotal, discount],
     queryFn: () => {
       if (!point) throw new Error("Select a delivery location.");
-      return quoteLocation({ data: { latitude: point.lat, longitude: point.lng, subtotal, discount } });
+      return quoteLocation({
+        data: { latitude: point.lat, longitude: point.lng, subtotal, discount },
+      });
     },
     enabled: radiusMode && fulfillment === "delivery" && point !== null,
   });
@@ -320,7 +330,6 @@ function CheckoutPage() {
   const grandTotal = Math.max(subtotal - discount, 0) + quote.charge;
 
   if (isHydrated && lines.length === 0 && !placed) {
-
     return (
       <div className="mx-auto w-full max-w-2xl px-4 py-16 sm:px-6">
         <EmptyState
@@ -410,7 +419,12 @@ function CheckoutPage() {
             setSubmitting(false);
             await navigate({
               to: "/auth",
-              search: { redirect: reservationId ? `/checkout?reservationId=${encodeURIComponent(reservationId)}` : "/checkout", from: "checkout" } as never,
+              search: {
+                redirect: reservationId
+                  ? `/checkout?reservationId=${encodeURIComponent(reservationId)}`
+                  : "/checkout",
+                from: "checkout",
+              } as never,
             });
             return;
           }
@@ -420,7 +434,8 @@ function CheckoutPage() {
             zoneId: radiusMode ? (zone?.id ?? null) : zoneId,
             latitude: isDelivery ? (point?.lat ?? null) : null,
             longitude: isDelivery ? (point?.lng ?? null) : null,
-            isDefault: saved.length === 0 || Boolean(saved.find((a) => a.id === form.id)?.isDefault),
+            isDefault:
+              saved.length === 0 || Boolean(saved.find((a) => a.id === form.id)?.isDefault),
           };
           if (isDelivery) {
             try {
@@ -684,9 +699,10 @@ function CheckoutPage() {
                         setLocating(true);
                         navigator.geolocation.getCurrentPosition(
                           (pos) => {
-                            void setDeliveryLocation(pos.coords.latitude, pos.coords.longitude).finally(
-                              () => setLocating(false),
-                            );
+                            void setDeliveryLocation(
+                              pos.coords.latitude,
+                              pos.coords.longitude,
+                            ).finally(() => setLocating(false));
                           },
                           () => {
                             setLocating(false);
@@ -957,7 +973,11 @@ function CheckoutPage() {
                 {isDelivery ? "Delivery charge" : "Delivery (pickup)"}
               </dt>
               <dd className="font-medium">
-                {quote.charge === 0 ? (isDelivery ? "Free" : formatBDT(0)) : formatBDT(quote.charge)}
+                {quote.charge === 0
+                  ? isDelivery
+                    ? "Free"
+                    : formatBDT(0)
+                  : formatBDT(quote.charge)}
               </dd>
             </div>
           </dl>
@@ -970,7 +990,13 @@ function CheckoutPage() {
                     ? `Add ${formatBDT(quote.amountToFreeDelivery)} more to get delivery for only ${formatBDT(zone.reducedDeliveryFee)}.`
                     : `Add ${formatBDT(quote.amountToFreeDelivery)} more to get FREE delivery.`}
                 </p>
-                <Button type="button" variant="outline" size="sm" className="mt-2" onClick={handleAddMoreItems}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={handleAddMoreItems}
+                >
                   Add More Items
                 </Button>
               </>
@@ -1006,9 +1032,7 @@ function CheckoutPage() {
             ) : (
               <div className="mt-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3">
                 <p className="text-sm font-medium text-destructive">
-                  {formatBDT(
-                    Math.max(quote.minimumOrder - Math.max(subtotal - discount, 0), 0),
-                  )}{" "}
+                  {formatBDT(Math.max(quote.minimumOrder - Math.max(subtotal - discount, 0), 0))}{" "}
                   more needed to place this delivery order.
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1047,9 +1071,21 @@ function CheckoutPage() {
             <div className="mt-4 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3 text-sm">
               <p className="font-semibold">Scheduled for {formatScheduled(scheduledFor)}</p>
               <div className="mt-1 flex gap-3 text-xs">
-                <button type="button" className="font-semibold text-primary underline-offset-2 hover:underline" onClick={() => setScheduleOpen(true)}>Change</button>
+                <button
+                  type="button"
+                  className="font-semibold text-primary underline-offset-2 hover:underline"
+                  onClick={() => setScheduleOpen(true)}
+                >
+                  Change
+                </button>
                 {restaurantOpen ? (
-                  <button type="button" className="text-muted-foreground underline-offset-2 hover:underline" onClick={() => setScheduledFor(null)}>Order now instead</button>
+                  <button
+                    type="button"
+                    className="text-muted-foreground underline-offset-2 hover:underline"
+                    onClick={() => setScheduledFor(null)}
+                  >
+                    Order now instead
+                  </button>
                 ) : null}
               </div>
             </div>
@@ -1057,7 +1093,13 @@ function CheckoutPage() {
             <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               <p>We're closed right now{hours.opensAt ? ` — we open at ${hours.opensAt}` : ""}.</p>
               {slots.length > 0 ? (
-                <button type="button" className="mt-1 text-xs font-semibold underline" onClick={() => setScheduleOpen(true)}>Choose a time to schedule</button>
+                <button
+                  type="button"
+                  className="mt-1 text-xs font-semibold underline"
+                  onClick={() => setScheduleOpen(true)}
+                >
+                  Choose a time to schedule
+                </button>
               ) : null}
             </div>
           ) : null}
@@ -1074,8 +1116,10 @@ function CheckoutPage() {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Placing order…
               </>
+            ) : scheduledFor ? (
+              "Schedule order"
             ) : (
-              scheduledFor ? "Schedule order" : "Place order"
+              "Place order"
             )}
           </Button>
           {restaurantOpen && !scheduledFor && slots.length > 0 ? (
