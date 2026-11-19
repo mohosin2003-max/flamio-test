@@ -145,7 +145,7 @@ describe("burger boost server API (STEP 04H)", () => {
   test("all six gameplay endpoints remain authenticated; public settings is read-only", () => {
     const src = readFileSync(new URL("./burger-boost.functions.ts", import.meta.url), "utf8");
     const fns = src.split("createServerFn(").slice(1);
-    expect(fns.length).toBe(7); // six authenticated gameplay + one public scalar read
+    expect(fns.length).toBe(8); // seven authenticated gameplay (incl. reward claim) + one public scalar read
     const [publicSettings, ...gameplay] = fns;
     expect(publicSettings).toContain('{ method: "GET" }');
     expect(publicSettings).toContain('.schema("burger_boost").rpc("get_public_owner_max")');

@@ -31,3 +31,8 @@ export function storeDiscountPreview(ownerMax: number, meter: number): number {
 export function boostDelta(d: number): string {
   return `${d >= 0 ? "+" : "−"}${Math.abs(d)} BOOST`;
 }
+
+/** In-game STORE DISCOUNT display: the cumulative gameplay meter, never below 0. Visual only — not the awarded discount. */
+export function gameplayDiscountDisplay(meter: number): number {
+  return Number.isFinite(meter) ? Math.max(0, Math.trunc(meter)) : 0;
+}

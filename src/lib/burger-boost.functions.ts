@@ -152,6 +152,8 @@ export type ApiDeps = {
   callerKey: () => string;
   /** Step 66 reward flow. Absent => reward fails closed as unavailable. */
   reward?: RewardDeps;
+  /** Reward reservation claim RPC. Absent => claim fails closed. */
+  claim?: (sessionId: string, userId: string) => Promise<unknown>;
 };
 
 /**
@@ -359,6 +361,21 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       }
     },
 
+    async claimReward(userId: unknown, input: unknown) {
+      const uid = requireUser(userId);
+      if (!uid) return { ok: false as const, error: MSG.unauthenticated };
+      const p = sessionIdSchema.safeParse(input);
+      if (!p.success) return { ok: false as const, error: MSG.notFound };
+      if (!deps.claim) return { ok: false as const, error: MSG.unavailable };
+      try {
+        const { parseClaimResult } = await import("@/lib/burger-boost-claim");
+        return parseClaimResult(await deps.claim(p.data.sessionId, uid));
+      } catch (e) {
+        logSafe("claimReward", e);
+        return { ok: false as const, error: MSG.unavailable };
+      }
+    },
+
     async expire(userId: unknown, input: unknown) {
       const uid = requireUser(userId);
       if (!uid) return { ok: false as const, error: MSG.unauthenticated };
@@ -404,8 +421,9 @@ function serverApi() {
       newId: () => globalThis.crypto.randomUUID(),
     });
     const rewardMod = await import("@/lib/burger-boost-reward-service");
+    const rewardTransport = adapter.createSupabaseRewardTransport(supabaseAdmin);
     const reward = rewardMod.createRewardService({
-      transport: adapter.createSupabaseRewardTransport(supabaseAdmin),
+      transport: rewardTransport,
       repo,
       now: () => Date.now(),
       newId: () => globalThis.crypto.randomUUID(),
@@ -417,6 +435,8 @@ function serverApi() {
       submitLimiter: rl.createRateLimiter(SUBMIT_LIMIT_PER_HOUR),
       callerKey: rl.callerKey,
       reward,
+      claim: (sessionId, userId) =>
+        rewardTransport.claim_reward_reservation({ p_session_id: sessionId, p_user_id: userId }),
     });
   })();
   apiPromise.catch(() => {
@@ -483,3 +503,9 @@ export const acknowledgeBurgerBoostRewardStart = createServerFn({ method: "POST"
   .handler(async ({ context, data }) =>
     (await serverApi()).acknowledgeReward(context.userId, data),
   );
+
+/** Claim a reservation for a completed reward session. The server RPC decides everything. */
+export const claimBurgerBoostReward = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => sessionIdSchema.parse(input))
+  .handler(async ({ context, data }) => (await serverApi()).claimReward(context.userId, data));

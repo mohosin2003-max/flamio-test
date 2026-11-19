@@ -10,9 +10,8 @@ import {
   Music,
 } from "lucide-react";
 
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { drawEnvironment } from "@/components/burger-boost/renderers/environment";
@@ -46,7 +45,7 @@ import {
 import {
   submitBurgerBoostGameplay,
   expireBurgerBoostSession,
-  getBurgerBoostPublicSettings,
+  claimBurgerBoostReward,
 } from "@/lib/burger-boost.functions";
 import {
   OPERATION_RULES_VERSION,
@@ -60,7 +59,7 @@ import {
 } from "@/lib/burger-boost-rules";
 import {
   createPauseClock,
-  storeDiscountPreview,
+  gameplayDiscountDisplay,
   boostDelta,
   type PauseClock,
 } from "@/lib/burger-boost-pause";
@@ -89,13 +88,23 @@ const ING: Record<Ingredient, { color: string; label: string }> = {
 type Screen = "start" | "playing" | "over";
 
 export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?: number }) {
-  const fetchSettings = useServerFn(getBurgerBoostPublicSettings);
-  const settingsQuery = useQuery({
-    queryKey: ["burger-boost", "public-settings"],
-    queryFn: () => fetchSettings(),
-    staleTime: 30_000,
-  });
-  const ownerMax = settingsQuery.data?.ownerMax ?? 0;
+  const navigate = useNavigate();
+  const claimFn = useServerFn(claimBurgerBoostReward);
+  const [claim, setClaim] = useState<{ busy: boolean; error?: string }>({ busy: false });
+  const claimReward = async () => {
+    const sid = liveRef.current?.sessionId;
+    if (!sid || claim.busy) return;
+    setClaim({ busy: true });
+    try {
+      const r = await claimFn({ data: { sessionId: sid } });
+      if (r.ok) {
+        setClaim({ busy: false });
+        void navigate({ to: "/checkout", search: { reservationId: r.reservationId } as never });
+      } else setClaim({ busy: false, error: r.error });
+    } catch {
+      setClaim({ busy: false, error: "We couldn't reach Flamio to claim this reward." });
+    }
+  };
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<GameState | null>(null);
@@ -268,7 +277,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
 
   // Game loop. Pause freezes the arcade clock (gates, timer, meter, mascot); server expiry is unaffected.
   useEffect(() => {
-    if (screen !== "playing") return;
+    if (screen !== "playing" || paused) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
@@ -397,7 +406,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
     };
-  }, [screen, gateCount]);
+  }, [screen, gateCount, paused]);
 
   // Swipe
   const touchX = useRef<number | null>(null);
@@ -416,7 +425,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           <Hud
             live={isLive}
             v2={hud.v2}
-            discount={isLive ? 0 : storeDiscountPreview(ownerMax, hud.meter)}
+            discount={gameplayDiscountDisplay(hud.meter)}
             meter={hud.meter}
             score={hud.score}
             remaining={remaining}
@@ -502,9 +511,6 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
 
       {screen === "start" && (
         <Overlay>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-            Practice mode
-          </p>
           <h1 className="font-display text-4xl font-black leading-none">
             FLAMIO
             <br />
@@ -533,14 +539,13 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
               grace.
             </li>
           </ul>
-          <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-            Practice mode: unlimited plays, never saved, never gives a coupon and never uses your
-            daily reward try.
-          </p>
-          <Button size="lg" className="w-full" onClick={start}>
-            <Play className="size-5" /> Start practice
-          </Button>
           <RealGamePanel onLive={startLive} onUnlock={unlockAudio} />
+          <Button size="lg" variant="outline" className="w-full" onClick={start}>
+            <Play className="size-5" /> PRACTICE
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Practice is unlimited and never gives a reward or uses your daily PLAY.
+          </p>
           <Link to="/" className="text-sm text-muted-foreground underline">
             Back to Flamio
           </Link>
@@ -552,7 +557,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           {(() => {
             const awarded =
               isLive && verdict?.kind === "ok" ? Math.max(0, Math.floor(verdict.awarded ?? 0)) : 0;
-            const preview = isLive ? 0 : storeDiscountPreview(ownerMax, result.meter);
+            const preview = isLive ? 0 : gameplayDiscountDisplay(result.meter);
             const pending = isLive && verdict?.kind === "pending";
             const won = awarded > 0;
             if (pending)
@@ -599,14 +604,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             );
           })()}
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok") ? (
-            <VictoryCat
-              layers={result.layers}
-              loss={
-                isLive
-                  ? !((verdict?.awarded ?? 0) > 0)
-                  : storeDiscountPreview(ownerMax, result.meter) <= 0
-              }
-            />
+            <VictoryCat layers={result.layers} loss={result.meter <= 0} />
           ) : (
             <BurgerStack layers={result.layers} />
           )}
@@ -614,10 +612,25 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             <Stat label="Layers" value={result.layers.length} />
             <Stat label="Spoiled" value={result.spoiledHits} />
           </dl>
-          {isLive && verdict?.kind === "ok" && (verdict.awarded ?? 0) > 0 ? (
-            <Button asChild size="lg" className="w-full">
-              <Link to="/account/vouchers">CLAIM &amp; USE DISCOUNT</Link>
-            </Button>
+          {isLive && verdict?.kind === "ok" && result.meter > 0 ? (
+            <div className="w-full space-y-2">
+              <Button
+                size="lg"
+                className="w-full"
+                disabled={claim.busy}
+                onClick={() => void claimReward()}
+              >
+                {claim.busy ? "Claiming…" : "CLAIM REWARD"}
+              </Button>
+              {claim.error && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {claim.error}
+                </p>
+              )}
+              <Button variant="outline" className="w-full" onClick={start}>
+                <RotateCcw className="size-5" /> Practice
+              </Button>
+            </div>
           ) : (
             <Button size="lg" className="w-full" onClick={start}>
               <RotateCcw className="size-5" /> {isLive ? "Play practice" : "Try again"}
@@ -707,7 +720,7 @@ function Hud(p: {
           aria-live="polite"
         >
           <span className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">
-            Discount
+            Store discount
           </span>
           <span
             key={p.discount}
@@ -723,7 +736,7 @@ function Hud(p: {
             aria-valuemin={-100}
             aria-valuemax={100}
             aria-valuenow={p.meter}
-            aria-label="Boost"
+            aria-label="Boost power"
           >
             <div
               className="absolute inset-y-0 left-0 bg-primary transition-all"
