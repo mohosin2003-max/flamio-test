@@ -324,7 +324,7 @@ function Hud(p: { live: boolean; v2: boolean; meter: number; score: number; rema
         <div>
           <div className="mb-1 flex items-end justify-between gap-2">
             <div className="flex items-baseline gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">FLAMIO Boost Power</span><span className={p.meter > 0 ? "font-display text-xl font-black text-primary" : "font-display text-xl font-black text-destructive"}>{p.meter}</span></div>
-            <div className="text-right leading-none"><span className="block text-[9px] uppercase tracking-widest text-muted-foreground">Store discount</span><span className="font-display text-sm font-bold">{storeDiscountPreview(DRAFT_SETTINGS.ownerMax, p.meter)}%</span></div>
+            <div className="text-right leading-none"><span className="block text-[9px] uppercase tracking-widest text-muted-foreground">Store discount</span><span className="font-display text-sm font-bold">{Math.max(0, p.meter)}%</span></div>
           </div>
           <div className="relative h-3 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={-100} aria-valuemax={100} aria-valuenow={p.meter} aria-label="Boost power">
             <div className={p.meter > 0 ? "absolute inset-y-0 left-0 bg-primary transition-all" : "absolute inset-y-0 left-0 bg-destructive transition-all"} style={{ width: `${p.meter > 0 ? shown : Math.min(100, -p.meter)}%` }} />
