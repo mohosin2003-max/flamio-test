@@ -24,6 +24,8 @@ export interface BurgerBoostRewardTransport {
   prepare_reward_session(p: { p_id: string; p_user_id: string; p_seed: string }): Promise<RewardRpcResult>;
   acknowledge_reward_start(p: { p_id: string; p_user_id: string }): Promise<RewardRpcResult>;
   complete_reward_session(p: { p_id: string; p_user_id: string; p_final_meter: number; p_telemetry_hash: string }): Promise<RewardRpcResult>;
+  claim_reward_reservation(p: { p_session_id: string; p_user_id: string }): Promise<RewardRpcResult>;
+  get_active_reward(p: { p_user_id: string }): Promise<RewardRpcResult>;
   transition_session(p: { p_id: string; p_user_id: string; p_target_status: "expired" | "rejected" }): Promise<boolean>;
 }
 
@@ -38,6 +40,9 @@ export type AckResult =
   | { ok: false; reason: "ack_expired" | "attempt_used" | "not_found" | "invalid_state" | "unavailable" };
 
 export type RewardOutcome = "release_locked" | "loss" | "none" | "full" | "partial";
+export type ClaimResult =
+  | { ok: true; reservationId: string; tier: "full" | "partial"; discountPercent: 0; status: "reserved" | "existing"; expiresAt: number }
+  | { ok: false; reason: "game_disabled" | "not_eligible" | "loss" | "quota_exhausted" | "unavailable" };
 export type CompleteResult =
   | { ok: true; verifiedScore: number; finalMeter: number; outcome: RewardOutcome; awardedDiscountPercent: 0 }
   | { ok: false; status: "not_found" | "not_reward" | "expired" | "rejected" | "completed" | "unavailable"; error: string };
@@ -91,6 +96,22 @@ export function createRewardService(deps: {
     async isReward(userId: string, sessionId: string): Promise<boolean> {
       try { const rec = await deps.repo.findForUser(sessionId, userId); return rec?.mode === "reward"; }
       catch { return false; }
+    },
+
+    async claim(userId: string, sessionId: string): Promise<ClaimResult> {
+      if (!UUID_RE.test(userId) || !UUID_RE.test(sessionId)) return { ok: false, reason: "not_eligible" };
+      const r = await t.claim_reward_reservation({ p_session_id: sessionId, p_user_id: userId });
+      const res = r?.result;
+      if (res === "game_disabled") return { ok: false, reason: "game_disabled" };
+      if (res === "not_eligible") return { ok: false, reason: "not_eligible" };
+      if (res === "loss") return { ok: false, reason: "loss" };
+      if (res === "quota_exhausted") return { ok: false, reason: "quota_exhausted" };
+      if (res !== "reserved" && res !== "existing") return { ok: false, reason: "unavailable" };
+      const id = r.id, tier = r.tier, expiresAt = ts(r.expires_at), pct = Number(r.discount_percent ?? 0);
+      if (typeof id !== "string" || !UUID_RE.test(id) || (tier !== "full" && tier !== "partial") ||
+          !Number.isInteger(pct) || pct < 0 || !Number.isFinite(expiresAt)) return { ok: false, reason: "unavailable" };
+      if (!RELEASE_LOCKS.couponIssuance && pct !== 0) return { ok: false, reason: "unavailable" };
+      return { ok: true, reservationId: id, tier, discountPercent: 0, status: res as "reserved" | "existing", expiresAt };
     },
 
     /** `payload` is untrusted; only playerActions is read. */
