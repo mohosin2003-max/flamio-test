@@ -204,7 +204,25 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       } catch (e) { logSafe("prepareReward", e); return { ok: false as const, error: MSG.unavailable }; }
     },
 
-    async acknowledgeReward(userId: unknown, input: unknown) {
+    async claimReward(userId: unknown, input: unknown) {
+    const uid = requireUser(userId);
+    if (!uid) return { ok: false as const, error: MSG.unauthenticated };
+    const p = sessionIdSchema.safeParse(input);
+    if (!p.success) return { ok: false as const, error: MSG.notFound };
+    if (!deps.reward) return { ok: false as const, error: MSG.unavailable };
+    try {
+      const r = await deps.reward.claim(uid, p.data.sessionId);
+      if (r.ok) return { ok: true as const, reservationId: r.reservationId, tier: r.tier, discountPercent: r.discountPercent, expiresAt: r.expiresAt };
+      const error = r.reason === "game_disabled" ? "Reward claiming is not enabled yet."
+        : r.reason === "not_eligible" ? "This game is not eligible for a reward."
+        : r.reason === "loss" ? "This result did not earn a reward."
+        : r.reason === "quota_exhausted" ? "Today's reward allocation is full."
+        : MSG.unavailable;
+      return { ok: false as const, error };
+    } catch (e) { logSafe("claimReward", e); return { ok: false as const, error: MSG.unavailable }; }
+  },
+
+  async acknowledgeReward(userId: unknown, input: unknown) {
       const uid = requireUser(userId);
       if (!uid) return { ok: false as const, error: MSG.unauthenticated };
       const p = sessionIdSchema.safeParse(input);
@@ -305,3 +323,8 @@ export const acknowledgeBurgerBoostRewardStart = createServerFn({ method: "POST"
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => sessionIdSchema.parse(input))
   .handler(async ({ context, data }) => (await serverApi()).acknowledgeReward(context.userId, data));
+
+export const claimBurgerBoostReward = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => sessionIdSchema.parse(input))
+  .handler(async ({ context, data }) => (await serverApi()).claimReward(context.userId, data));

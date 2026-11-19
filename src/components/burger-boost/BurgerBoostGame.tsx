@@ -15,7 +15,7 @@ import {
   DEFAULT_GATE_COUNT, GAMEPLAY_DURATION_MS, HARD_CUTOFF_MS,
   createLiveGame, buildLiveSubmission, once, type GameState, type LiveSession,
 } from "@/lib/burger-boost-game";
-import { submitBurgerBoostGameplay, expireBurgerBoostSession } from "@/lib/burger-boost.functions";
+import { submitBurgerBoostGameplay, expireBurgerBoostSession, claimBurgerBoostReward } from "@/lib/burger-boost.functions";
 import { OPERATION_RULES_VERSION, TIERED_RULES_VERSION, isMeterRules, gateSchedule, trackPosition, METER, type Ingredient, type Lane } from "@/lib/burger-boost-rules";
 import { createPauseClock, storeDiscountPreview, boostDelta, type PauseClock } from "@/lib/burger-boost-pause";
 import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
@@ -56,6 +56,9 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; text?: string } | null>(null);
   const submitFn = useServerFn(submitBurgerBoostGameplay);
   const expireFn = useServerFn(expireBurgerBoostSession);
+  const claimFn = useServerFn(claimBurgerBoostReward);
+  const [claimingReward, setClaimingReward] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
   // Audio: one engine per mounted game, created lazily, disposed on unmount.
   const audioRef = useRef<AudioEngine | null>(null);
   const [muted, setMuted] = useState(false); // sound effects
@@ -268,6 +271,27 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
             ? <VictoryCat layers={result.layers} loss={result.meter <= 0} />
             : <BurgerStack layers={result.layers} />}
+          {isLive && liveRef.current?.mode === "reward" && verdict?.kind === "ok" && result.phase === "finished" ? (
+            <div className="w-full space-y-2">
+              {claimError ? <p role="alert" className="text-sm text-destructive">{claimError}</p> : null}
+              <Button size="lg" className="w-full" disabled={claimingReward} onClick={async () => {
+                if (claimingReward) return;
+                setClaimingReward(true); setClaimError(null);
+                try {
+                  const r = await claimFn({ data: { sessionId: liveRef.current!.sessionId } });
+                  if (r.ok) {
+                    window.location.assign(`/checkout?reservationId=${encodeURIComponent(r.reservationId)}`);
+                    return;
+                  }
+                  setClaimError(r.error);
+                } catch {
+                  setClaimError("We couldn't claim the reward. Please try again.");
+                } finally { setClaimingReward(false); }
+              }}>
+                {claimingReward ? "Claiming reward…" : "Claim Reward"}
+              </Button>
+            </div>
+          ) : null}
           <dl className="grid w-full grid-cols-2 gap-2 text-sm">
             <Stat label="Layers" value={result.layers.length} />
             <Stat label="Spoiled" value={result.spoiledHits} />

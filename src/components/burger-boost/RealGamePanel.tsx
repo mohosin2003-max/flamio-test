@@ -51,7 +51,7 @@ export function RealGamePanel({ onLive, onUnlock }: { onLive: (live: LiveSession
       const r = await create({ data: {} });
       if (r.ok) {
         setState({ kind: "idle" });
-        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt, rulesVersion: r.session.rulesVersion });
+        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt, rulesVersion: r.session.rulesVersion , mode: "practice" });
       } else setState({ kind: "msg", text: r.error });
     } catch {
       setState({ kind: "msg", text: "Saved games aren't available yet. Practice is open." });
@@ -84,7 +84,7 @@ export function RealGamePanel({ onLive, onUnlock }: { onLive: (live: LiveSession
       const r = await acknowledge({ data: { sessionId } });
       if (r.ok) {
         setReward({ kind: "idle" });
-        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt, rulesVersion: r.session.rulesVersion });
+        onLive({ sessionId: r.session.sessionId, publicGates: r.publicGates, expiresAt: r.session.expiresAt, rulesVersion: r.session.rulesVersion , mode: "reward" });
       } else setReward({ kind: "idle", text: r.error });
     } catch {
       setReward({ kind: "idle", text: "We couldn't reach the server, so the reward game didn't start." });

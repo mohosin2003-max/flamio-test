@@ -341,6 +341,10 @@ export function createSupabaseRewardTransport(supabase: SupabaseSchemaClient) {
     acknowledge_reward_start: (p: { p_id: string; p_user_id: string }) => obj("acknowledge_reward_start", p),
     complete_reward_session: (p: { p_id: string; p_user_id: string; p_final_meter: number; p_telemetry_hash: string }) =>
       obj("complete_reward_session", p),
+    claim_reward_reservation: (p: { p_session_id: string; p_user_id: string }) =>
+      obj("claim_reward_reservation", p),
+    get_active_reward: (p: { p_user_id: string }) =>
+      obj("get_active_reward", p),
     transition_session: base.transition_session,
   };
 }

@@ -138,7 +138,7 @@ export function practiceSeed(): bigint {
 /* ------------------------- STEP 46D: live saved session ------------------------- */
 
 /** Minimal typed handoff from createBurgerBoostSession to the game screen. */
-export type LiveSession = { sessionId: string; publicGates: PublicGate[]; expiresAt: number; rulesVersion?: number };
+export type LiveSession = { sessionId: string; publicGates: PublicGate[]; expiresAt: number; rulesVersion?: number; mode?: "practice" | "reward" };
 
 /**
  * Builds the local display track from the SERVER-supplied public gates only.
