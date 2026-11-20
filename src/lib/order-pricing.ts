@@ -166,3 +166,75 @@ export function assertRewardCheckoutAllowed(locks: { checkout: boolean } = RELEA
   if (!locks.checkout) throw new Error("Burger Boost rewards can't be used at checkout yet.");
   throw new Error("Burger Boost reward checkout isn't installed yet.");
 }
+
+// ---------------------------------------------------------------------------
+// 23505 handling for order inserts. Postgres reports the violated constraint
+// name/key in message/details; we classify on those instead of the bare code.
+// ---------------------------------------------------------------------------
+type PgErrorLike = { code?: unknown; message?: unknown; details?: unknown; constraint?: unknown };
+
+function pgText(err: unknown): string {
+  const e = (err ?? {}) as PgErrorLike;
+  return [e.message, e.details, e.constraint].filter((v) => typeof v === "string").join(" ");
+}
+
+export function isIdempotencyKeyConflict(err: unknown): boolean {
+  if ((err as PgErrorLike | null)?.code !== "23505") return false;
+  return /orders_idempotency_key_uq|\(idempotency_key\)/.test(pgText(err));
+}
+
+export function isOrderCodeConflict(err: unknown): boolean {
+  if ((err as PgErrorLike | null)?.code !== "23505") return false;
+  return /orders_code_key|\(code\)/.test(pgText(err));
+}
+
+export interface InsertedOrderRow {
+  id: string;
+  code: string;
+  created_at: string;
+}
+
+export interface OrderInsertDeps {
+  /** Inserts one order attempt with a fresh order code. */
+  insert: () => Promise<{ data: InsertedOrderRow | null; error: unknown }>;
+  /** Reads the committed order holding this idempotency key. */
+  findByKey: (
+    key: string,
+  ) => Promise<{ data: (InsertedOrderRow & { user_id: string | null }) | null; error: unknown }>;
+}
+
+export type OrderInsertOutcome =
+  | { kind: "inserted"; row: InsertedOrderRow }
+  | { kind: "existing"; row: InsertedOrderRow }
+  | { kind: "failed"; error: unknown };
+
+/**
+ * Inserts an order. Order-code collisions retry with a new code; an
+ * idempotency-key collision returns the already-committed order (same user
+ * only, never another user's); any other error fails visibly.
+ */
+export async function insertOrderIdempotent(
+  deps: OrderInsertDeps,
+  idempotencyKey: string | null | undefined,
+  userId: string | null,
+  maxAttempts = 3,
+): Promise<OrderInsertOutcome> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { data, error } = await deps.insert();
+    if (!error && data) return { kind: "inserted", row: data };
+    lastError = error;
+    if (idempotencyKey && isIdempotencyKeyConflict(error)) {
+      const found = await deps.findByKey(idempotencyKey);
+      if (found.error || !found.data) return { kind: "failed", error: found.error ?? error };
+      if (!userId || found.data.user_id !== userId) {
+        throw new Error("This order request id was already used. Please refresh and try again.");
+      }
+      const { id, code, created_at } = found.data;
+      return { kind: "existing", row: { id, code, created_at } };
+    }
+    if (isOrderCodeConflict(error)) continue;
+    break;
+  }
+  return { kind: "failed", error: lastError };
+}
