@@ -66,6 +66,7 @@ describe("Step 4B settings contracts (pure, no database)", () => {
   test("Owner row maps persisted settings and reservations, not invented counts", () => {
     expect(parseOwnerRewardSettings(row)).toEqual({
       available: true,
+      gameEnabled: false,
       settings,
       claimExpiryMinutes: 30,
       usage: {

@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   getBurgerBoostOwnerOverview,
   getOwnerRewardSettings,
+  setBurgerBoostGameEnabled,
   updateOwnerRewardSettings,
 } from "@/lib/burger-boost-owner.functions";
 import { Button } from "@/components/ui/button";
@@ -68,14 +69,11 @@ function OwnerBurgerBoost() {
           <div>
             <p className="font-semibold">Game status</p>
             <p className="text-sm text-muted-foreground">
-              Locked off. Rewards {d.discountPercent}% · checkout {d.checkoutEnabled ? "on" : "off"}
+              Rewards {d.discountPercent}% · checkout {d.checkoutEnabled ? "on" : "off"}
               .
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Lock className="size-4 text-muted-foreground" />
-            <Switch checked={d.gameEnabled} disabled aria-label="Game enabled (locked)" />
-          </div>
+          <GameToggle />
         </CardContent>
       </Card>
 
@@ -250,5 +248,40 @@ function RewardSettingsForm() {
         </>
       )}
     </section>
+  );
+}
+
+function GameToggle() {
+  const qc = useQueryClient();
+  const fetchSettings = useServerFn(getOwnerRewardSettings);
+  const setEnabled = useServerFn(setBurgerBoostGameEnabled);
+  const settings = useQuery({
+    queryKey: ["owner", "burger-boost", "settings"],
+    queryFn: () => fetchSettings(),
+  });
+  const m = useMutation({
+    mutationFn: (enabled: boolean) => setEnabled({ data: { enabled } }),
+    onSuccess: (r) => {
+      qc.setQueryData(["owner", "burger-boost", "settings"], r);
+      toast.success(r.gameEnabled ? "Game turned on." : "Game turned off.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not change game status."),
+  });
+  const available = settings.data?.available === true;
+  const on = settings.data?.gameEnabled === true;
+  return (
+    <div className="flex items-center gap-2">
+      {!available && <Lock className="size-4 text-muted-foreground" />}
+      <span className="text-sm text-muted-foreground">{on ? "On" : "Off"}</span>
+      <Switch
+        checked={on}
+        disabled={!available || m.isPending}
+        aria-label="Game enabled"
+        onCheckedChange={(next) => {
+          const msg = next ? "Turn the Burger Boost game ON for customers?" : "Turn the game OFF?";
+          if (window.confirm(msg)) m.mutate(next);
+        }}
+      />
+    </div>
   );
 }

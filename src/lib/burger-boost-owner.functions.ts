@@ -8,7 +8,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
   assertRewardSettingsOwner,
+  gameEnabledArgs,
   ownerSettingsArgs,
+  setGameEnabledAsOwner,
   parseOwnerRewardSettings,
   unavailableOwnerSettings,
   type RewardSettingsTransport,
@@ -100,3 +102,18 @@ export const updateOwnerRewardSettings = createServerFn({ method: "POST" })
     if (!result.available) throw new Error("Reward settings returned an invalid response.");
     return result;
   });
+
+export const setBurgerBoostGameEnabled = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => gameEnabledArgs(input))
+  .handler(async ({ context, data: args }) =>
+    setGameEnabledAsOwner({
+      args,
+      loadRoles: () =>
+        context.supabase.from("user_roles").select("role").eq("user_id", context.userId),
+      loadTransport: async () => {
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        return supabaseAdmin as unknown as RewardSettingsTransport;
+      },
+    }),
+  );

@@ -4,8 +4,8 @@ import { validateRewardSettings, type RewardSettings } from "./burger-boost-rewa
 export type RewardSettingsTransport = {
   schema(name: "burger_boost"): {
     rpc(
-      name: "get_owner_settings" | "update_settings",
-      args?: ReturnType<typeof ownerSettingsArgs>,
+      name: "get_owner_settings" | "update_settings" | "set_game_enabled",
+      args?: ReturnType<typeof ownerSettingsArgs> | { p_enabled: boolean },
     ): PromiseLike<{ data: unknown; error: unknown }>;
   };
 };
@@ -38,6 +38,8 @@ export function assertRewardSettingsOwner(roles: readonly { role: string }[]) {
 
 export type OwnerRewardSettings = {
   available: boolean;
+  /** Strict: only a literal boolean true from the server counts as ON. */
+  gameEnabled: boolean;
   settings: RewardSettings | null;
   claimExpiryMinutes: number;
   usage: {
@@ -51,6 +53,7 @@ export type OwnerRewardSettings = {
 
 export const unavailableOwnerSettings: OwnerRewardSettings = {
   available: false,
+  gameEnabled: false,
   settings: null,
   claimExpiryMinutes: 30,
   usage: null,
@@ -78,6 +81,7 @@ export function parseOwnerRewardSettings(value: unknown): OwnerRewardSettings {
   }
   return {
     available: true,
+    gameEnabled: row.game_enabled === true,
     settings: check.settings,
     claimExpiryMinutes: 30,
     usage: {
@@ -88,4 +92,39 @@ export function parseOwnerRewardSettings(value: unknown): OwnerRewardSettings {
       partialReserved: Number(row.partial_reserved),
     },
   };
+}
+
+/** Strict input for the Owner game toggle: exactly `{ enabled: boolean }`. */
+export function gameEnabledArgs(input: unknown): { p_enabled: boolean } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid input.");
+  const keys = Object.keys(input);
+  const enabled = (input as Record<string, unknown>)["enabled"];
+  if (keys.length !== 1 || keys[0] !== "enabled" || typeof enabled !== "boolean")
+    throw new Error("Invalid input.");
+  return { p_enabled: enabled };
+}
+
+/**
+ * Owner-only game toggle. Role check happens before the privileged transport
+ * is loaded; the RPC changes only game_enabled + updated_at.
+ */
+export async function setGameEnabledAsOwner(deps: {
+  loadRoles: () => PromiseLike<{ data: { role: string }[] | null; error: unknown }>;
+  loadTransport: () => Promise<RewardSettingsTransport>;
+  args: { p_enabled: boolean };
+}): Promise<OwnerRewardSettings> {
+  const { data: roles, error: roleError } = await deps.loadRoles();
+  if (roleError) throw new Error("Unable to verify Owner access.");
+  assertRewardSettingsOwner(roles ?? []);
+  const transport = await deps.loadTransport();
+  const { data, error } = await transport
+    .schema("burger_boost")
+    .rpc("set_game_enabled", { p_enabled: deps.args.p_enabled });
+  if (error)
+    throw new Error(
+      "Game status could not be changed. The approved database update may still be pending.",
+    );
+  const result = parseOwnerRewardSettings(data);
+  if (!result.available) throw new Error("Game status returned an invalid response.");
+  return result;
 }
