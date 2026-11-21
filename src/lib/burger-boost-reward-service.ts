@@ -181,10 +181,14 @@ export function createRewardService(deps: {
       if (res === "not_eligible") return { ok: false, status: "completed", error: "session already finalized" };
       if (typeof res !== "string" || !OUTCOMES.has(res)) return { ok: false, status: "unavailable", error: "completion failed" };
       // The RPC is authoritative; enforce the configured Phase 2 ceiling at the server boundary.
-      if (Number(r.awarded_discount_percent ?? 0) !== 0 && !RELEASE_LOCKS.couponIssuance) {
+      const awardedDiscountPercent = Number(r.awarded_discount_percent ?? 0);
+      if (!Number.isInteger(awardedDiscountPercent) || awardedDiscountPercent < 0 || awardedDiscountPercent > 30) {
+        return { ok: false, status: "unavailable", error: "invalid reward amount" };
+      }
+      if (!RELEASE_LOCKS.couponIssuance && awardedDiscountPercent !== 0) {
         return { ok: false, status: "unavailable", error: "lock violation" };
       }
-      return { ok: true, verifiedScore: Math.max(0, m.finalMeter), finalMeter: m.finalMeter, outcome: res as RewardOutcome, awardedDiscountPercent: 0 };
+      return { ok: true, verifiedScore: Math.max(0, m.finalMeter), finalMeter: m.finalMeter, outcome: res as RewardOutcome, awardedDiscountPercent };
     },
   };
 }
