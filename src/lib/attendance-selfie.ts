@@ -83,3 +83,10 @@ export function decodeBase64(b64: string): Uint8Array {
 export function isSelfieVerificationEnabled(value: boolean | null | undefined): boolean {
   return value === true;
 }
+
+
+/** Check-in Photo Evidence camera: front ("user") or rear ("environment"). */
+export type FacingMode = "user" | "environment";
+export function nextFacingMode(current: FacingMode): FacingMode {
+  return current === "user" ? "environment" : "user";
+}
