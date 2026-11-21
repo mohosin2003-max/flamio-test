@@ -1,13 +1,12 @@
 /**
- * FLAMIO Burger Boost — Step 53 server completion decision (PURE, inactive).
+ * FLAMIO Burger Boost — Phase 2 reward policy mirror (TEST).
  *
- * Pure reward policy mirror for the live TEST Phase 2 flow.
- * The authoritative reward amount and coupon/checkout state are enforced by
- * the TEST database RPCs; this module is not proof of atomicity.
+ * The TEST database RPCs are authoritative for reward amount, coupon issuance,
+ * reservation and checkout. This module is only a pure reference model used by tests.
  */
 import { allocateReward, type Allocation, type DailyUsage, type RewardSettings, type SessionMode } from "./burger-boost-reward";
 
-/** Mirrors the approved TEST Phase 2 release state. */
+/** Release state: true means the corresponding Phase 2 capability is enabled in TEST. */
 export const RELEASE_LOCKS = { couponIssuance: true, checkout: true } as const;
 
 export type CompletionDecision =
@@ -24,7 +23,6 @@ export function decideCompletion(input: {
   const locks = input.locks ?? RELEASE_LOCKS;
   if (input.mode !== "reward") return { kind: "practice", awardedDiscountPercent: 0 };
   if (!Number.isFinite(input.finalMeter) || input.finalMeter <= 0) return { kind: "loss", awardedDiscountPercent: 0 };
-  // Allocation day = the session's START Dhaka date, never completion time.
   if (!locks.couponIssuance) {
     const copy: DailyUsage = { ...input.usage };
     const a: Allocation = allocateReward(copy, input.settings, "reward", input.finalMeter, input.sessionStartedAt);
@@ -36,7 +34,6 @@ export function decideCompletion(input: {
   return { kind: "issue", awardedDiscountPercent: a.discountPercent, tier: a.tier, expiresAt: a.expiresAt };
 }
 
-/** Owner draft defaults: no invented business values. Not persisted. */
 export const DRAFT_SETTINGS: RewardSettings = {
   ownerMax: 0, partialMax: 0, dailyFullLimit: 0, dailyPartialLimit: 0, minOrderBdt: 0, gateCount: 30,
 };
