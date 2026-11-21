@@ -25,6 +25,7 @@ export interface BurgerBoostRewardTransport {
   acknowledge_reward_start(p: { p_id: string; p_user_id: string }): Promise<RewardRpcResult>;
   complete_reward_session(p: { p_id: string; p_user_id: string; p_final_meter: number; p_telemetry_hash: string }): Promise<RewardRpcResult>;
   claim_reward_reservation(p: { p_session_id: string; p_user_id: string }): Promise<RewardRpcResult>;
+  place_order_with_reward(p: { p_user_id: string; p_reservation_id: string; p_idempotency_key: string; p_order: unknown; p_items: unknown }): Promise<RewardRpcResult>;
   get_active_reward(p: { p_user_id: string }): Promise<RewardRpcResult>;
   transition_session(p: { p_id: string; p_user_id: string; p_target_status: "expired" | "rejected" }): Promise<boolean>;
 }
@@ -112,6 +113,39 @@ export function createRewardService(deps: {
           !Number.isInteger(pct) || pct < 0 || !Number.isFinite(expiresAt)) return { ok: false, reason: "unavailable" };
       if (!RELEASE_LOCKS.couponIssuance && pct !== 0) return { ok: false, reason: "unavailable" };
       return { ok: true, reservationId: id, tier, discountPercent: pct, status: res as "reserved" | "existing", expiresAt };
+    },
+
+    async placeOrder(userId: string, reservationId: string, idempotencyKey: string, order: unknown, items: unknown) {
+      if (!UUID_RE.test(userId) || !UUID_RE.test(reservationId) || idempotencyKey.length < 8) {
+        return { ok: false as const, error: "invalid checkout request" };
+      }
+      const r = await t.place_order_with_reward({
+        p_user_id: userId,
+        p_reservation_id: reservationId,
+        p_idempotency_key: idempotencyKey,
+        p_order: order,
+        p_items: items,
+      });
+      if (r?.result !== "order_created" && r?.result !== "existing_order") {
+        const error = r?.result === "reservation_expired" ? "Your reward reservation expired."
+          : r?.result === "reservation_invalid" ? "This reward reservation is no longer valid."
+          : r?.result === "below_minimum" ? `Minimum order is ৳${Number(r.minimum_order_bdt ?? 0)}.`
+          : r?.result === "coupon_invalid" ? "This reward coupon is no longer valid."
+          : r?.result === "reward_disabled" ? "Reward checkout is temporarily unavailable."
+          : "We couldn't place the reward order.";
+        return { ok: false as const, error };
+      }
+      return {
+        ok: true as const,
+        orderId: String(r.order_id),
+        orderCode: String(r.order_code ?? ""),
+        subtotal: Number(r.subtotal ?? 0),
+        discount: Number(r.discount ?? 0),
+        deliveryCharge: Number(r.delivery_charge ?? 0),
+        total: Number(r.total ?? 0),
+        couponCode: String(r.coupon_code ?? ""),
+        discountPercent: Number(r.discount_percent ?? 0),
+      };
     },
 
     /** `payload` is untrusted; only playerActions is read. */
