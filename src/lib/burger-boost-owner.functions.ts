@@ -16,6 +16,12 @@ import {
   type RewardSettingsTransport,
 } from "@/lib/burger-boost-settings";
 
+import {
+  readRewardConfigAsOwner,
+  rewardConfigArgs,
+  updateRewardConfigAsOwner,
+  type RewardConfigTransport,
+} from "@/lib/burger-boost-reward-config";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
 import { REWARD_BOUNDS } from "@/lib/burger-boost-reward";
@@ -115,5 +121,30 @@ export const setBurgerBoostGameEnabled = createServerFn({ method: "POST" })
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         return supabaseAdmin as unknown as RewardSettingsTransport;
       },
+    }),
+  );
+
+const loadRewardConfigTransport = async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin as unknown as RewardConfigTransport;
+};
+
+export const getOwnerRewardConfig = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    readRewardConfigAsOwner({
+      loadRoles: () => context.supabase.from("user_roles").select("role").eq("user_id", context.userId),
+      loadTransport: loadRewardConfigTransport,
+    }),
+  );
+
+export const updateOwnerRewardConfig = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => rewardConfigArgs(input))
+  .handler(async ({ context, data: args }) =>
+    updateRewardConfigAsOwner({
+      args,
+      loadRoles: () => context.supabase.from("user_roles").select("role").eq("user_id", context.userId),
+      loadTransport: loadRewardConfigTransport,
     }),
   );

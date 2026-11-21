@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DRAFT_SETTINGS } from "@/lib/burger-boost-reward-flow";
 import { REWARD_BOUNDS, type RewardSettings } from "@/lib/burger-boost-reward";
+import { RewardConfigForm } from "@/components/burger-boost/RewardConfigForm";
 
 export const Route = createFileRoute("/_authenticated/owner/burger-boost")({
   head: () => ({
@@ -102,6 +103,8 @@ function OwnerBurgerBoost() {
       </Card>
 
       <RewardSettingsForm />
+
+      <RewardConfigForm />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
