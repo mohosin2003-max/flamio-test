@@ -1,16 +1,13 @@
 /**
  * FLAMIO Burger Boost — Step 53 server completion decision (PURE, inactive).
  *
- * Decides what a verified completion WOULD earn, but while the release locks
- * are active (bb_coupons_phase1_locked CHECK(false),
- * bb_sessions_discount_locked CHECK(awarded_discount_percent = 0)) it never
- * reserves a slot, never issues a coupon and always reports 0% awarded.
- * Real slot reservation must be the atomic database transaction in
- * docs/burger-boost/drafts — this module is not proof of atomicity.
+ * Pure reward policy mirror for the live TEST Phase 2 flow.
+ * The authoritative reward amount and coupon/checkout state are enforced by
+ * the TEST database RPCs; this module is not proof of atomicity.
  */
 import { allocateReward, type Allocation, type DailyUsage, type RewardSettings, type SessionMode } from "./burger-boost-reward";
 
-/** Mirrors the database locks. Only an approved release changes these. */
+/** Mirrors the approved TEST Phase 2 release state. */
 export const RELEASE_LOCKS = { couponIssuance: true, checkout: true } as const;
 
 export type CompletionDecision =
