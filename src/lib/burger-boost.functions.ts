@@ -10,8 +10,7 @@
  * Server-only modules (session core, adapter, rate limiter) are loaded with
  * dynamic imports INSIDE handlers so nothing server-side ships to the browser.
  *
- * NO DATABASE INTEGRATION: the default transport fails closed with a sanitized
- * "unavailable" result. No real RPC is called. The game remains disabled.
+ * TEST database integration is wired through the server-only reward transport. Production remains out of scope.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -100,7 +99,7 @@ export type PublicGateLoader = (sessionId: string, userId: string) => Promise<Pu
 export type ApiDeps = {
   service: Service; publicGates: PublicGateLoader;
   createLimiter: Limiter; submitLimiter: Limiter; callerKey: () => string;
-  /** Step 66 reward flow. Absent => reward fails closed as unavailable. */
+  /** Reward flow. Absent => reward fails closed as unavailable. */
   reward?: RewardDeps;
 };
 
@@ -178,7 +177,7 @@ export function createBurgerBoostApi(deps: ApiDeps) {
         }
         // Only validated actions travel to the core; nothing else from the client.
         const r = await deps.service.submit(p.data.sessionId, uid, { playerActions: p.data.playerActions });
-        // verifiedScore comes only from the server replay; discount is locked at 0.
+        // verifiedScore comes only from the server replay; reward amount comes from the authoritative TEST RPC.
         if (r.ok) {
           if (typeof r.verifiedScore !== "number" || !Number.isFinite(r.verifiedScore)) throw new Error("score_missing");
           return { ok: true as const, status: "completed" as const, verifiedScore: r.verifiedScore, awardedDiscountPercent: 0 as const };
