@@ -343,6 +343,8 @@ export function createSupabaseRewardTransport(supabase: SupabaseSchemaClient) {
       obj("complete_reward_session", p),
     claim_reward_reservation: (p: { p_session_id: string; p_user_id: string }) =>
       obj("claim_reward_reservation", p),
+    place_order_with_reward: (p: { p_user_id: string; p_reservation_id: string; p_idempotency_key: string; p_order: unknown; p_items: unknown }) =>
+      obj("place_order_with_reward", p),
     get_active_reward: (p: { p_user_id: string }) =>
       obj("get_active_reward", p),
     transition_session: base.transition_session,
