@@ -142,8 +142,10 @@ const bad = () => new BurgerBoostPersistenceError("invalid_row");
 /** Strict parser for every valid row shape. Throws invalid_row on anything else. */
 export function parseSessionRow(row: RpcSessionRow): ParsedSessionRow {
   if (!row || !ROW_STATUSES.has(row.status)) throw bad();
-  if (Number(row.awarded_discount_percent) !== 0) throw bad();
+  const awardedDiscount = Number(row.awarded_discount_percent);
   const mode = row.mode ?? "legacy";
+  if (!Number.isInteger(awardedDiscount) || awardedDiscount < 0 || awardedDiscount > 30) throw bad();
+  if (mode !== "reward" && awardedDiscount !== 0) throw bad();
   if (!MODES.has(mode)) throw bad();
   // Step 64K: legacy <=> v1 only; practice/reward rows carry v2 or v3.
   if (mode === "legacy" ? row.rules_version !== 1 : row.rules_version !== 2 && row.rules_version !== 3) throw bad();
@@ -196,7 +198,7 @@ export function parseSessionRow(row: RpcSessionRow): ParsedSessionRow {
     completedAt,
     verifiedScore,
     telemetryHash,
-    awardedDiscountPercent: 0,
+    awardedDiscountPercent: awardedDiscount,
     ...(mode === "practice" || mode === "reward" ? { mode } : {}),
   };
   return { kind: "started", record: rec };
