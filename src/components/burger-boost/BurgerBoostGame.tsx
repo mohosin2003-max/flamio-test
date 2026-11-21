@@ -53,7 +53,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   const liveRef = useRef<LiveSession | null>(null);
   const finalizeRef = useRef<(() => Promise<void>) | null>(null);
   const [isLive, setIsLive] = useState(false);
-  const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; text?: string } | null>(null);
+  const [verdict, setVerdict] = useState<{ kind: "pending" | "ok" | "fail"; score?: number; discountPercent?: number; text?: string } | null>(null);
   const submitFn = useServerFn(submitBurgerBoostGameplay);
   const expireFn = useServerFn(expireBurgerBoostSession);
   const claimFn = useServerFn(claimBurgerBoostReward);
@@ -99,7 +99,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
         }
         const r = await submitFn({ data: payload });
         setVerdict(r.ok && "verifiedScore" in r
-          ? { kind: "ok", score: r.verifiedScore }
+          ? { kind: "ok", score: r.verifiedScore, discountPercent: Number("awardedDiscountPercent" in r ? r.awardedDiscountPercent : 0) }
           : { kind: "fail", text: r.error ?? "This game couldn't be verified." });
       } catch {
         setVerdict({ kind: "fail", text: "We couldn't reach the server to verify this game." });
@@ -265,7 +265,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
           ) : (<>
             <p className={result.meter > 0 ? "font-display text-6xl font-black text-primary" : "font-display text-6xl font-black text-destructive"}>{result.meter}</p>
             <p className="text-sm text-muted-foreground">FLAMIO Boost Power</p>
-            <p className="text-sm">Store discount: <b>{storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter)}%</b></p>
+            <p className="text-sm">Store discount: <b>{isLive ? `${verdict?.discountPercent ?? 0}%` : `${storeDiscountPreview(DRAFT_SETTINGS.ownerMax, result.meter)}%`}</b></p>
             {result.meter <= 0 && <p className="text-sm text-muted-foreground">Boost Power at or below 0 — in a reward game this would earn no coupon.</p>}
           </>)}
           {result.phase === "finished" && (!isLive || verdict?.kind === "ok")
@@ -296,7 +296,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             <Stat label="Layers" value={result.layers.length} />
             <Stat label="Spoiled" value={result.spoiledHits} />
           </dl>
-          <p className="text-xs text-muted-foreground">{isLive ? "Saved game — score checked by Flamio. Discount: 0%." : "Practice result — not saved. No coupon."}</p>
+          <p className="text-xs text-muted-foreground">{isLive ? `Saved game — score checked by Flamio. Reward: ${verdict?.discountPercent ?? 0}% discount.` : "Practice result — not saved. No coupon."}</p>
           <Button size="lg" className="w-full" onClick={start}><RotateCcw className="size-5" /> {isLive ? "Play practice" : "Play again"}</Button>
           <Link to="/" className="text-sm text-muted-foreground underline">Back to Flamio</Link>
         </Overlay>
