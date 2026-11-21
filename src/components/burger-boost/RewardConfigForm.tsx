@@ -40,7 +40,7 @@ export function RewardConfigForm() {
         <div className="flex items-center justify-between gap-2">
           <div>
             <p className="font-semibold">Reward settings</p>
-            <p className="text-sm text-muted-foreground">Owner-controlled Phase 2 configuration. Phase 1 rewards remain locked.</p>
+            <p className="text-sm text-muted-foreground">Owner-controlled Phase 2 configuration. Reward issuance and checkout are now enabled in TEST.</p>
           </div>
           <Badge variant="outline"><ShieldCheck className="mr-1 size-3" />Max {REWARD_CONFIG_CEILING_PERCENT}%</Badge>
         </div>
