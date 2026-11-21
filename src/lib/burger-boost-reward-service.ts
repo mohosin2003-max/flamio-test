@@ -41,10 +41,10 @@ export type AckResult =
 
 export type RewardOutcome = "release_locked" | "loss" | "none" | "full" | "partial";
 export type ClaimResult =
-  | { ok: true; reservationId: string; tier: "full" | "partial"; discountPercent: 0; status: "reserved" | "existing"; expiresAt: number }
+  | { ok: true; reservationId: string; tier: "full" | "partial"; discountPercent: number; status: "reserved" | "existing"; expiresAt: number }
   | { ok: false; reason: "game_disabled" | "not_eligible" | "loss" | "quota_exhausted" | "unavailable" };
 export type CompleteResult =
-  | { ok: true; verifiedScore: number; finalMeter: number; outcome: RewardOutcome; awardedDiscountPercent: 0 }
+  | { ok: true; verifiedScore: number; finalMeter: number; outcome: RewardOutcome; awardedDiscountPercent: number }
   | { ok: false; status: "not_found" | "not_reward" | "expired" | "rejected" | "completed" | "unavailable"; error: string };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -111,7 +111,7 @@ export function createRewardService(deps: {
       if (typeof id !== "string" || !UUID_RE.test(id) || (tier !== "full" && tier !== "partial") ||
           !Number.isInteger(pct) || pct < 0 || !Number.isFinite(expiresAt)) return { ok: false, reason: "unavailable" };
       if (!RELEASE_LOCKS.couponIssuance && pct !== 0) return { ok: false, reason: "unavailable" };
-      return { ok: true, reservationId: id, tier, discountPercent: 0, status: res as "reserved" | "existing", expiresAt };
+      return { ok: true, reservationId: id, tier, discountPercent: pct, status: res as "reserved" | "existing", expiresAt };
     },
 
     /** `payload` is untrusted; only playerActions is read. */
