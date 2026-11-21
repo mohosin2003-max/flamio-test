@@ -1,7 +1,7 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Pencil, Trash2 } from "lucide-react";
 
@@ -26,6 +26,7 @@ import { formatDistance, haversineMeters, pickRadiusZone } from "@/lib/geo";
 import { reverseGeocode } from "@/lib/customer-location";
 import { formatBDT } from "@/lib/format";
 import { checkCoupon } from "@/lib/coupons.functions";
+import { placeBurgerBoostRewardOrder } from "@/lib/burger-boost.functions";
 import { saveOrder, type PlacedOrder } from "@/lib/orders";
 import { placeOrder } from "@/lib/orders.functions";
 import { canScheduleNow, formatScheduled, isOpenAt, listSlots } from "@/lib/opening-hours";
@@ -72,8 +73,11 @@ function CheckoutPage() {
   const radiusMode =
     origin !== null && zones.some((z) => z.zoneType === "radius" && z.radiusMaxM !== null);
   const navigate = useNavigate();
+  const rewardReservationId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("reservationId") : null;
+  const rewardIdempotencyKeyRef = useRef(`bb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   const submitOrder = useServerFn(placeOrder);
+  const submitRewardOrder = useServerFn(placeBurgerBoostRewardOrder);
 
   // Opening hours (Asia/Dhaka). The server re-checks everything on submit.
   const fetchHours = useServerFn(getPublicHours);
@@ -218,11 +222,13 @@ function CheckoutPage() {
   const [coupon, setCoupon] = useState<{ code: string; discount: number } | null>(null);
   const [couponChecking, setCouponChecking] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
+  const rewardCheckout = Boolean(rewardReservationId);
 
   const discount = coupon ? Math.min(coupon.discount, subtotal) : 0;
 
   // A coupon priced against an older subtotal must be re-checked.
   useEffect(() => {
+    if (rewardCheckout) return;
     if (!coupon) return;
     let active = true;
     setCouponChecking(true);
@@ -421,6 +427,53 @@ function CheckoutPage() {
           }
 
           try {
+            if (rewardReservationId) {
+              const rewardCreated = await submitRewardOrder({
+                data: {
+                  reservationId: rewardReservationId,
+                  idempotencyKey: rewardIdempotencyKeyRef.current,
+                  order: {
+                    fulfillment,
+                    payment_method: method,
+                    payment_label:
+                      paymentMethods.find((m) => m.id === method)?.label ?? "Cash on Delivery",
+                    customer_name: name,
+                    customer_phone: phone,
+                    address_line: isDelivery ? form.addressLine.trim() : null,
+                    area: form.area?.trim() || null,
+                    landmark: form.landmark?.trim() || null,
+                    delivery_notes: form.deliveryNotes?.trim() || null,
+                    zone_id: isDelivery ? (radiusMode ? (zone?.id ?? null) : zoneId) : null,
+                    zone_name: isDelivery ? (zone?.name ?? null) : null,
+                    latitude: isDelivery ? (point?.lat ?? null) : null,
+                    longitude: isDelivery ? (point?.lng ?? null) : null,
+                    estimated_time: quote.estimatedTime,
+                    pickup_note: settings.pickupNote,
+                    subtotal,
+                    delivery_charge: quote.charge,
+                    channel: "online",
+                    order_kind: scheduledFor ? "scheduled" : "regular",
+                    payment_status: "unpaid",
+                    status: scheduledFor ? "scheduled" : "placed",
+                    scheduled_for: scheduledFor,
+                  },
+                  items: lines.map((l) => ({
+                    product_id: l.productId,
+                    variant_id: l.variantId,
+                    quantity: l.quantity,
+                    combo_name: l.comboName ?? null,
+                    combo_key: l.comboKey ?? null,
+                  })),
+                },
+              });
+              if (!rewardCreated.ok) throw new Error(rewardCreated.error);
+              setPlaced(true);
+              clear();
+              toast.success("Reward order placed — " + rewardCreated.discountPercent + "% discount applied");
+              await navigate({ to: "/order/$orderId", params: { orderId: rewardCreated.orderId } });
+              return;
+            }
+
             const created = await submitOrder({
               data: {
                 fulfillment,
@@ -853,8 +906,17 @@ function CheckoutPage() {
             ))}
           </ul>
 
+          {rewardCheckout ? (
+            <div className="mt-4 rounded-xl border border-primary/40 bg-primary/5 px-3 py-3 text-sm">
+              <p className="font-semibold text-primary">FLAMIO Burger Boost reward</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Your verified reward is reserved for this checkout. The server will apply the reward discount atomically.
+              </p>
+            </div>
+          ) : null}
+
           {/* Coupon — priced by the server, never in the browser. */}
-          <div className="mt-4 space-y-2 border-t border-border/70 pt-3">
+          {!rewardCheckout ? <div className="mt-4 space-y-2 border-t border-border/70 pt-3">
             <Label htmlFor="coupon">Coupon code</Label>
             {coupon ? (
               <div className="flex items-center justify-between gap-2 rounded-xl border border-primary/50 bg-secondary px-3 py-2 text-sm">
@@ -922,7 +984,7 @@ function CheckoutPage() {
                 {couponError}
               </p>
             ) : null}
-          </div>
+          </div> : null}
 
           <dl className="mt-4 space-y-2 border-t border-border/70 pt-3 text-sm">
             <div className="flex justify-between">
