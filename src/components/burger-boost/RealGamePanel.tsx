@@ -122,7 +122,7 @@ export function RealGamePanel({ onLive, onUnlock }: { onLive: (live: LiveSession
                 </Button>
               )}
               {reward.kind === "idle" && reward.text && <p role="status" className="text-muted-foreground">{reward.text}</p>}
-              <p className="text-xs text-muted-foreground">Reward game: eligible wins can earn the Owner-configured store discount, currently up to 30%.</p>
+              <p className="text-xs text-muted-foreground">Reward game: eligible wins use the Owner-configured discount — currently 10%, with a 30% security ceiling.</p>
             </div>
             <p className="text-xs text-muted-foreground">Game history: not available yet.</p>
           </>
