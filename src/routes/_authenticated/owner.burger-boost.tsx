@@ -37,21 +37,21 @@ function OwnerBurgerBoost() {
     <div className="mx-auto w-full max-w-4xl space-y-4 p-4">
       <header>
         <h1 className="font-display text-2xl font-bold">FLAMIO Burger Boost</h1>
-        <p className="text-sm text-muted-foreground">Read-only for now. Settings can't be saved until the game's database is installed.</p>
+        <p className="text-sm text-muted-foreground">TEST control panel. Reward settings are live and server-validated.</p>
       </header>
 
       <Card><CardContent className="flex items-center justify-between gap-4 p-4">
         <div>
           <p className="font-semibold">Game status</p>
-          <p className="text-sm text-muted-foreground">Locked off. Rewards {d.discountPercent}% · checkout {d.checkoutEnabled ? "on" : "off"}.</p>
+          <p className="text-sm text-muted-foreground">Reward system and checkout are controlled by the Phase 2 settings below.</p>
         </div>
-        <div className="flex items-center gap-2"><Lock className="size-4 text-muted-foreground" /><Switch checked={d.gameEnabled} disabled aria-label="Game enabled (locked)" /></div>
+        <div className="flex items-center gap-2"><Badge variant="outline">TEST</Badge></div>
       </CardContent></Card>
 
       <Card><CardContent className="space-y-1 p-4">
         <p className="font-semibold">Gates per game</p>
         <p className="text-3xl font-black">{d.gateCount.current}</p>
-        <p className="text-sm text-muted-foreground">Allowed range {d.gateCount.min}–{d.gateCount.max}. Customers can't change this. Not editable yet (no saved settings).</p>
+        <p className="text-sm text-muted-foreground">Allowed range {d.gateCount.min}–{d.gateCount.max}. Customers can't change this. Gate count remains Owner-controlled with the approved default of 30.</p>
       </CardContent></Card>
 
       <Card><CardContent className="space-y-3 p-4">
@@ -69,12 +69,12 @@ function OwnerBurgerBoost() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card><CardContent className="p-4"><p className="font-semibold">Today's winners &amp; slots left</p><p className="text-sm text-muted-foreground">Unavailable — {d.usage.reason}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="font-semibold">Reward history</p><p className="text-sm text-muted-foreground">Unavailable — {d.rewardHistory.reason}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="font-semibold">Reward history</p><p className="text-sm text-muted-foreground">TEST reward history is available after the first verified reward transaction.</p></CardContent></Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card><CardContent className="p-4"><p className="font-semibold">Game analytics</p><p className="text-sm text-muted-foreground">Unavailable — {d.analytics.reason}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="font-semibold">Activity log</p><p className="text-sm text-muted-foreground">Unavailable — {d.audit.reason}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="font-semibold">Game analytics</p><p className="text-sm text-muted-foreground">Analytics remains read-only until the reporting view is finalized.</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="font-semibold">Activity log</p><p className="text-sm text-muted-foreground">Audit history remains read-only until the reporting view is finalized.</p></CardContent></Card>
       </div>
     </div>
   );
