@@ -67,7 +67,7 @@ export function RewardConfigForm() {
             <Switch checked={current.couponStackingEnabled} onCheckedChange={(v) => set("couponStackingEnabled", v)} />
           </div>
           <div className="flex items-center justify-between rounded-md border p-3">
-            <div><Label>Reward System</Label><p className="text-xs text-muted-foreground">Configuration only; Phase 1 remains locked</p></div>
+            <div><Label>Reward System</Label><p className="text-xs text-muted-foreground">Live TEST reward controls. Changes are server-validated and capped at 30%.</p></div>
             <Switch checked={current.rewardSystemEnabled} onCheckedChange={(v) => set("rewardSystemEnabled", v)} />
           </div>
         </div>
