@@ -418,7 +418,7 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
   return (
     <div
       ref={rootRef}
-      className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground"
+      className="bb-theme fixed inset-0 z-50 mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden overscroll-none touch-manipulation bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground"
     >
       {screen === "playing" && (
         <>
@@ -451,7 +451,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
             }}
           />
           <div
-            className="relative min-h-0 flex-1 touch-none select-none"
+            className="relative min-h-0 flex-1 touch-none select-none overscroll-none"
+            style={{ touchAction: "none", overscrollBehavior: "none" }}
             onTouchStart={(e) => {
               touchX.current = e.touches[0]?.clientX ?? null;
             }}
@@ -472,8 +473,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
               <Button
                 size="lg"
                 variant="secondary"
-                className="h-16 text-base"
-                onPointerDown={() => setLane(0)}
+                className="h-16 min-h-16 touch-none text-base shadow-md active:scale-95 active:bg-primary active:text-primary-foreground"
+                onPointerDown={(e) => { e.preventDefault(); setLane(0); }}
                 aria-label="Move to left lane"
               >
                 <ChevronLeft className="size-6" /> Left
@@ -481,8 +482,8 @@ export function BurgerBoostGame({ gateCount = DEFAULT_GATE_COUNT }: { gateCount?
               <Button
                 size="lg"
                 variant="secondary"
-                className="h-16 text-base"
-                onPointerDown={() => setLane(1)}
+                className="h-16 min-h-16 touch-none text-base shadow-md active:scale-95 active:bg-primary active:text-primary-foreground"
+                onPointerDown={(e) => { e.preventDefault(); setLane(1); }}
                 aria-label="Move to right lane"
               >
                 Right <ChevronRight className="size-6" />
@@ -679,8 +680,8 @@ function Hud(p: {
             ? `Grace ${Math.ceil(p.graceLeft / 1000)}s`
             : `${Math.ceil(p.remaining / 1000)}s`}
         </div>
-        <span className="text-xs text-muted-foreground">
-          Gate {p.gate}/{p.total}
+        <span className="shrink-0 whitespace-nowrap rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-bold">
+          Gate {p.gate} / {p.total}
         </span>
         <div className="flex items-center">
           <Button
@@ -716,11 +717,11 @@ function Hud(p: {
       </div>
       <div className="flex items-center gap-3">
         <div
-          className="flex min-w-[7.5rem] flex-col items-center rounded-xl border-2 border-primary bg-background px-4 py-1 shadow-lg"
+          className="flex shrink-0 flex-col items-center rounded-xl border-2 border-primary bg-background px-3 py-1 shadow-lg"
           aria-live="polite"
         >
-          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">
-            Store discount
+          <span className="whitespace-nowrap text-[10px] font-black uppercase tracking-wider text-primary">
+            Store Discount (Max)
           </span>
           <span
             key={p.discount}
@@ -730,8 +731,12 @@ function Hud(p: {
           </span>
         </div>
         {p.v2 ? (
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+            Boost Power
+          </span>
           <div
-            className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-muted"
+            className="relative h-2.5 w-full overflow-hidden rounded-full bg-muted"
             role="meter"
             aria-valuemin={-100}
             aria-valuemax={100}
@@ -742,6 +747,7 @@ function Hud(p: {
               className="absolute inset-y-0 left-0 bg-primary transition-all"
               style={{ width: `${shown}%` }}
             />
+          </div>
           </div>
         ) : (
           <p className="flex-1 text-[11px] text-muted-foreground">

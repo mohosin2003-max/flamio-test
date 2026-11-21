@@ -301,9 +301,11 @@ function loadBoards(): Board[] {
   return boards;
 }
 
+/** Short commercial headlines shown across the top of each board. */
+export const BOARD_HEADLINES = ["FLAMIO SMASH", "NAGA BLAST", "DHAKA'S CRISPIEST"] as const;
 const BOARD_EVERY = 3.5; // gate units, alternating sides
 /** Giant elevated boards: set far back from the curb and high above street level. */
-const BOARD_W = 210, BOARD_H = 145, POST_H = 150, BOARD_SETBACK = 30;
+const BOARD_W = 240, BOARD_H = 165, POST_H = 150, BOARD_SETBACK = 30;
 const PHOTO = 0.68;
 
 /** Largest bold font (≤ max) whose text fits maxW — shrinks instead of truncating. */
@@ -388,6 +390,16 @@ export function drawBillboards(ctx: CanvasRenderingContext2D, f: EnvFrame) {
       ctx.fillStyle = C.primary;
       ctx.font = `900 ${Math.max(4, 20 * s)}px system-ui, sans-serif`;
       ctx.fillText("FLAMIO", x + bw / 2, y + photoH / 2);
+    }
+    // commercial headline strip across the top of the photo
+    {
+      const head = BOARD_HEADLINES[Math.abs(n) % BOARD_HEADLINES.length]!;
+      const hh = photoH * 0.26;
+      ctx.fillStyle = "rgba(20,17,16,0.82)"; ctx.fillRect(x, y, bw, hh);
+      ctx.fillStyle = C.primary; ctx.fillRect(x, y + hh - Math.max(1, 2 * s), bw, Math.max(1, 2 * s));
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff7ed";
+      fitFont(ctx, head, bw * 0.9, 26 * s, "900");
+      ctx.fillText(head, x + bw / 2, y + hh / 2);
     }
     // info panel
     ctx.fillStyle = "#141110";
