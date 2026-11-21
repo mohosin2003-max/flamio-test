@@ -7,7 +7,7 @@
  * replay of the persisted seed + persisted rules version. Client values for
  * score, meter, discount, seed or status are never read.
  *
- * Release locks stay on: awardedDiscountPercent is always 0 and no coupon is issued.
+ * Phase 2 reward issuance is enabled in TEST; the database remains authoritative for the reward amount and coupon lifecycle.
  */
 import { replayDiscountMeter, OPERATION_RULES_VERSION, TIERED_RULES_VERSION } from "./burger-boost-rules";
 import {
@@ -180,7 +180,7 @@ export function createRewardService(deps: {
       if (res === "expired") return { ok: false, status: "expired", error: "hard cutoff exceeded" };
       if (res === "not_eligible") return { ok: false, status: "completed", error: "session already finalized" };
       if (typeof res !== "string" || !OUTCOMES.has(res)) return { ok: false, status: "unavailable", error: "completion failed" };
-      // Locks: the RPC never awards today; enforce 0 here too regardless of its echo.
+      // The RPC is authoritative; enforce the configured Phase 2 ceiling at the server boundary.
       if (Number(r.awarded_discount_percent ?? 0) !== 0 && !RELEASE_LOCKS.couponIssuance) {
         return { ok: false, status: "unavailable", error: "lock violation" };
       }
