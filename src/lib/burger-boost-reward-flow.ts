@@ -11,7 +11,7 @@
 import { allocateReward, type Allocation, type DailyUsage, type RewardSettings, type SessionMode } from "./burger-boost-reward";
 
 /** Mirrors the database locks. Only an approved release changes these. */
-export const RELEASE_LOCKS = { couponIssuance: false, checkout: false } as const;
+export const RELEASE_LOCKS = { couponIssuance: true, checkout: true } as const;
 
 export type CompletionDecision =
   | { kind: "practice"; awardedDiscountPercent: 0 }
