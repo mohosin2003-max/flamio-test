@@ -91,7 +91,8 @@ type RewardDeps = {
   prepare(userId: string): Promise<{ ok: true; sessionId: string; ackDeadlineAt: number } | { ok: false; reason: string }>;
   acknowledge(userId: string, id: string): Promise<{ ok: true; sessionId: string; rulesVersion: number; startedAt: number; expiresAt: number } | { ok: false; reason: string }>;
   isReward(userId: string, id: string): Promise<boolean>;
-  complete(userId: string, id: string, payload: unknown): Promise<{ ok: true; verifiedScore: number; finalMeter: number; outcome: string; awardedDiscountPercent: 0 } | { ok: false; status: string; error: string }>;
+  complete(userId: string, id: string, payload: unknown): Promise<{ ok: true; verifiedScore: number; finalMeter: number; outcome: string; awardedDiscountPercent: number } | { ok: false; status: string; error: string }>;
+  placeOrder(userId: string, reservationId: string, idempotencyKey: string, order: unknown, items: unknown): Promise<{ ok: true; orderId: string; orderCode: string; subtotal: number; discount: number; deliveryCharge: number; total: number; couponCode: string; discountPercent: number } | { ok: false; error: string }>;
 };
 type Limiter = { checkAndRecord(key: string): boolean };
 /** Server-only: builds the answer-free gate view for a session the caller owns. */
@@ -170,7 +171,7 @@ export function createBurgerBoostApi(deps: ApiDeps) {
       try {
         if (deps.reward && await deps.reward.isReward(uid, p.data.sessionId)) {
           const rr = await deps.reward.complete(uid, p.data.sessionId, { playerActions: p.data.playerActions });
-          if (rr.ok) return { ok: true as const, status: "completed" as const, verifiedScore: rr.verifiedScore, awardedDiscountPercent: 0 as const, rewardOutcome: rr.outcome };
+          if (rr.ok) return { ok: true as const, status: "completed" as const, verifiedScore: rr.verifiedScore, awardedDiscountPercent: rr.awardedDiscountPercent, rewardOutcome: rr.outcome };
           const error = rr.status === "not_found" ? MSG.notFound : rr.status === "expired" ? MSG.expired
             : rr.status === "rejected" ? MSG.invalid : rr.status === "unavailable" ? MSG.unavailable : MSG.inactive;
           return { ok: false as const, status: rr.status, error };
@@ -220,6 +221,19 @@ export function createBurgerBoostApi(deps: ApiDeps) {
         : MSG.unavailable;
       return { ok: false as const, error };
     } catch (e) { logSafe("claimReward", e); return { ok: false as const, error: MSG.unavailable }; }
+  },
+
+  async placeRewardOrder(userId: unknown, input: unknown) {
+    const uid = requireUser(userId);
+    if (!uid) return { ok: false as const, error: MSG.unauthenticated };
+    if (!deps.reward) return { ok: false as const, error: MSG.unavailable };
+    const i = input && typeof input === "object" ? input as Record<string, unknown> : {};
+    const reservationId = typeof i.reservationId === "string" ? i.reservationId : "";
+    const idempotencyKey = typeof i.idempotencyKey === "string" ? i.idempotencyKey : "";
+    if (!uuid.safeParse(reservationId).success || idempotencyKey.length < 8) return { ok: false as const, error: MSG.invalid };
+    try {
+      return await deps.reward.placeOrder(uid, reservationId, idempotencyKey, i.order, i.items);
+    } catch (e) { logSafe("placeRewardOrder", e); return { ok: false as const, error: MSG.unavailable }; }
   },
 
   async acknowledgeReward(userId: unknown, input: unknown) {
@@ -328,3 +342,13 @@ export const claimBurgerBoostReward = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => sessionIdSchema.parse(input))
   .handler(async ({ context, data }) => (await serverApi()).claimReward(context.userId, data));
+
+export const placeBurgerBoostRewardOrder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({
+    reservationId: uuid,
+    idempotencyKey: z.string().min(8).max(100),
+    order: z.record(z.unknown()),
+    items: z.array(z.record(z.unknown())).min(1).max(50),
+  }).strict().parse(input))
+  .handler(async ({ context, data }) => (await serverApi()).placeRewardOrder(context.userId, data));
