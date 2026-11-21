@@ -232,7 +232,16 @@ export function createBurgerBoostApi(deps: ApiDeps) {
     const idempotencyKey = typeof i.idempotencyKey === "string" ? i.idempotencyKey : "";
     if (!uuid.safeParse(reservationId).success || idempotencyKey.length < 8) return { ok: false as const, error: MSG.invalid };
     try {
-      return await deps.reward.placeOrder(uid, reservationId, idempotencyKey, i.order, i.items);
+      const result = await deps.reward.placeOrder(uid, reservationId, idempotencyKey, i.order, i.items);
+      if (result.ok) {
+        try {
+          const { dispatchDueNotificationJobs } = await import("@/lib/push.server");
+          await dispatchDueNotificationJobs(10);
+        } catch (notifyError) {
+          console.error("[burger-boost] reward order notification failed", notifyError);
+        }
+      }
+      return result;
     } catch (e) { logSafe("placeRewardOrder", e); return { ok: false as const, error: MSG.unavailable }; }
   },
 
