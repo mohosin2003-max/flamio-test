@@ -55,6 +55,7 @@ export const getOwnerRewardConfig = createServerFn({ method: "GET" })
 
 export const updateOwnerRewardConfig = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => input as RewardConfig)
   .handler(async ({ context, data }) => {
     await assertOwner(context.userId);
     const parsed = validateRewardConfig(data);

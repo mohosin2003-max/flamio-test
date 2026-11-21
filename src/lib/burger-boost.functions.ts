@@ -90,6 +90,7 @@ type RewardDeps = {
   prepare(userId: string): Promise<{ ok: true; sessionId: string; ackDeadlineAt: number } | { ok: false; reason: string }>;
   acknowledge(userId: string, id: string): Promise<{ ok: true; sessionId: string; rulesVersion: number; startedAt: number; expiresAt: number } | { ok: false; reason: string }>;
   isReward(userId: string, id: string): Promise<boolean>;
+  claim(userId: string, sessionId: string): Promise<import("@/lib/burger-boost-reward-service").ClaimResult>;
   complete(userId: string, id: string, payload: unknown): Promise<{ ok: true; verifiedScore: number; finalMeter: number; outcome: string; awardedDiscountPercent: number } | { ok: false; status: string; error: string }>;
   placeOrder(userId: string, reservationId: string, idempotencyKey: string, order: unknown, items: unknown): Promise<{ ok: true; orderId: string; orderCode: string; subtotal: number; discount: number; deliveryCharge: number; total: number; couponCode: string; discountPercent: number } | { ok: false; error: string }>;
 };

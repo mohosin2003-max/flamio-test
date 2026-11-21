@@ -48,7 +48,7 @@ export type SessionRecord = {
   completedAt: number | null;
   verifiedScore: number | null;
   telemetryHash: string | null;
-  awardedDiscountPercent: 0;
+  awardedDiscountPercent: number;
   /** Server-set at creation. Absent on legacy v1 rows. Never accepted from the client. */
   mode?: SessionMode;
 };
