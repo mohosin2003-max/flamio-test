@@ -518,7 +518,7 @@ export const ownerListAttendanceRequests = createServerFn({ method: "GET" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isManager) throw new Error("Only an Owner or Manager can review attendance requests.");
     const { data, error } = await db.from("attendance_requests")
-      .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, reason, status, review_note, created_at")
+      .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, approved_overtime_start_at, approved_overtime_end_at, reason, status, review_note, created_at")
       .order("created_at", { ascending: false }).limit(200);
     if (error) throw new Error("Could not load attendance requests.");
     const ids = Array.from(new Set((data ?? []).map((r: { user_id: string }) => r.user_id)));
