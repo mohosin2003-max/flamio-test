@@ -45,7 +45,7 @@ export function evaluateGeofence({
   point,
   station,
   now,
-  maxAccuracyMeters = 100,
+  maxAccuracyMeters = 500,
   maxAgeMs = 2 * 60 * 1000,
 }: GeofenceInput): GeofenceResult {
   const valid =
