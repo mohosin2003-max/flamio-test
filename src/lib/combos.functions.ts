@@ -36,6 +36,8 @@ const comboSchema = z.object({
   pricingMode: z.enum(["calculated", "fixed"]),
   fixedPrice: z.number().min(0).max(1000000).nullable(),
   isActive: z.boolean(),
+  showInOffers: z.boolean().optional(),
+  showInPopular: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(1000),
   groups: z.array(groupSchema).max(8),
 });
@@ -115,14 +117,20 @@ export const ownerSaveCombo = createServerFn({ method: "POST" })
     };
     // The combo picture is an optional extra column; where it isn't installed
     // yet the save still goes through without it.
-    const withImage = { ...payload, image_url: candidate.imageUrl };
-    const { missingComboImageColumn } = await import("@/lib/combos.server");
+    const withImage: Record<string, unknown> = { ...payload, image_url: candidate.imageUrl };
+    if (data.showInOffers !== undefined) withImage.show_in_offers = data.showInOffers;
+    if (data.showInPopular !== undefined) withImage.show_in_popular = data.showInPopular;
+    const { missingComboImageColumn, missingComboVisibilityColumns } = await import("@/lib/combos.server");
+    const withoutVisibility = { ...payload, image_url: candidate.imageUrl };
     const { looseDb } = await import("@/integrations/supabase/loose.server");
     const db = looseDb(supabaseAdmin);
 
     let comboId = data.id;
     if (comboId) {
       let { error } = await db.from("combos").update(withImage).eq("id", comboId);
+      if (error && missingComboVisibilityColumns(error)) {
+        ({ error } = await db.from("combos").update(withoutVisibility).eq("id", comboId));
+      }
       if (error && missingComboImageColumn(error)) {
         ({ error } = await supabaseAdmin.from("combos").update(payload).eq("id", comboId));
       }
@@ -137,6 +145,13 @@ export const ownerSaveCombo = createServerFn({ method: "POST" })
         .insert({ ...withImage, slug })
         .select("id")
         .single();
+      if (error && missingComboVisibilityColumns(error)) {
+        ({ data: row, error } = await db
+          .from("combos")
+          .insert({ ...withoutVisibility, slug })
+          .select("id")
+          .single());
+      }
       if (error && missingComboImageColumn(error)) {
         ({ data: row, error } = await supabaseAdmin
           .from("combos")
@@ -219,6 +234,39 @@ export const ownerDeleteCombo = createServerFn({ method: "POST" })
     if (error) {
       console.error("Combo delete failed", error);
       throw new Error("We couldn't remove this combo. Please try again.");
+    }
+    return { ok: true };
+  });
+
+/** Owner: promotional placement toggles. Never touches `is_active`. */
+export const ownerSetComboVisibility = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        showInOffers: z.boolean().optional(),
+        showInPopular: z.boolean().optional(),
+      })
+      .refine((v) => v.showInOffers !== undefined || v.showInPopular !== undefined)
+      .parse(input),
+  )
+  .handler(async ({ context, data }) => {
+    const { assertPermission } = await import("@/lib/owner.server");
+    await assertPermission(context.userId, "combos");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { looseDb } = await import("@/integrations/supabase/loose.server");
+    const { missingComboVisibilityColumns } = await import("@/lib/combos.server");
+    const update: Record<string, boolean> = {};
+    if (data.showInOffers !== undefined) update.show_in_offers = data.showInOffers;
+    if (data.showInPopular !== undefined) update.show_in_popular = data.showInPopular;
+    const { error } = await looseDb(supabaseAdmin).from("combos").update(update).eq("id", data.id);
+    if (error) {
+      if (missingComboVisibilityColumns(error)) {
+        throw new Error("Offers/Popular switches need a one-time database update first.");
+      }
+      console.error("Combo visibility update failed", error);
+      throw new Error("We couldn't change this combo. Please try again.");
     }
     return { ok: true };
   });

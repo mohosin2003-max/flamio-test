@@ -26,7 +26,12 @@ import {
   ownerListCombos,
   ownerSaveCombo,
   ownerSetComboActive,
+  ownerSetComboVisibility,
 } from "@/lib/combos.functions";
+import { isFixedRecipe, recipeFromGroups } from "@/lib/combos";
+import {
+  FixedComboEditor, emptyFixedCombo, fixedComboPayload, type FixedComboForm,
+} from "@/components/owner/FixedComboEditor";
 import { formatBDT } from "@/lib/format";
 import { menuQueryOptions } from "@/lib/menu-repository";
 
@@ -68,6 +73,8 @@ type ComboForm = {
   pricingMode: "calculated" | "fixed";
   fixedPrice: number | null;
   isActive: boolean;
+  showInOffers?: boolean;
+  showInPopular?: boolean;
   sortOrder: number;
   groups: GroupForm[];
 };
@@ -95,6 +102,8 @@ function OwnerCombos() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<ComboForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [fixed, setFixed] = useState<FixedComboForm | null>(null);
+  const setVisibility = useServerFn(ownerSetComboVisibility);
 
   const combos = useQuery<ComboRow[]>({
     queryKey: ["owner-combos"],
@@ -125,9 +134,14 @@ function OwnerCombos() {
             Build combos from the menu items you already have. Nothing is duplicated.
           </p>
         </div>
-        <Button onClick={() => setEditing({ ...emptyCombo, sortOrder: rows.length })}>
-          <Plus className="mr-2 h-4 w-4" /> New combo
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setFixed(emptyFixedCombo(rows.length))}>
+            <Plus className="mr-2 h-4 w-4" /> New fixed combo
+          </Button>
+          <Button onClick={() => setEditing({ ...emptyCombo, sortOrder: rows.length })}>
+            <Plus className="mr-2 h-4 w-4" /> New combo
+          </Button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -171,7 +185,21 @@ function OwnerCombos() {
                         }
                       }}
                     />
-                    <Button variant="outline" size="sm" onClick={() => setEditing(combo)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        isFixedRecipe(combo)
+                          ? setFixed({
+                              id: combo.id, name: combo.name, description: combo.description,
+                              imageUrl: combo.imageUrl, offerPrice: combo.fixedPrice,
+                              isActive: combo.isActive, showInOffers: combo.showInOffers ?? true,
+                              showInPopular: combo.showInPopular ?? false, sortOrder: combo.sortOrder,
+                              items: recipeFromGroups(combo.groups),
+                            })
+                          : setEditing(combo)
+                      }
+                    >
                       Edit
                     </Button>
                     <Button
@@ -196,6 +224,29 @@ function OwnerCombos() {
                   </div>
                 </div>
 
+                <div className="flex flex-wrap gap-4 text-sm">
+                  {isFixedRecipe(combo) ? (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs">Fixed bundle</span>
+                  ) : null}
+                  {(["showInOffers", "showInPopular"] as const).map((field) => (
+                    <label key={field} className="flex items-center gap-2">
+                      <Switch
+                        checked={field === "showInOffers" ? (combo.showInOffers ?? true) : (combo.showInPopular ?? false)}
+                        aria-label={`${field === "showInOffers" ? "Show in Offers" : "Show in Home Popular"}: ${combo.name}`}
+                        onCheckedChange={async (checked) => {
+                          try {
+                            await setVisibility({ data: { id: combo.id as string, [field]: checked } });
+                            await refresh();
+                          } catch (error) {
+                            toast.error(error instanceof Error ? error.message : "Couldn't change this combo");
+                          }
+                        }}
+                      />
+                      {field === "showInOffers" ? "Show in Offers" : "Show in Home Popular"}
+                    </label>
+                  ))}
+                </div>
+
                 {combo.problems.length > 0 ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/40 p-3 text-sm">
                     <p className="font-medium">Needs fixing before it can go live:</p>
@@ -211,6 +262,24 @@ function OwnerCombos() {
           ))}
         </div>
       )}
+
+      {fixed ? (
+        <FixedComboEditor
+          initial={fixed}
+          products={menu.products}
+          onClose={() => setFixed(null)}
+          onSave={async (form) => {
+            try {
+              await save({ data: fixedComboPayload(form) });
+              await refresh();
+              toast.success("Fixed combo saved");
+              setFixed(null);
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Couldn't save this combo");
+            }
+          }}
+        />
+      ) : null}
 
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">

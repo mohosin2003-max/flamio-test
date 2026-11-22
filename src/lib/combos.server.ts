@@ -26,12 +26,20 @@ type ComboRow = {
   pricing_mode: string;
   fixed_price: number | string | null;
   is_active: boolean;
+  show_in_offers?: boolean | null;
+  show_in_popular?: boolean | null;
   sort_order: number;
 };
 
 const COMBO_BASE_COLUMNS =
   "id, slug, name, description, pricing_mode, fixed_price, is_active, sort_order";
 const COMBO_COLUMNS = `${COMBO_BASE_COLUMNS}, image_url`;
+const COMBO_FULL_COLUMNS = `${COMBO_COLUMNS}, show_in_offers, show_in_popular`;
+
+/** True when the optional promotional visibility columns aren't installed yet. */
+export function missingComboVisibilityColumns(error: { message?: string } | null): boolean {
+  return Boolean(error?.message && /show_in_(offers|popular)/i.test(error.message));
+}
 
 /** True when the database doesn't have the optional combo image column yet. */
 export function missingComboImageColumn(error: { message?: string } | null): boolean {
@@ -62,6 +70,8 @@ function mapCombo(row: ComboRow, groups: GroupRow[]): ComboConfig {
     pricingMode: row.pricing_mode as ComboPricingMode,
     fixedPrice: row.fixed_price === null ? null : Number(row.fixed_price),
     isActive: row.is_active,
+    showInOffers: row.show_in_offers ?? true,
+    showInPopular: row.show_in_popular ?? false,
     sortOrder: row.sort_order,
     groups: groups
       .filter((g) => g.combo_id === row.id)
@@ -93,7 +103,10 @@ export async function loadComboConfigs(comboId?: string): Promise<ComboConfig[]>
     return query;
   };
 
-  let { data: combos, error } = await run(COMBO_COLUMNS);
+  let { data: combos, error } = await run(COMBO_FULL_COLUMNS);
+  if (error && missingComboVisibilityColumns(error)) {
+    ({ data: combos, error } = await run(COMBO_COLUMNS));
+  }
   if (error && missingComboImageColumn(error)) {
     // The optional combo image column isn't installed yet — combos still work.
     ({ data: combos, error } = await run(COMBO_BASE_COLUMNS));
@@ -170,6 +183,8 @@ export async function loadCustomerCombos(): Promise<ComboDto[]> {
       pricingMode: config.pricingMode,
       fixedPrice: config.fixedPrice,
       isActive: config.isActive,
+      showInOffers: config.showInOffers ?? true,
+      showInPopular: config.showInPopular ?? false,
       sortOrder: config.sortOrder,
       groups: groups.filter((g) => g.isRequired || g.productIds.length > 0),
     });
