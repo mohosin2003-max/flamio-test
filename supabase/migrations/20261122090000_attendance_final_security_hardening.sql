@@ -2,24 +2,54 @@
 -- Final security/consistency hardening for attendance requests, overtime and breaks.
 -- Production untouched.
 
--- 1) Enforce request/session ownership at the database level.
-CREATE UNIQUE INDEX IF NOT EXISTS attendance_sessions_id_user_id_uq
-  ON public.attendance_sessions(id, user_id);
-
-DO $$
+-- 1) Enforce request/session ownership and submission timestamp validation.
+CREATE OR REPLACE FUNCTION public.attendance_validate_request_submission()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO public, pg_temp
+AS $function$
+DECLARE
+  v_session public.attendance_sessions%ROWTYPE;
+  v_now timestamptz := now();
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'attendance_requests_session_owner_fkey'
-      AND conrelid = 'public.attendance_requests'::regclass
-  ) THEN
-    ALTER TABLE public.attendance_requests
-      ADD CONSTRAINT attendance_requests_session_owner_fkey
-      FOREIGN KEY (session_id, user_id)
-      REFERENCES public.attendance_sessions(id, user_id)
-      ON DELETE RESTRICT;
+  IF NEW.session_id IS NOT NULL THEN
+    SELECT * INTO v_session FROM public.attendance_sessions
+    WHERE id=NEW.session_id FOR SHARE;
+    IF v_session.id IS NULL THEN
+      RAISE EXCEPTION 'Referenced attendance session does not exist';
+    END IF;
+    IF v_session.user_id <> NEW.user_id THEN
+      RAISE EXCEPTION 'Attendance request session does not belong to the requester';
+    END IF;
   END IF;
-END $$;
+
+  IF NEW.requested_clock_in IS NOT NULL THEN
+    IF NEW.requested_clock_in > v_now THEN RAISE EXCEPTION 'Requested clock-in cannot be in the future'; END IF;
+    IF NEW.requested_clock_in < v_now - interval '31 days' THEN RAISE EXCEPTION 'Requested clock-in is too old'; END IF;
+  END IF;
+  IF NEW.requested_clock_out IS NOT NULL THEN
+    IF NEW.requested_clock_out > v_now THEN RAISE EXCEPTION 'Requested clock-out cannot be in the future'; END IF;
+    IF NEW.requested_clock_out < v_now - interval '31 days' THEN RAISE EXCEPTION 'Requested clock-out is too old'; END IF;
+  END IF;
+  IF NEW.requested_clock_in IS NOT NULL AND NEW.requested_clock_out IS NOT NULL THEN
+    IF NEW.requested_clock_out <= NEW.requested_clock_in THEN RAISE EXCEPTION 'Requested clock-out must be after clock-in'; END IF;
+    IF NEW.requested_clock_out - NEW.requested_clock_in > interval '24 hours' THEN RAISE EXCEPTION 'Requested attendance window cannot exceed 24 hours'; END IF;
+  END IF;
+  IF NEW.request_type='missed_punch'
+     AND NEW.target_date IS NOT NULL
+     AND NEW.requested_clock_in IS NOT NULL
+     AND (NEW.requested_clock_in AT TIME ZONE 'Asia/Dhaka')::date <> NEW.target_date THEN
+    RAISE EXCEPTION 'Missed-punch date does not match requested clock-in date';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS attendance_validate_request_submission_trg ON public.attendance_requests;
+CREATE TRIGGER attendance_validate_request_submission_trg
+BEFORE INSERT ON public.attendance_requests
+FOR EACH ROW EXECUTE FUNCTION public.attendance_validate_request_submission();
 
 -- 2) Stop duplicate pending leave / missed-punch spam.
 CREATE UNIQUE INDEX IF NOT EXISTS attendance_requests_one_pending_leave_range_idx
@@ -52,55 +82,43 @@ BEGIN
 
   SELECT * INTO v_break
   FROM public.attendance_breaks
-  WHERE id = _break_id
-    AND user_id = _actor_id
-    AND ended_at IS NULL
+  WHERE id=_break_id AND user_id=_actor_id AND ended_at IS NULL
   FOR UPDATE;
 
-  IF v_break.id IS NULL THEN
-    RAISE EXCEPTION 'No active break was found';
-  END IF;
+  IF v_break.id IS NULL THEN RAISE EXCEPTION 'No active break was found'; END IF;
 
   SELECT * INTO v_session
   FROM public.attendance_sessions
-  WHERE id = v_break.session_id
-    AND user_id = _actor_id
+  WHERE id=v_break.session_id AND user_id=_actor_id
   FOR UPDATE;
 
-  IF v_session.id IS NULL THEN
-    RAISE EXCEPTION 'Attendance session no longer exists';
-  END IF;
+  IF v_session.id IS NULL THEN RAISE EXCEPTION 'Attendance session no longer exists'; END IF;
 
   IF v_session.clock_out_at IS NOT NULL THEN
-    -- The duty-end maintenance may have closed the session concurrently.
-    -- Close the break at the authoritative session end without extending work.
-    v_end := LEAST(v_end, v_session.clock_out_at);
+    v_end:=LEAST(v_end,v_session.clock_out_at);
   END IF;
+  IF v_end<=v_break.started_at THEN RAISE EXCEPTION 'Break end time is invalid'; END IF;
 
-  IF v_end <= v_break.started_at THEN
-    RAISE EXCEPTION 'Break end time is invalid';
-  END IF;
-
-  v_minutes := floor(extract(epoch FROM (v_end - v_break.started_at)) / 60);
+  v_minutes:=floor(extract(epoch FROM (v_end-v_break.started_at))/60);
 
   UPDATE public.attendance_breaks
-  SET ended_at = v_end, source = 'app', updated_at = now()
-  WHERE id = v_break.id;
+  SET ended_at=v_end,source='app',updated_at=now()
+  WHERE id=v_break.id;
 
   UPDATE public.attendance_sessions
-  SET break_minutes = COALESCE(v_session.break_minutes, 0) + v_minutes,
-      updated_at = now()
-  WHERE id = v_session.id;
+  SET break_minutes=COALESCE(v_session.break_minutes,0)+v_minutes,
+      updated_at=now()
+  WHERE id=v_session.id;
 
+  PERFORM public.attendance_recalculate_session(v_session.id);
   RETURN v_minutes;
 END;
 $function$;
 
-REVOKE EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid, uuid)
+REVOKE EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid,uuid)
   FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid, uuid)
+GRANT EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid,uuid)
   TO service_role;
-
 -- 4) Service bridge for manager session verification.
 CREATE OR REPLACE FUNCTION public.attendance_verify_session_as_service(
   _session_id uuid,
