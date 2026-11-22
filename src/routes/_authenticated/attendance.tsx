@@ -31,18 +31,19 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 import { isChimeMuted, playChime, setChimeMuted, type ChimeKind } from "@/lib/attendance-chimes";
 import { staffRecordGpsTransition } from "@/lib/attendance-location-events.functions";
+import { readReliableAttendanceLocation } from "@/lib/attendance-location";
 
 const QUEUE_LABEL: Record<QueueKind, string> = { clock_in: "Clock in", clock_out: "Clock out", break_start: "Break start", break_end: "Break end", task_item_toggle: "Checklist tick", task_complete: "Task completion" };
 
 const EXCEPTION_PENDING = Symbol("exception-pending");
 
 async function readClockOutLocation(): Promise<{ latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number }> {
-  // Single on-demand reading; failures are sent as "no location" so the server asks for a reason instead of trapping staff.
-  if (typeof navigator === "undefined" || !navigator.geolocation) return {};
   try {
-    const p = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
-    return { latitude: p.coords.latitude, longitude: p.coords.longitude, accuracyMeters: p.coords.accuracy, capturedAt: Math.round(p.timestamp) };
-  } catch { return {}; }
+    return await readReliableAttendanceLocation();
+  } catch {
+    // Clock-out may still use the existing Owner-review exception flow when GPS cannot be verified.
+    return {};
+  }
 }
 
 export const Route = createFileRoute("/_authenticated/attendance")({
@@ -211,17 +212,13 @@ function MyAttendance() {
       if (!active || inFlight || !navigator.onLine || document.visibilityState !== "visible") return;
       inFlight = true;
       try {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true, timeout: 12000, maximumAge: 0,
-          });
-        });
-        if (!active || position.coords.accuracy > 50) return;
+        const location = await readReliableAttendanceLocation();
+        if (!active) return;
         await recordGpsTransition({ data: {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters: position.coords.accuracy,
-          capturedAt: Math.round(position.timestamp),
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+          capturedAt: location.capturedAt,
         } });
       } catch {
         // GPS permission, network, and transient failures must not block attendance actions.
@@ -303,7 +300,7 @@ function MyAttendance() {
       })()}{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), activeBreak.session_id ? { breakId: activeBreak.id, sessionId: activeBreak.session_id } : undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} aria-describedby={activeBreak ? "clockout-locked" : undefined} onClick={() => void doClockOut()}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div>{activeBreak ? <p id="clockout-locked" className="mt-2 text-xs text-muted-foreground">Clock out is locked while your break is running. End your break first.</p> : null}</div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
           const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number; qrToken?: string; selfiePath?: string } = { shiftId: shiftId || null, note: note.trim() || null };
           try {
-            if (settings?.geofence_enabled) { if (!navigator.onLine) throw new Error("Geofence clock-in needs an online connection so the GPS reading can be checked immediately."); if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; payload.capturedAt = Math.round(position.timestamp); }
+            if (settings?.geofence_enabled) { if (!navigator.onLine) throw new Error("Geofence clock-in needs an online connection so the GPS reading can be checked immediately."); const location = await readReliableAttendanceLocation(); payload.latitude = location.latitude; payload.longitude = location.longitude; payload.accuracyMeters = location.accuracyMeters; payload.capturedAt = location.capturedAt; }
             if (settings?.qr_verification_enabled) { if (!qrToken.trim()) throw new Error("Enter the station QR token before clocking in."); payload.qrToken = qrToken.trim(); }
             if (isSelfieVerificationEnabled(settings?.selfie_verification_enabled)) {
               if (!selfie) throw new Error("Take a new check-in photo with your camera before clocking in.");
