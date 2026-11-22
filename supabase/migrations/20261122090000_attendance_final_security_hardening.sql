@@ -62,8 +62,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS attendance_requests_one_pending_missed_punch_d
 
 -- 3) Atomic break closure + session total update.
 CREATE OR REPLACE FUNCTION public.attendance_end_break_as_service(
-  _actor_id uuid,
-  _break_id uuid
+  _actor_id uuid,_break_id uuid
 )
 RETURNS integer
 LANGUAGE plpgsql
@@ -73,52 +72,30 @@ AS $function$
 DECLARE
   v_break public.attendance_breaks%ROWTYPE;
   v_session public.attendance_sessions%ROWTYPE;
-  v_end timestamptz := now();
+  v_end timestamptz:=now();
   v_minutes integer;
 BEGIN
-  IF _actor_id IS NULL OR NOT public.has_role(_actor_id, 'staff'::public.app_role) THEN
+  IF _actor_id IS NULL OR NOT public.has_role(_actor_id,'staff'::public.app_role) THEN
     RAISE EXCEPTION 'Only staff can end an attendance break';
   END IF;
-
-  SELECT * INTO v_break
-  FROM public.attendance_breaks
-  WHERE id=_break_id AND user_id=_actor_id AND ended_at IS NULL
-  FOR UPDATE;
-
+  SELECT * INTO v_break FROM public.attendance_breaks
+  WHERE id=_break_id AND user_id=_actor_id AND ended_at IS NULL FOR UPDATE;
   IF v_break.id IS NULL THEN RAISE EXCEPTION 'No active break was found'; END IF;
-
-  SELECT * INTO v_session
-  FROM public.attendance_sessions
-  WHERE id=v_break.session_id AND user_id=_actor_id
-  FOR UPDATE;
-
+  SELECT * INTO v_session FROM public.attendance_sessions
+  WHERE id=v_break.session_id AND user_id=_actor_id FOR UPDATE;
   IF v_session.id IS NULL THEN RAISE EXCEPTION 'Attendance session no longer exists'; END IF;
-
-  IF v_session.clock_out_at IS NOT NULL THEN
-    v_end:=LEAST(v_end,v_session.clock_out_at);
-  END IF;
+  IF v_session.clock_out_at IS NOT NULL THEN v_end:=LEAST(v_end,v_session.clock_out_at); END IF;
   IF v_end<=v_break.started_at THEN RAISE EXCEPTION 'Break end time is invalid'; END IF;
-
   v_minutes:=floor(extract(epoch FROM (v_end-v_break.started_at))/60);
-
-  UPDATE public.attendance_breaks
-  SET ended_at=v_end,source='app',updated_at=now()
-  WHERE id=v_break.id;
-
-  UPDATE public.attendance_sessions
-  SET break_minutes=COALESCE(v_session.break_minutes,0)+v_minutes,
-      updated_at=now()
-  WHERE id=v_session.id;
-
+  UPDATE public.attendance_breaks SET ended_at=v_end,source='app',updated_at=now() WHERE id=v_break.id;
+  UPDATE public.attendance_sessions SET break_minutes=COALESCE(v_session.break_minutes,0)+v_minutes,updated_at=now() WHERE id=v_session.id;
   PERFORM public.attendance_recalculate_session(v_session.id);
   RETURN v_minutes;
 END;
 $function$;
 
-REVOKE EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid,uuid)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid,uuid)
-  TO service_role;
+REVOKE EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.attendance_end_break_as_service(uuid,uuid) TO service_role;
 -- 4) Service bridge for manager session verification.
 CREATE OR REPLACE FUNCTION public.attendance_verify_session_as_service(
   _session_id uuid,
