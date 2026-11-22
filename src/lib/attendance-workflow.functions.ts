@@ -532,7 +532,7 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ requestId: z.string().uuid(), decision: z.enum(["approved", "rejected"]), reviewNote: z.string().trim().max(1000).nullable().optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.isOwner) throw new Error("Only the Owner can review attendance requests.");
+    if (!access.isManager) throw new Error("Only an Owner or Manager can review attendance requests.");
     const { data: current, error: readError } = await db.from("attendance_requests")
       .select("id, user_id, request_type, status, session_id, leave_start_date, leave_end_date, requested_clock_in, requested_clock_out")
       .eq("id", data.requestId).maybeSingle();
