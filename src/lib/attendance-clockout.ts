@@ -1,7 +1,7 @@
 /**
  * Clock-out geofence decision (pure, no I/O). The server is authoritative.
  * Reuses evaluateGeofence (coordinate validity, staleness) with the same
- * 50 m accuracy cap and strict radius test used at clock-in.
+ * 100 m accuracy cap and uncertainty-aware radius test used at clock-in.
  */
 import { distanceMeters, evaluateGeofence } from "@/lib/attendance-logic";
 
