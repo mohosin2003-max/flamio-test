@@ -516,7 +516,7 @@ export const ownerListAttendanceRequests = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.isOwner) throw new Error("Only the Owner can review attendance requests.");
+    if (!access.isManager) throw new Error("Only an Owner or Manager can review attendance requests.");
     const { data, error } = await db.from("attendance_requests")
       .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, reason, status, review_note, created_at")
       .order("created_at", { ascending: false }).limit(200);
@@ -542,7 +542,7 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
     // Use the TEST-only service-role bridge to execute the existing database
     // transaction, including leave/shift changes, missed-punch creation,
     // session correction and recalculation. The bridge independently verifies
-    // the supplied actor is an Owner and is executable only by service_role.
+    // the supplied actor is an Owner or Manager and is executable only by service_role.
     const { data: updated, error } = await db.rpc("attendance_review_request_as_service", {
       _request_id: data.requestId,
       _approve: data.decision === "approved",
