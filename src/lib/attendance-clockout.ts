@@ -5,7 +5,7 @@
  */
 import { distanceMeters, evaluateGeofence } from "@/lib/attendance-logic";
 
-export const CLOCK_OUT_MAX_ACCURACY_METERS = 50;
+export const CLOCK_OUT_MAX_ACCURACY_METERS = 100;
 export const CLOCK_OUT_MAX_AGE_MS = 2 * 60 * 1000;
 export function validateClockInLocationTimestamp(capturedAt: unknown, now: number): { ok: true } | { ok: false; reason: "missing" | "invalid" | "stale" } {
   if (typeof capturedAt !== "number" || !Number.isFinite(capturedAt) || capturedAt <= 0) return { ok: false, reason: "missing" };
@@ -76,9 +76,11 @@ export function decideClockOutLocation(input: {
     else if (!r.ok && r.reason === "stale") discrepancy = "stale_location";
     else if (!r.ok && r.reason === "inaccurate") discrepancy = "inaccurate_location";
     else {
-      // Strict radius test, identical to clock-in (no accuracy tolerance).
+      // Use the GPS accuracy as an uncertainty radius. This mirrors clock-in:
+      // the reported uncertainty circle must still overlap the configured
+      // station fence; the configured radius itself is not enlarged.
       distance = distanceMeters({ lat: p.latitude, lng: p.longitude }, { lat: st.latitude, lng: st.longitude });
-      if (!Number.isFinite(distance) || distance > st.radius) discrepancy = "outside_geofence";
+      if (!Number.isFinite(distance) || distance - Number(p.accuracyMeters) > st.radius) discrepancy = "outside_geofence";
     }
   }
   if (!discrepancy) return { ok: true, mode: "verified_location", distance };
