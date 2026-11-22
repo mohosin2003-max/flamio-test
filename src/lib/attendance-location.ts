@@ -1,0 +1,1 @@
+import type { GeolocationPosition } from "@/lib/attendance-location-types";
