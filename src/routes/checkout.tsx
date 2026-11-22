@@ -29,6 +29,7 @@ import { checkCoupon } from "@/lib/coupons.functions";
 import { placeBurgerBoostRewardOrder } from "@/lib/burger-boost.functions";
 import { saveOrder, type PlacedOrder } from "@/lib/orders";
 import { placeOrder } from "@/lib/orders.functions";
+import { newCheckoutAttemptKey } from "@/lib/order-idempotency";
 import { canScheduleNow, formatScheduled, isOpenAt, listSlots } from "@/lib/opening-hours";
 import { getPublicHours } from "@/lib/scheduling.functions";
 import { ScheduleDialog } from "@/components/checkout/ScheduleDialog";
@@ -74,6 +75,8 @@ function CheckoutPage() {
     origin !== null && zones.some((z) => z.zoneType === "radius" && z.radiusMaxM !== null);
   const navigate = useNavigate();
   const rewardReservationId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("reservationId") : null;
+  // One key per checkout attempt: kept across retries, replaced only after success.
+  const orderAttemptKeyRef = useRef(newCheckoutAttemptKey());
   const rewardIdempotencyKeyRef = useRef(`bb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   const submitOrder = useServerFn(placeOrder);
@@ -496,6 +499,7 @@ function CheckoutPage() {
                 discount,
                 couponCode: coupon?.code ?? null,
                 scheduledFor,
+                idempotencyKey: orderAttemptKeyRef.current,
                 deliveryCharge: quote.charge,
                 total: grandTotal,
                 items: lines.map((l) => ({
@@ -517,6 +521,7 @@ function CheckoutPage() {
 
             // Orders live in the database only — nothing private is kept on the device.
 
+            orderAttemptKeyRef.current = newCheckoutAttemptKey();
             setPlaced(true);
             clear();
             toast.success(scheduledFor ? "Order scheduled" : "Order placed");

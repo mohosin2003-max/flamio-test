@@ -114,6 +114,8 @@ const placeOrderSchema = z.object({
   channel: z.enum(["online", "counter"]).default("online"),
   /** Optional scheduled pre-order slot (ISO). Re-validated on the server. */
   scheduledFor: z.string().datetime({ offset: true }).nullable().optional(),
+  /** Per-checkout-attempt id: a retried submit returns the first order. */
+  idempotencyKey: z.string().trim().min(8).max(128).nullable().optional(),
 });
 
 export type PlaceOrderInput = z.infer<typeof placeOrderSchema>;
@@ -279,56 +281,70 @@ export const placeOrder = createServerFn({ method: "POST" })
 
     const total = Math.max(subtotal - discount, 0) + deliveryCharge;
 
-    let inserted: { id: string; code: string; created_at: string } | null = null;
-    let lastError: unknown = null;
+    const { insertOrderIdempotent } = await import("@/lib/order-idempotency");
+    const outcome = await insertOrderIdempotent(
+      {
+        insert: async () => {
+          const res = await supabaseAdmin
+          .from("orders")
+          .insert({
+            ...({ idempotency_key: data.idempotencyKey ?? null } as Record<string, unknown>),
+            code: orderCode(new Date()),
+            user_id: userId,
+            channel,
+            // Counter sales are confirmed/sold the moment the bill is completed.
+            status: channel === "counter" ? "completed" : scheduledFor ? "scheduled" : "placed",
+            ...({
+              order_kind: scheduledFor ? "scheduled" : "regular",
+              scheduled_for: scheduledFor,
+              scheduled_activate_at: scheduledActivateAt,
+            } as Record<string, unknown>),
+            fulfillment: data.fulfillment,
+            payment_method: data.paymentMethod,
+            payment_label: data.paymentLabel,
+            customer_name: data.customerName,
+            customer_phone: data.customerPhone,
+            address_line: isDelivery ? data.addressLine : null,
+            area: isDelivery ? data.area : null,
+            landmark: isDelivery ? data.landmark : null,
+            delivery_notes: data.deliveryNotes,
+            zone_id: zoneId,
+            zone_name: zoneName,
+            latitude,
+            longitude,
+            distance_m: distanceM,
+            estimated_time: estimatedTime,
+            pickup_note: isDelivery ? null : data.pickupNote,
+            subtotal,
+            discount,
+            delivery_charge: deliveryCharge,
+            total,
+            coupon_code: couponCode,
+          })
+          .select("id, code, created_at")
+          .single();
+          return { data: res.data, error: res.error };
+        },
+        findByKey: async (key) => {
+          const res = await supabaseAdmin
+            .from("orders")
+            .select("id, code, created_at, user_id")
+            .eq("idempotency_key" as never, key as never)
+            .maybeSingle();
+          return { data: res.data as never, error: res.error };
+        },
+      },
+      data.idempotencyKey ?? null,
+      userId,
+    );
 
-    for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
-      const { data: row, error } = await supabaseAdmin
-        .from("orders")
-        .insert({
-          code: orderCode(new Date()),
-          user_id: userId,
-          channel,
-          // Counter sales are confirmed/sold the moment the bill is completed.
-          status: channel === "counter" ? "completed" : scheduledFor ? "scheduled" : "placed",
-          ...({
-            order_kind: scheduledFor ? "scheduled" : "regular",
-            scheduled_for: scheduledFor,
-            scheduled_activate_at: scheduledActivateAt,
-          } as Record<string, unknown>),
-          fulfillment: data.fulfillment,
-          payment_method: data.paymentMethod,
-          payment_label: data.paymentLabel,
-          customer_name: data.customerName,
-          customer_phone: data.customerPhone,
-          address_line: isDelivery ? data.addressLine : null,
-          area: isDelivery ? data.area : null,
-          landmark: isDelivery ? data.landmark : null,
-          delivery_notes: data.deliveryNotes,
-          zone_id: zoneId,
-          zone_name: zoneName,
-          latitude,
-          longitude,
-          distance_m: distanceM,
-          estimated_time: estimatedTime,
-          pickup_note: isDelivery ? null : data.pickupNote,
-          subtotal,
-          discount,
-          delivery_charge: deliveryCharge,
-          total,
-          coupon_code: couponCode,
-        })
-        .select("id, code, created_at")
-        .single();
-
-      if (error) {
-        lastError = error;
-        // 23505 = duplicate order code; regenerate and retry.
-        if (error.code !== "23505") break;
-        continue;
-      }
-      inserted = row;
+    // Duplicate of an already-committed request: return it with no second
+    // items insert, coupon count, stock deduction or alert.
+    if (outcome.kind === "existing") {
+      return { id: outcome.row.id, code: outcome.row.code, createdAt: outcome.row.created_at };
     }
+    const inserted = outcome.kind === "inserted" ? outcome.row : null;
+    const lastError = outcome.kind === "failed" ? outcome.error : null;
 
     if (!inserted) {
       console.error("Order insert failed", lastError);
