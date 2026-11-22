@@ -17,7 +17,7 @@ BEGIN
       ADD CONSTRAINT attendance_requests_session_owner_fkey
       FOREIGN KEY (session_id, user_id)
       REFERENCES public.attendance_sessions(id, user_id)
-      ON DELETE SET NULL;
+      ON DELETE RESTRICT;
   END IF;
 END $$;
 
