@@ -288,6 +288,25 @@ export const staffClockIn = createServerFn({ method: "POST" })
       ...(selfiePath ? { clock_in_selfie_path: selfiePath } : {}),
     }).select("id, user_id, shift_id, duty_date, clock_in_at, status, late_minutes").single();
     if (insertError || !session) {
+      // Concurrent taps, a remounted page, or a delayed network retry can
+      // race the same authenticated staff member into the unique
+      // no-overlapping-session constraint. If another request already
+      // created the open session, treat this request as the same successful
+      // clock-in instead of making the staff tap again.
+      const isSessionConflict = insertError?.code === "23P01"
+        || /attendance_sessions.*conflict|conflicts with existing key/i.test(insertError?.message ?? "");
+      if (isSessionConflict) {
+        const { data: existing, error: existingError } = await db.from("attendance_sessions")
+          .select("id, user_id, shift_id, duty_date, clock_in_at, status, late_minutes")
+          .eq("user_id", context.userId)
+          .is("clock_out_at", null)
+          .order("clock_in_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!existingError && existing) {
+          return { ok: true, session: existing, idempotent: true };
+        }
+      }
       console.error("Attendance clock-in failed", insertError?.message);
       throw new Error("Clock-in failed. Please refresh and try again.");
     }
