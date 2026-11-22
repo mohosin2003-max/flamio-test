@@ -101,6 +101,8 @@ function MyAttendance() {
   const [overtime, setOvertime] = useState("60");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const punchInFlightRef = useRef<QueueKind | null>(null);
+  const [punchStatus, setPunchStatus] = useState<"idle" | "checking_location" | "submitting">("idle");
   const queueRef = useRef<QueueStorage | null>(null);
   const [queue, setQueue] = useState<QueuedAction[]>([]);
   const [persistent, setPersistent] = useState(true);
@@ -190,17 +192,27 @@ function MyAttendance() {
     } finally { setBusy(false); }
   };
   const doClockOut = async (reason?: string) => {
-    if (busy) return;
-    const loc = query.data && (query.data as AttendanceWorkspace).settings?.geofence_enabled ? await readClockOutLocation() : {};
-    const d = { note: note.trim() || null, ...loc, ...(reason ? { exceptionReason: reason } : {}) };
-    await punch("clock_out", async () => {
+    if (punchInFlightRef.current) return;
+    punchInFlightRef.current = "clock_out";
+    setBusy(true);
+    setPunchStatus("checking_location");
+    try {
+      const loc = query.data && (query.data as AttendanceWorkspace).settings?.geofence_enabled ? await readClockOutLocation() : {};
+      const d = { note: note.trim() || null, ...loc, ...(reason ? { exceptionReason: reason } : {}) };
+      setPunchStatus("submitting");
+      await punch("clock_out", async () => {
       try { const r = await clockOut({ data: d }); setExceptionPrompt(null); setExceptionReason(""); return r; }
       catch (error) {
         const ex = parseExceptionRequired(error instanceof Error ? error.message : "");
         if (ex) { setExceptionPrompt(ex.message); return EXCEPTION_PENDING; }
         throw error;
       }
-    }, d, reason ? "Clocked out — sent for Owner review" : "Clocked out");
+      }, d, reason ? "Clocked out — sent for Owner review" : "Clocked out");
+    } finally {
+      punchInFlightRef.current = null;
+      setPunchStatus("idle");
+      setBusy(false);
+    }
   };
   const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000, enabled: staffDuty });
   // Foreground-only geofence sampling. Android/browser background execution is not guaranteed.
@@ -297,7 +309,7 @@ function MyAttendance() {
             <div className="col-span-2"><dt className="text-xs text-muted-foreground">Time on duty</dt><dd className="font-display text-lg font-bold">{Math.floor(elapsed / 60)} h {elapsed % 60} min</dd></div>
           </dl>
         </div>;
-      })()}{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), activeBreak.session_id ? { breakId: activeBreak.id, sessionId: activeBreak.session_id } : undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} aria-describedby={activeBreak ? "clockout-locked" : undefined} onClick={() => void doClockOut()}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div>{activeBreak ? <p id="clockout-locked" className="mt-2 text-xs text-muted-foreground">Clock out is locked while your break is running. End your break first.</p> : null}</div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
+      })()}{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), activeBreak.session_id ? { breakId: activeBreak.id, sessionId: activeBreak.session_id } : undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak) || Boolean(punchInFlightRef.current)} aria-describedby={activeBreak ? "clockout-locked" : undefined} onClick={() => void doClockOut()}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div>{activeBreak ? <p id="clockout-locked" className="mt-2 text-xs text-muted-foreground">Clock out is locked while your break is running. End your break first.</p> : null}</div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); if (punchInFlightRef.current) return; punchInFlightRef.current = "clock_in"; setBusy(true); setPunchStatus("checking_location"); void (async () => {
           const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number; qrToken?: string; selfiePath?: string } = { shiftId: shiftId || null, note: note.trim() || null };
           try {
             if (settings?.geofence_enabled) { if (!navigator.onLine) throw new Error("Geofence clock-in needs an online connection so the GPS reading can be checked immediately."); const location = await readReliableAttendanceLocation(); payload.latitude = location.latitude; payload.longitude = location.longitude; payload.accuracyMeters = location.accuracyMeters; payload.capturedAt = location.capturedAt; }
@@ -306,14 +318,15 @@ function MyAttendance() {
               if (!selfie) throw new Error("Take a new check-in photo with your camera before clocking in.");
               if (Date.now() - selfie.capturedAt > SELFIE_MAX_AGE_MS) { setSelfie(null); throw new Error("This photo has expired. Take a new check-in photo."); }
               if (!navigator.onLine) throw new Error("Check-in photo upload needs an internet connection. Try again when online.");
-              setBusy(true);
               try { const up = await uploadSelfie({ data: { imageBase64: selfie.base64, capturedAt: selfie.capturedAt } }); payload.selfiePath = up.path; }
-              finally { setBusy(false); }
+              finally { setPunchStatus("checking_location"); }
             }
-          } catch (err) { toast.error(err instanceof Error ? err.message : "Clock-in failed"); return; }
+          } catch (err) { toast.error(err instanceof Error ? err.message : "Clock-in failed"); punchInFlightRef.current = null; setPunchStatus("idle"); setBusy(false); return; }
+          setPunchStatus("submitting");
           await punch("clock_in", () => clockIn({ data: payload }), payload, "Clocked in");
           setSelfie(null);
-        })();}}>
+          punchInFlightRef.current = null; setPunchStatus("idle"); setBusy(false);
+        })().catch(() => { punchInFlightRef.current = null; setPunchStatus("idle"); setBusy(false); });}}>
         <div className="space-y-1"><Label htmlFor="attendance-shift">Today's shift</Label><select id="attendance-shift" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={shiftId} onChange={(e)=>setShiftId(e.target.value)}><option value="">Unscheduled / automatic selection</option>{shifts.filter((s) =>s.status==="scheduled").map((s) =><option key={s.id} value={s.id}>{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" overnight":""}{s.duty_role?" · "+s.duty_role:""}</option>)}</select></div>
         <div className="space-y-1"><Label htmlFor="punch-note">Note (optional)</Label><Input id="punch-note" maxLength={500} value={note} onChange={(e)=>setNote(e.target.value)}/></div>
         {settings?.geofence_enabled ? <p className="text-xs text-muted-foreground">GPS geofence is enabled. Allow precise location when prompted; location is checked against your assigned station on the server.</p> : null}{settings?.qr_verification_enabled ? <div className="space-y-2"><Label htmlFor="attendance-qr-token">Station QR token</Label><Input id="attendance-qr-token" autoComplete="off" maxLength={512} value={qrToken} onChange={(e) => setQrToken(e.target.value)} placeholder="Paste the token from your station QR"/><Button type="button" variant="outline" disabled={busy} onClick={()=>setQrScannerOpen(true)}><Camera className="mr-2 h-4 w-4"/>Scan station QR</Button><p className="text-xs text-muted-foreground">Camera scanning requires permission and a supported Android browser. Manual token entry remains available.</p></div> : null}{isSelfieVerificationEnabled(settings?.selfie_verification_enabled) ? <div className="space-y-2 rounded-md border p-3"><Label>Required check-in photo</Label>{selfie ? <img src={selfie.preview} alt="Your check-in photo" className="h-24 w-24 rounded-md object-cover" /> : null}<Button type="button" variant="outline" disabled={busy} onClick={() => setSelfieOpen(true)}><Camera className="mr-2 h-4 w-4"/>{selfie ? "Retake photo" : "Take check-in photo"}</Button><p className="text-xs text-muted-foreground">Use the live camera to take a new photo. It is stored privately for Owner/Manager review. You cannot select a gallery file here. Clock-out does not require a photo.</p></div> : null}<p className="text-xs text-muted-foreground">Clock-in uses server time and current Owner settings.</p><Button disabled={busy}><LogIn className="mr-2 h-4 w-4"/>Clock in</Button>
