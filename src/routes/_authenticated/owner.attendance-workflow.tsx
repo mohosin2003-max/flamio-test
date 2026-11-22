@@ -69,7 +69,7 @@ function AttendanceWorkflow() {
   const pendingRequests = ownerRequests.filter((r) => r.status === "pending");
   return <div className="space-y-5">
     <BackToAttendance />
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl font-bold">Attendance Tasks & Requests</h2><p className="text-sm text-muted-foreground">Owner-only workflow controls · TEST</p></div><Button variant="outline" onClick={()=>{void management.refetch();void requests.refetch();}}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl font-bold">Attendance Tasks & Requests</h2><p className="text-sm text-muted-foreground">Owner/Manager workflow controls · TEST</p></div><Button variant="outline" onClick={()=>{void management.refetch();void requests.refetch();}}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button></div>
     <Tabs defaultValue="tasks" className="space-y-4">
     <TabsList><TabsTrigger value="tasks" type="button">Tasks & Checklists</TabsTrigger><TabsTrigger value="requests" type="button">Staff Requests ({pendingRequests.length})</TabsTrigger></TabsList>
     <TabsContent value="tasks" forceMount className="space-y-5 data-[state=inactive]:hidden">
