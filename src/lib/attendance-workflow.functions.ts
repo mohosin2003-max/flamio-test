@@ -233,8 +233,8 @@ export const staffClockIn = createServerFn({ method: "POST" })
           ? "GPS reading is older than two minutes. Refresh your location and try again."
           : "GPS timestamp is invalid. Refresh your location and try again.");
       }
-      if (data.accuracyMeters > 50) {
-        throw new Error("GPS accuracy is too low. Move to an open area and try again.");
+      if (data.accuracyMeters > 100) {
+        throw new Error("GPS accuracy is too low. Move to an open area, keep Location on, and try again.");
       }
       if (!shift?.station_id) {
         throw new Error("A station-linked shift is required while geofence verification is enabled.");
@@ -248,7 +248,12 @@ export const staffClockIn = createServerFn({ method: "POST" })
         throw new Error("The selected shift's station has no active geofence configured.");
       }
       const distance = distanceMeters(data.latitude, data.longitude, Number(station.latitude), Number(station.longitude));
-      if (!Number.isFinite(distance) || distance > Number(station.geofence_radius_meters)) {
+      const radius = Number(station.geofence_radius_meters);
+      // Treat the browser's accuracy as an uncertainty radius. A reported
+      // point is accepted only when its uncertainty circle still overlaps
+      // the station fence. This prevents false "outside" failures near the
+      // boundary without simply enlarging the configured geofence.
+      if (!Number.isFinite(distance) || !Number.isFinite(radius) || distance - data.accuracyMeters > radius) {
         throw new Error("You are outside the permitted attendance geofence.");
       }
     }
