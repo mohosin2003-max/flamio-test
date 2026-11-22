@@ -507,13 +507,6 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
       }
     }
 
-    if (data.requestType === "leave" && data.leaveStartDate) {
-      const today = localDateDhaka();
-      if (data.leaveStartDate < today) {
-        throw new Error("Leave requests cannot start in the past.");
-      }
-    }
-
     if (data.sessionId) {
       const { data: session, error: sessionError } = await db.from("attendance_sessions")
         .select("id, user_id, shift_id, clock_out_at, early_leave_minutes, session_kind, duty_date")
