@@ -24,8 +24,14 @@ export class AttendanceLocationError extends Error {
 
 const DEFAULT_OPTIONS: PositionOptions = {
   enableHighAccuracy: true,
-  timeout: 12000,
+  timeout: 8000,
   maximumAge: 0,
+};
+
+const WARM_OPTIONS: PositionOptions = {
+  enableHighAccuracy: true,
+  timeout: 3500,
+  maximumAge: 5000,
 };
 
 function classifyPositionError(error: GeolocationPositionError): AttendanceLocationError {
@@ -91,15 +97,26 @@ function wait(ms: number): Promise<void> {
  */
 export async function readReliableAttendanceLocation(options?: Partial<PositionOptions>): Promise<AttendanceLocation> {
   const merged: PositionOptions = { ...DEFAULT_OPTIONS, ...options };
+
+  // Fast path: Android may already have a very recent precise reading.
+  // A <=5s-old reading is still subject to the same server-side freshness
+  // and geofence checks, so this improves responsiveness without weakening
+  // the security boundary.
+  try {
+    const warm = await readOnce({ ...WARM_OPTIONS, ...options });
+    if (warm.accuracyMeters <= 30) return warm;
+  } catch {
+    // Fall through to fresh acquisition.
+  }
+
   const readings: AttendanceLocation[] = [];
   let lastError: AttendanceLocationError | null = null;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const reading = await readOnce(merged);
       readings.push(reading);
 
-      // A <=30m reading is already strong enough for this 1km TEST station.
       if (reading.accuracyMeters <= 30) return reading;
     } catch (error) {
       lastError = error instanceof AttendanceLocationError
@@ -107,7 +124,7 @@ export async function readReliableAttendanceLocation(options?: Partial<PositionO
         : new AttendanceLocationError("position_unavailable", "Could not read GPS location.");
     }
 
-    if (attempt < 2) await wait(700);
+    if (attempt < 1) await wait(400);
   }
 
   if (readings.length > 0) {
