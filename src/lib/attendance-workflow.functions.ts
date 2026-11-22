@@ -309,9 +309,12 @@ export const staffClockOut = createServerFn({ method: "POST" })
     { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const now = new Date();
     const { data: session, error: readError } = await db.from("attendance_sessions")
-      .select("id, user_id, shift_id, clock_in_at, break_minutes, status, flags")
+       .select("id, user_id, shift_id, clock_in_at, break_minutes, status, flags, session_kind")
       .eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (readError || !session) throw new Error("No open attendance session was found.");
+    if (session.session_kind === "overtime") {
+      throw new Error("Approved overtime closes automatically. Manual clock-out is not allowed during overtime.");
+    }
     const { data: openBreaks, error: breakReadError } = await db.from("attendance_breaks")
       .select("id, started_at").eq("session_id", session.id).is("ended_at", null).limit(1);
     if (breakReadError) throw new Error("Could not check your break status.");
@@ -342,14 +345,17 @@ export const staffClockOut = createServerFn({ method: "POST" })
       exceptionReason: data.exceptionReason ?? null, now: now.getTime(),
     });
     if (!decision.ok) throw new Error(decision.error);
-    const workedMinutes = Math.max(0, Math.floor(elapsed / 60000) - Number(session.break_minutes ?? 0));
-    const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - now.getTime()) / 60000)) : 0;
+    const effectiveOutMs = shift ? Math.min(now.getTime(), Date.parse(shift.ends_at)) : now.getTime();
+    const effectiveElapsed = effectiveOutMs - Date.parse(session.clock_in_at);
+    const workedMinutes = Math.max(0, Math.floor(effectiveElapsed / 60000) - Number(session.break_minutes ?? 0));
+    const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - effectiveOutMs) / 60000)) : 0;
+    const effectiveOutAt = new Date(effectiveOutMs).toISOString();
     const isException = decision.mode === "exception";
     const note = isException
       ? `[Location exception: ${decision.discrepancy}] ${decision.reason}${data.note ? ` | ${data.note}` : ""}`.slice(0, 500)
       : data.note ?? null;
     const update: Record<string, unknown> = {
-      clock_out_at: now.toISOString(), clock_out_source: "app", clock_out_note: note,
+      clock_out_at: effectiveOutAt, clock_out_source: "app", clock_out_note: note,
       worked_minutes: workedMinutes, early_leave_minutes: earlyLeave, status: "closed",
     };
     if (isException) {
@@ -369,7 +375,7 @@ export const staffClockOut = createServerFn({ method: "POST" })
       tableName: "attendance_sessions", rowId: session.id, action: isException ? "clock_out_location_exception" : "clock_out",
       actorId: context.userId, subjectUserId: context.userId, oldData: session,
       newData: {
-        clockOutAt: now.toISOString(), workedMinutes, locationCheck: decision.mode,
+        clockOutAt: effectiveOutAt, workedMinutes, locationCheck: decision.mode,
         ...(isException ? { discrepancy: decision.discrepancy, reason: decision.reason } : {}),
         ...(decision.distance !== undefined ? { distanceMeters: Math.round(decision.distance) } : {}),
         ...(data.accuracyMeters !== undefined ? { accuracyMeters: Math.round(data.accuracyMeters) } : {}),
