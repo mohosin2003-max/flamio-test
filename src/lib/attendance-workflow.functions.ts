@@ -233,8 +233,8 @@ export const staffClockIn = createServerFn({ method: "POST" })
           ? "GPS reading is older than two minutes. Refresh your location and try again."
           : "GPS timestamp is invalid. Refresh your location and try again.");
       }
-      if (data.accuracyMeters > 100) {
-        throw new Error("GPS accuracy is too low. Move to an open area, keep Location on, and try again.");
+      if (data.accuracyMeters > 500) {
+        throw new Error("GPS accuracy is too low (over 500m). Turn on Precise location for this browser/app, keep Location on, and try again.");
       }
       if (!shift?.station_id) {
         throw new Error("A station-linked shift is required while geofence verification is enabled.");
