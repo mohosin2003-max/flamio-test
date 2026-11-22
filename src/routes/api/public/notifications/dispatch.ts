@@ -27,6 +27,18 @@ export const Route = createFileRoute("/api/public/notifications/dispatch")({
           console.error("Scheduled order activation failed", activationError);
         }
 
+        // Attendance: close normal duty at shift end and open/close approved
+        // overtime windows. Server clock only; safe to run repeatedly.
+        try {
+          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const { error } = await (
+            supabaseAdmin as unknown as { rpc: (fn: string) => Promise<{ error: unknown }> }
+          ).rpc("attendance_run_duty_maintenance");
+          if (error) console.error("Attendance duty maintenance failed", error);
+        } catch (maintenanceError) {
+          console.error("Attendance duty maintenance failed", maintenanceError);
+        }
+
         const { dispatchDueNotificationJobs } = await import("@/lib/push.server");
         const result = await dispatchDueNotificationJobs(25);
 

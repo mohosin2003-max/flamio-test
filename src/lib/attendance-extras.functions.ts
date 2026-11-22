@@ -88,7 +88,7 @@ export const ownerGetAttendanceReport = createServerFn({ method: "GET" })
     const db = await ownerDb(context.userId);
     if (data.toDate < data.fromDate) throw new Error("End date must be on or after the start date.");
     const { data: sessions, error } = await db.from("attendance_sessions")
-      .select("user_id, shift_id, duty_date, worked_minutes, break_minutes, late_minutes, overtime_minutes, clock_out_at, clock_in_selfie_path")
+      .select("id, user_id, shift_id, duty_date, worked_minutes, break_minutes, late_minutes, overtime_minutes, clock_out_at, clock_in_selfie_path")
       .gte("duty_date", data.fromDate).lte("duty_date", data.toDate).limit(5000);
     if (error) throw new Error("Attendance report could not be loaded.");
     const rows = sessions ?? [];
@@ -102,10 +102,23 @@ export const ownerGetAttendanceReport = createServerFn({ method: "GET" })
     const scheduled = new Map((shifts.data ?? []).map((s: { id: string; starts_at: string; ends_at: string; planned_break_minutes: number }) => [
       s.id, Math.max(0, Math.round((Date.parse(s.ends_at) - Date.parse(s.starts_at)) / 60000) - Number(s.planned_break_minutes ?? 0)),
     ]));
+    // Overtime = approved overtime windows only (never worked minus scheduled).
+    const { countedOvertimeMinutes } = await import("@/lib/attendance-overtime");
+    const otBySession = new Map<string, number>();
+    const sessionIds = rows.map((r: { id: string }) => r.id);
+    if (sessionIds.length) {
+      const { data: ot, error: otError } = await db.from("attendance_requests")
+        .select("session_id, status, overtime_starts_at, overtime_ends_at")
+        .eq("request_type", "overtime").eq("status", "approved").in("session_id", sessionIds.slice(0, 1000));
+      if (!otError) for (const o of ot ?? []) {
+        const mins = countedOvertimeMinutes({ status: o.status, startMs: o.overtime_starts_at ? Date.parse(o.overtime_starts_at) : null, endMs: o.overtime_ends_at ? Date.parse(o.overtime_ends_at) : null }, Date.now());
+        otBySession.set(String(o.session_id), (otBySession.get(String(o.session_id)) ?? 0) + mins);
+      }
+    }
     const report = buildReport(rows.map((r: Record<string, unknown>) => ({
       userId: String(r.user_id), staffName: names.get(String(r.user_id)) ?? "Staff member", dutyDate: String(r.duty_date),
       workedMinutes: Number(r.worked_minutes ?? 0), breakMinutes: Number(r.break_minutes ?? 0), lateMinutes: Number(r.late_minutes ?? 0),
-      overtimeMinutes: Number(r.overtime_minutes ?? 0), scheduledMinutes: r.shift_id ? scheduled.get(String(r.shift_id)) ?? null : null,
+      overtimeMinutes: otBySession.get(String(r.id)) ?? 0, scheduledMinutes: r.shift_id ? scheduled.get(String(r.shift_id)) ?? null : null,
       closed: Boolean(r.clock_out_at),
     })), data.period as ReportPeriod);
     const selfies = selfieCountsByRow(rows.map((r: Record<string, unknown>) => ({ userId: String(r.user_id), dutyDate: String(r.duty_date), hasSelfie: Boolean(r.clock_in_selfie_path) })), data.period as ReportPeriod);

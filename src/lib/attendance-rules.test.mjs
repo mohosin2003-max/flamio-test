@@ -71,12 +71,12 @@ describe("reports and CSV", () => {
     expect(periodKey("2026-10-23", "weekly")).toBe("2026-10-17");
     expect(periodKey("2026-10-17", "weekly")).toBe("2026-10-17");
   });
-  test("overtime only for scheduled closed sessions", () => {
+  test("overtime comes only from approved overtime, not worked minus scheduled", () => {
     const [row] = buildReport([
       { userId: "u", staffName: "A", dutyDate: "2026-10-18", workedMinutes: 500, breakMinutes: 0, lateMinutes: 0, overtimeMinutes: 0, scheduledMinutes: 450, closed: true },
       { userId: "u", staffName: "A", dutyDate: "2026-10-18", workedMinutes: 600, breakMinutes: 0, lateMinutes: 0, overtimeMinutes: 0, scheduledMinutes: null, closed: true },
     ], "daily");
-    expect(row.overtimeMinutes).toBe(50);
+    expect(row.overtimeMinutes).toBe(0);
   });
   test("CSV neutralises formula injection", () => {
     const csv = reportToCsv([{ period: "2026-10-18", userId: "u", staffName: "=HYPERLINK(\"x\")", sessions: 1, openSessions: 0, workedMinutes: 0, breakMinutes: 0, lateMinutes: 0, lateCount: 0, overtimeMinutes: 0, scheduledMinutes: 0 }]);

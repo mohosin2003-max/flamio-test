@@ -157,7 +157,7 @@ export interface ReportRow {
   breakMinutes: number;
   lateMinutes: number;
   lateCount: number;
-  /** Only counted for sessions linked to a schedule; unscheduled time is never overtime. */
+  /** Only approved overtime windows count; worked time past the schedule is never overtime. */
   overtimeMinutes: number;
   scheduledMinutes: number;
 }
@@ -177,11 +177,11 @@ export function buildReport(rows: ReportSession[], period: ReportPeriod): Report
       cur.workedMinutes += Math.max(0, r.workedMinutes);
       cur.breakMinutes += Math.max(0, r.breakMinutes);
     }
+    cur.overtimeMinutes += Math.max(0, r.overtimeMinutes);
     cur.lateMinutes += Math.max(0, r.lateMinutes);
     if (r.lateMinutes > 0) cur.lateCount += 1;
     if (r.scheduledMinutes != null && r.closed) {
       cur.scheduledMinutes += r.scheduledMinutes;
-      cur.overtimeMinutes += Math.max(0, r.workedMinutes - r.scheduledMinutes);
     }
     map.set(key, cur);
   }

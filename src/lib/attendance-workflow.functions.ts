@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { isAllowedOvertimeMinutes, manualClockOutAt } from "@/lib/attendance-overtime";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -51,6 +52,16 @@ async function audit(db: unknown, input: {
   if (error) console.error("Attendance audit log insert failed", error.message);
 }
 
+/** Overtime windows (columns added by the TEST migration); empty if not installed yet. */
+async function loadOvertimeWindows(db: { from: (t: string) => any }, ids: string[]) {
+  const out = new Map<string, { overtime_starts_at: string | null; overtime_ends_at: string | null; overtime_completed_at: string | null }>();
+  if (!ids.length) return out;
+  const { data, error } = await db.from("attendance_requests").select("id, overtime_starts_at, overtime_ends_at, overtime_completed_at").in("id", ids);
+  if (error) return out;
+  for (const r of data ?? []) out.set(String(r.id), { overtime_starts_at: r.overtime_starts_at, overtime_ends_at: r.overtime_ends_at, overtime_completed_at: r.overtime_completed_at });
+  return out;
+}
+
 export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -70,7 +81,7 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
         .select("id, title, description, due_date, due_at, priority, status, requires_verification, requires_photo, photo_path, started_at, completed_at, completion_note, review_note")
         .eq("assigned_to", context.userId).order("due_date", { ascending: false }).limit(100),
       db.from("attendance_requests")
-        .select("id, request_type, leave_type, leave_start_date, leave_end_date, target_date, reason, status, review_note, created_at")
+        .select("id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_overtime_minutes, reason, status, review_note, created_at")
         .eq("user_id", context.userId).order("created_at", { ascending: false }).limit(50),
       // Read-only: latest ended break of this staff member, used only to reconcile a lost break-end reply.
       db.from("attendance_breaks")
@@ -128,7 +139,11 @@ export const staffGetAttendanceWorkspace = createServerFn({ method: "GET" })
       lastClosedBreak: closedBreakResult.data?.[0] ?? null,
       sessions: sessionsResult.data ?? [],
       tasks: (tasksResult.data ?? []).map((task: Record<string, unknown>) => ({ ...task, checklist: itemsByTask.get(String(task.id)) ?? [] })),
-      requests: requestsResult.data ?? [],
+      requests: await (async () => {
+        const rows = requestsResult.data ?? [];
+        const windows = await loadOvertimeWindows(db, rows.map((r: { id: string }) => r.id));
+        return rows.map((r: Record<string, unknown>) => ({ ...r, ...(windows.get(String(r.id)) ?? {}) }));
+      })(),
     };
   });
 
@@ -342,14 +357,16 @@ export const staffClockOut = createServerFn({ method: "POST" })
       exceptionReason: data.exceptionReason ?? null, now: now.getTime(),
     });
     if (!decision.ok) throw new Error(decision.error);
-    const workedMinutes = Math.max(0, Math.floor(elapsed / 60000) - Number(session.break_minutes ?? 0));
-    const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - now.getTime()) / 60000)) : 0;
+    // Normal duty never runs past the scheduled end; later time is not overtime.
+    const outMs = manualClockOutAt(now.getTime(), shift ? Date.parse(shift.ends_at) : null);
+    const workedMinutes = Math.max(0, Math.floor((outMs - Date.parse(session.clock_in_at)) / 60000) - Number(session.break_minutes ?? 0));
+    const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - outMs) / 60000)) : 0;
     const isException = decision.mode === "exception";
     const note = isException
       ? `[Location exception: ${decision.discrepancy}] ${decision.reason}${data.note ? ` | ${data.note}` : ""}`.slice(0, 500)
       : data.note ?? null;
     const update: Record<string, unknown> = {
-      clock_out_at: now.toISOString(), clock_out_source: "app", clock_out_note: note,
+      clock_out_at: new Date(outMs).toISOString(), clock_out_source: "app", clock_out_note: note,
       worked_minutes: workedMinutes, early_leave_minutes: earlyLeave, status: "closed",
     };
     if (isException) {
@@ -369,7 +386,7 @@ export const staffClockOut = createServerFn({ method: "POST" })
       tableName: "attendance_sessions", rowId: session.id, action: isException ? "clock_out_location_exception" : "clock_out",
       actorId: context.userId, subjectUserId: context.userId, oldData: session,
       newData: {
-        clockOutAt: now.toISOString(), workedMinutes, locationCheck: decision.mode,
+        clockOutAt: new Date(outMs).toISOString(), workedMinutes, locationCheck: decision.mode,
         ...(isException ? { discrepancy: decision.discrepancy, reason: decision.reason } : {}),
         ...(decision.distance !== undefined ? { distanceMeters: Math.round(decision.distance) } : {}),
         ...(data.accuracyMeters !== undefined ? { accuracyMeters: Math.round(data.accuracyMeters) } : {}),
@@ -461,7 +478,7 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
     requestedClockOut: z.string().datetime().nullable().optional(),
     requestedOvertimeMinutes: z.number().int().min(1).max(960).nullable().optional(),
     reason: z.string().trim().min(5).max(1000),
-  }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.").refine((v) => v.requestType !== "correction" || Boolean(v.sessionId && (v.requestedClockIn || v.requestedClockOut)), "Correction requires a session and a requested time.").refine((v) => v.requestType !== "missed_punch" || Boolean(v.targetDate && v.requestedClockIn && v.requestedClockOut), "Missed punch requires a date and both times.").refine((v) => v.requestType !== "overtime" || Boolean(v.sessionId && v.requestedOvertimeMinutes), "Overtime requires a session and minutes.").parse(input))
+  }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.").refine((v) => v.requestType !== "correction" || Boolean(v.sessionId && (v.requestedClockIn || v.requestedClockOut)), "Correction requires a session and a requested time.").refine((v) => v.requestType !== "missed_punch" || Boolean(v.targetDate && v.requestedClockIn && v.requestedClockOut), "Missed punch requires a date and both times.").refine((v) => v.requestType !== "overtime" || Boolean(v.sessionId && isAllowedOvertimeMinutes(v.requestedOvertimeMinutes)), "Overtime requires a session and a duration of 30 min, 1 hour, 1.5 hours or 2 hours.").parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
@@ -518,13 +535,14 @@ export const ownerListAttendanceRequests = createServerFn({ method: "GET" })
     const { access, db } = await dbForUser(context.userId);
     if (!access.isOwner) throw new Error("Only the Owner can review attendance requests.");
     const { data, error } = await db.from("attendance_requests")
-      .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, reason, status, review_note, created_at")
+      .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, reason, status, review_note, created_at, reviewed_at, session_id")
       .order("created_at", { ascending: false }).limit(200);
     if (error) throw new Error("Could not load attendance requests.");
+    const windows = await loadOvertimeWindows(db, (data ?? []).map((r: { id: string }) => r.id));
     const ids = Array.from(new Set((data ?? []).map((r: { user_id: string }) => r.user_id)));
     const { data: profiles } = ids.length ? await db.from("profiles").select("id, full_name").in("id", ids) : { data: [] };
     const names = new Map((profiles ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name || "Unnamed staff"]));
-    return (data ?? []).map((r: Record<string, unknown>) => ({ ...r, staff_name: names.get(String(r.user_id)) ?? "Staff member" }));
+    return (data ?? []).map((r: Record<string, unknown>) => ({ ...r, ...(windows.get(String(r.id)) ?? {}), staff_name: names.get(String(r.user_id)) ?? "Staff member" }));
   });
 
 export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
@@ -552,6 +570,11 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
     if (error || !updated) {
       console.error("Attendance request review failed", error?.message);
       throw new Error("Could not apply this attendance request. Check its dates/times and try again.");
+    }
+    if (data.decision === "approved" && current.request_type === "overtime") {
+      // Fix the authoritative window now (pre-approved: duty end; post-end: approval time).
+      const { error: otError } = await db.rpc("attendance_schedule_overtime", { _request_id: current.id });
+      if (otError) console.error("Overtime window scheduling failed; minute job will retry", otError.message);
     }
     await audit(db, {
       tableName: "attendance_requests",
