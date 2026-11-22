@@ -5,7 +5,7 @@
  */
 import { distanceMeters, evaluateGeofence } from "@/lib/attendance-logic";
 
-export const CLOCK_OUT_MAX_ACCURACY_METERS = 100;
+export const CLOCK_OUT_MAX_ACCURACY_METERS = 500;
 export const CLOCK_OUT_MAX_AGE_MS = 2 * 60 * 1000;
 export function validateClockInLocationTimestamp(capturedAt: unknown, now: number): { ok: true } | { ok: false; reason: "missing" | "invalid" | "stale" } {
   if (typeof capturedAt !== "number" || !Number.isFinite(capturedAt) || capturedAt <= 0) return { ok: false, reason: "missing" };
