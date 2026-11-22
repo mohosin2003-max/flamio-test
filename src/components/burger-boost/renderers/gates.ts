@@ -232,6 +232,16 @@ function portal(ctx: Ctx, x: number, top: number, w: number, h: number, s: numbe
   ctx.shadowColor = glow; ctx.shadowBlur = 10 * s;
   ctx.lineWidth = Math.max(1.5, 4 * s); ctx.strokeStyle = frame; rr(ctx, x, top, w, h, 10 * s); ctx.stroke();
   ctx.shadowBlur = 0;
+  // premium inner bevel + gold corner caps (identical on both lanes)
+  ctx.lineWidth = Math.max(0.6, 1.2 * s); ctx.strokeStyle = "rgba(255,236,210,0.55)";
+  rr(ctx, x + 3 * s, top + 3 * s, w - 6 * s, h - 6 * s, 8 * s); ctx.stroke();
+  ctx.fillStyle = "#f4c14a";
+  for (const cx of [x, x + w]) { ctx.beginPath(); ctx.arc(cx, top + h, Math.max(1, 3.5 * s), 0, Math.PI * 2); ctx.fill(); }
+}
+
+/** Soft neutral backing disc so food icons read clearly at speed. */
+function iconBacking(ctx: Ctx, cx: number, cy: number, r: number) {
+  ctx.fillStyle = "rgba(255,244,230,0.14)"; ctx.beginPath(); ctx.arc(cx, cy, r * 1.35, 0, Math.PI * 2); ctx.fill();
 }
 
 export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, now: number, index: number, gateCount: number) {
@@ -282,6 +292,7 @@ export function drawGate(ctx: Ctx, gate: DrawableGate, p: Projected, C: Colors, 
       portal(ctx, lx, top, w, h, s, NP.frame, NP.glow, NP.inner);
       portal(ctx, rx, top, w, h, s, NP.frame, NP.glow, NP.inner);
       const r = Math.min(w, h) * 0.32;
+      iconBacking(ctx, cxL, cy, r); iconBacking(ctx, cxR, cy, r);
       drawFood(ctx, gate.lanes[0], cxL, cy, r);
       drawFood(ctx, gate.lanes[1], cxR, cy, r);
     } else {
