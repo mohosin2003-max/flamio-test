@@ -22,6 +22,17 @@ export class AttendanceLocationError extends Error {
   }
 }
 
+// Attendance only needs a reliable position inside the configured fence.
+// A balanced/network-assisted reading is deliberately tried first because
+// Android can take much longer to produce a high-accuracy GPS fix on the
+// first request. The server still enforces the final accuracy/freshness and
+// geofence checks.
+const FAST_OPTIONS: PositionOptions = {
+  enableHighAccuracy: false,
+  timeout: 3000,
+  maximumAge: 10000,
+};
+
 const DEFAULT_OPTIONS: PositionOptions = {
   enableHighAccuracy: true,
   timeout: 8000,
@@ -29,9 +40,9 @@ const DEFAULT_OPTIONS: PositionOptions = {
 };
 
 const WARM_OPTIONS: PositionOptions = {
-  enableHighAccuracy: true,
-  timeout: 3500,
-  maximumAge: 5000,
+  enableHighAccuracy: false,
+  timeout: 1500,
+  maximumAge: 10000,
 };
 
 function classifyPositionError(error: GeolocationPositionError): AttendanceLocationError {
@@ -98,26 +109,39 @@ function wait(ms: number): Promise<void> {
 export async function readReliableAttendanceLocation(options?: Partial<PositionOptions>): Promise<AttendanceLocation> {
   const merged: PositionOptions = { ...DEFAULT_OPTIONS, ...options };
 
-  // Fast path: Android may already have a very recent precise reading.
-  // A <=5s-old reading is still subject to the same server-side freshness
-  // and geofence checks, so this improves responsiveness without weakening
-  // the security boundary.
+  // Fast path: use a recent Android/browser reading first. The server still
+  // enforces its own freshness, accuracy and geofence rules.
   try {
     const warm = await readOnce({ ...WARM_OPTIONS, ...options });
-    if (warm.accuracyMeters <= 30) return warm;
+    if (warm.accuracyMeters <= 100) return warm;
   } catch {
-    // Fall through to fresh acquisition.
+    // Fall through to acquisition.
   }
 
   const readings: AttendanceLocation[] = [];
   let lastError: AttendanceLocationError | null = null;
 
+  // First request: balanced location. This is normally much faster than
+  // forcing a cold GPS fix and is sufficient for our 100m server accuracy
+  // limit.
+  try {
+    const fast = await readOnce({ ...FAST_OPTIONS, ...options });
+    readings.push(fast);
+    if (fast.accuracyMeters <= 100) return fast;
+  } catch (error) {
+    lastError = error instanceof AttendanceLocationError
+      ? error
+      : new AttendanceLocationError("position_unavailable", "Could not read GPS location.");
+  }
+
+  // Fallback: cold high-accuracy GPS. We only reach this when the fast
+  // provider could not return a usable reading.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const reading = await readOnce(merged);
       readings.push(reading);
 
-      if (reading.accuracyMeters <= 30) return reading;
+      if (reading.accuracyMeters <= 100) return reading;
     } catch (error) {
       lastError = error instanceof AttendanceLocationError
         ? error
