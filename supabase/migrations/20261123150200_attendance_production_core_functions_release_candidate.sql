@@ -29,7 +29,7 @@ AS $function$
      AND EXISTS (
            SELECT 1 FROM public.user_roles
             WHERE user_id = _user_id AND role IN ('owner'::public.app_role, 'admin'::public.app_role));
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_minutes(_from timestamp with time zone, _to timestamp with time zone)
@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION public.attendance_minutes(_from timestamp with time z
 AS $function$
   SELECT CASE WHEN _from IS NULL OR _to IS NULL OR _to <= _from THEN 0
               ELSE floor(extract(epoch FROM (_to - _from)) / 60)::integer END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_match_shift(_user_id uuid, _at timestamp with time zone)
@@ -59,7 +59,7 @@ AS $function$
      AND NOT EXISTS (SELECT 1 FROM public.attendance_sessions x WHERE x.shift_id = sh.id)
    ORDER BY abs(extract(epoch FROM (_at - sh.starts_at)))
    LIMIT 1;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_assert_valid_window(_user_id uuid, _exclude_session uuid, _in timestamp with time zone, _out timestamp with time zone)
@@ -84,7 +84,7 @@ BEGIN
     RAISE EXCEPTION 'These times overlap another attendance session';
   END IF;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_recalculate_session(_session_id uuid)
@@ -209,7 +209,7 @@ BEGIN
          updated_at = now()
    WHERE id = v_s.id;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_clock_out(_note text DEFAULT NULL::text, _source text DEFAULT 'app'::text)
@@ -297,7 +297,7 @@ begin
   select * into r from public.attendance_sessions where id = r.id;
   return r;
 end;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_start_break()
@@ -326,7 +326,7 @@ BEGIN
   RETURNING * INTO r;
   RETURN r;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_end_break()
@@ -348,7 +348,7 @@ BEGIN
   PERFORM public.attendance_recalculate_session(r.session_id);
   RETURN r;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_submit_request(_request_type text, _reason text, _leave_type text DEFAULT NULL::text, _leave_start_date date DEFAULT NULL::date, _leave_end_date date DEFAULT NULL::date, _session_id uuid DEFAULT NULL::uuid, _target_date date DEFAULT NULL::date, _requested_clock_in timestamp with time zone DEFAULT NULL::timestamp with time zone, _requested_clock_out timestamp with time zone DEFAULT NULL::timestamp with time zone, _requested_overtime_minutes integer DEFAULT NULL::integer)
