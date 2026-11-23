@@ -11,7 +11,7 @@ BEGIN
   NEW.ends_at := ((NEW.shift_date + CASE WHEN NEW.is_overnight THEN 1 ELSE 0 END) + NEW.end_time) AT TIME ZONE 'Asia/Dhaka';
   RETURN NEW;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_toggle_task_item(_item_id uuid, _done boolean)
@@ -39,7 +39,7 @@ BEGIN
    WHERE id = i.id RETURNING * INTO i;
   RETURN i;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_toggle_task_item_as_service(_actor_id uuid, _item_id uuid, _done boolean)
@@ -97,7 +97,7 @@ BEGIN
 
   RETURN v_new;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_update_task_progress(_task_id uuid, _status text, _note text DEFAULT NULL::text)
@@ -130,7 +130,7 @@ BEGIN
   RETURNING * INTO t;
   RETURN t;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_validate_request_submission()
@@ -174,7 +174,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_verify_session(_session_id uuid, _status text, _note text DEFAULT NULL::text)
@@ -223,7 +223,7 @@ RETURNING * INTO s;
 
 RETURN s;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_verify_session_as_service(_session_id uuid, _status text, _note text, _actor_id uuid)
@@ -251,7 +251,7 @@ BEGIN
 
   RETURN v_session;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_verify_task_photo_cleanup_secret(_provided_secret text)
