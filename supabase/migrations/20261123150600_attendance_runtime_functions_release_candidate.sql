@@ -51,7 +51,7 @@ BEGIN
   SELECT * INTO r FROM public.attendance_sessions WHERE id = r.id;
   RETURN r;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_end_break()
@@ -73,7 +73,7 @@ BEGIN
   PERFORM public.attendance_recalculate_session(r.session_id);
   RETURN r;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_team_directory()
