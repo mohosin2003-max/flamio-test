@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { OVERTIME_LABELS, isAllowedOvertimeMinutes, overtimeState } from "@/lib/attendance-overtime";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -33,14 +32,7 @@ type ManagementData = {
   stations: Array<{ id: string; name: string; isActive: boolean }>;
   tasks: Array<{ id: string; title: string; staffName: string; dueDate: string; dueAt: string | null; priority: string; status: string; description: string | null; completionNote: string | null; reviewNote: string | null; requiresPhoto: boolean; photoPath: string | null }>;
 };
-type OwnerAttendanceRequest = { id: string; status: string; staff_name: string; request_type: string; leave_start_date: string | null; leave_end_date: string | null; target_date: string | null; reason: string; review_note: string | null; created_at?: string; reviewed_at?: string | null; requested_overtime_minutes?: number | null; overtime_starts_at?: string | null; overtime_ends_at?: string | null };
-const otTime = (v: string) => new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-function OwnerOvertimeLine({ r }: { r: OwnerAttendanceRequest }) {
-  const len = r.requested_overtime_minutes && isAllowedOvertimeMinutes(r.requested_overtime_minutes) ? OVERTIME_LABELS[r.requested_overtime_minutes] : `${r.requested_overtime_minutes ?? "?"} min`;
-  const state = overtimeState({ status: r.status, startMs: r.overtime_starts_at ? Date.parse(r.overtime_starts_at) : null, endMs: r.overtime_ends_at ? Date.parse(r.overtime_ends_at) : null }, Date.now());
-  const label = { pending: "Pending request", scheduled: "Approved overtime (not started)", active: "Approved overtime running", completed: "Completed overtime", rejected: "Rejected request", cancelled: "Cancelled request" }[state];
-  return <p className="text-xs text-muted-foreground">{label} · {len}{r.created_at ? ` · asked ${otTime(r.created_at)}` : ""}{r.reviewed_at ? ` · reviewed ${otTime(r.reviewed_at)}` : ""}{r.overtime_starts_at && r.overtime_ends_at ? ` · ${otTime(r.overtime_starts_at)} → ${otTime(r.overtime_ends_at)}` : ""}</p>;
-}
+type OwnerAttendanceRequest = { id: string; status: string; staff_name: string; request_type: string; leave_start_date: string | null; leave_end_date: string | null; target_date: string | null; requested_overtime_minutes?: number | null; approved_overtime_start_at?: string | null; approved_overtime_end_at?: string | null; reason: string; review_note: string | null };
 
 function AttendanceWorkflow() {
   const qc = useQueryClient();
@@ -77,7 +69,7 @@ function AttendanceWorkflow() {
   const pendingRequests = ownerRequests.filter((r) => r.status === "pending");
   return <div className="space-y-5">
     <BackToAttendance />
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl font-bold">Attendance Tasks & Requests</h2><p className="text-sm text-muted-foreground">Owner-only workflow controls · TEST</p></div><Button variant="outline" onClick={()=>{void management.refetch();void requests.refetch();}}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-display text-xl font-bold">Attendance Tasks & Requests</h2><p className="text-sm text-muted-foreground">Owner/Manager workflow controls · TEST</p></div><Button variant="outline" onClick={()=>{void management.refetch();void requests.refetch();}}><RefreshCw className="mr-2 h-4 w-4"/>Refresh</Button></div>
     <Tabs defaultValue="tasks" className="space-y-4">
     <TabsList><TabsTrigger value="tasks" type="button">Tasks & Checklists</TabsTrigger><TabsTrigger value="requests" type="button">Staff Requests ({pendingRequests.length})</TabsTrigger></TabsList>
     <TabsContent value="tasks" forceMount className="space-y-5 data-[state=inactive]:hidden">
@@ -99,7 +91,7 @@ function AttendanceWorkflow() {
     <OpenTasksEditCard />
     </TabsContent>
     <TabsContent value="requests" forceMount className="space-y-5 data-[state=inactive]:hidden">
-    <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Pending staff requests ({pendingRequests.length})</h3>{ownerRequests.length?ownerRequests.map((r)=><div key={r.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><div><p className="font-semibold">{r.staff_name} · {String(r.request_type).replaceAll("_"," ")}</p><p className="text-xs text-muted-foreground">{r.leave_start_date? r.leave_start_date+" – "+r.leave_end_date : r.target_date||"No target date"} · {r.status}</p></div></div><p className="text-sm">{r.reason}</p>{r.request_type==="overtime"?<OwnerOvertimeLine r={r}/>:null}{r.review_note?<p className="text-sm text-muted-foreground">Previous note: {r.review_note}</p>:null}{r.status==="pending"?<div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={()=>void run(()=>reviewRequest({data:{requestId:r.id,decision:"approved"}}),"Request approved")}><CheckCircle2 className="mr-1 h-4 w-4"/>Approve</Button><Button size="sm" variant="outline" disabled={busy} onClick={()=>openReviewDialog("request",r.id)}><XCircle className="mr-1 h-4 w-4"/>Reject</Button></div>:null}</div>):<p className="text-sm text-muted-foreground">No attendance requests yet.</p>}</CardContent></Card>
+    <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Pending staff requests ({pendingRequests.length})</h3>{ownerRequests.length?ownerRequests.map((r)=><div key={r.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><div><p className="font-semibold">{r.staff_name} · {String(r.request_type).replaceAll("_"," ")}</p><p className="text-xs text-muted-foreground">{r.leave_start_date? r.leave_start_date+" – "+r.leave_end_date : r.target_date||"No target date"} · {r.status}</p></div></div><p className="text-sm">{r.reason}</p>{r.request_type==="overtime"?<p className="text-xs text-muted-foreground">Duration: {r.requested_overtime_minutes ?? "—"} min · Start: {r.approved_overtime_start_at ? new Date(r.approved_overtime_start_at).toLocaleString("en-GB",{timeZone:"Asia/Dhaka"}) : "Pending approval"} · End: {r.approved_overtime_end_at ? new Date(r.approved_overtime_end_at).toLocaleString("en-GB",{timeZone:"Asia/Dhaka"}) : "—"}</p>:null}{r.review_note?<p className="text-sm text-muted-foreground">Previous note: {r.review_note}</p>:null}{r.status==="pending"?<div className="flex flex-wrap gap-2"><Button size="sm" disabled={busy} onClick={()=>void run(()=>reviewRequest({data:{requestId:r.id,decision:"approved"}}),"Request approved")}><CheckCircle2 className="mr-1 h-4 w-4"/>Approve</Button><Button size="sm" variant="outline" disabled={busy} onClick={()=>openReviewDialog("request",r.id)}><XCircle className="mr-1 h-4 w-4"/>Reject</Button></div>:null}</div>):<p className="text-sm text-muted-foreground">No attendance requests yet.</p>}</CardContent></Card>
     </TabsContent>
     </Tabs>
     <Dialog open={Boolean(reviewDialog)} onOpenChange={(open)=>{if(!open&&!busy)setReviewDialog(null);}}>

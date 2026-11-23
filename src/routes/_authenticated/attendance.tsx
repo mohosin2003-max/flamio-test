@@ -25,25 +25,25 @@ import {
 } from "@/lib/attendance-workflow.functions";
 import { browserQueueStorage, clearConfirmed, enqueue, flush, recoverInterruptedSync, isPermanentError, isTransientNetworkError, reconcileConflict, reconcileTaskConflict, isTaskKind, retryFailed, type QueueKind, type QueueStorage, type QueuedAction } from "@/lib/attendance-offline";
 import { breakStatus } from "@/lib/attendance-rules";
-import { OVERTIME_DURATIONS, OVERTIME_LABELS, isAllowedOvertimeMinutes, overtimeState } from "@/lib/attendance-overtime";
 import { lateNoticeMinutes } from "@/lib/attendance-late-notice";
 import { EXCEPTION_REASON_MAX, EXCEPTION_REASON_MIN, parseExceptionRequired } from "@/lib/attendance-clockout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { isChimeMuted, playChime, setChimeMuted, type ChimeKind } from "@/lib/attendance-chimes";
 import { staffRecordGpsTransition } from "@/lib/attendance-location-events.functions";
+import { readReliableAttendanceLocation } from "@/lib/attendance-location";
 
 const QUEUE_LABEL: Record<QueueKind, string> = { clock_in: "Clock in", clock_out: "Clock out", break_start: "Break start", break_end: "Break end", task_item_toggle: "Checklist tick", task_complete: "Task completion" };
 
 const EXCEPTION_PENDING = Symbol("exception-pending");
 
 async function readClockOutLocation(): Promise<{ latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number }> {
-  // Single on-demand reading; failures are sent as "no location" so the server asks for a reason instead of trapping staff.
-  if (typeof navigator === "undefined" || !navigator.geolocation) return {};
   try {
-    const p = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
-    return { latitude: p.coords.latitude, longitude: p.coords.longitude, accuracyMeters: p.coords.accuracy, capturedAt: Math.round(p.timestamp) };
-  } catch { return {}; }
+    return await readReliableAttendanceLocation();
+  } catch {
+    // Clock-out may still use the existing Owner-review exception flow when GPS cannot be verified.
+    return {};
+  }
 }
 
 export const Route = createFileRoute("/_authenticated/attendance")({
@@ -54,15 +54,7 @@ export const Route = createFileRoute("/_authenticated/attendance")({
 type AttendanceShift = { id: string; start_time: string; end_time: string; is_overnight: boolean; duty_role: string | null; planned_break_minutes: number; status: string };
 type AttendanceSession = { id: string; shift_id: string | null; clock_out_at: string | null; clock_in_at: string; late_minutes: number | null; duty_date: string; worked_minutes: number | null; status: string };
 type AttendanceTask = { id: string; title: string; status: string; priority: string; description: string | null; due_date: string; due_at: string | null; checklist: Array<{ id: string; is_done: boolean; label: string }>; requires_verification: boolean; requires_photo: boolean; photo_path: string | null };
-type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null; requested_overtime_minutes?: number | null; overtime_starts_at?: string | null; overtime_ends_at?: string | null };
-
-function OvertimeLine({ r }: { r: AttendanceRequest }) {
-  const t = (v: string) => new Date(v).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit" });
-  const len = r.requested_overtime_minutes && isAllowedOvertimeMinutes(r.requested_overtime_minutes) ? OVERTIME_LABELS[r.requested_overtime_minutes] : null;
-  const state = overtimeState({ status: r.status, startMs: r.overtime_starts_at ? Date.parse(r.overtime_starts_at) : null, endMs: r.overtime_ends_at ? Date.parse(r.overtime_ends_at) : null }, Date.now());
-  const label = { pending: "Pending approval", scheduled: "Approved", active: "Overtime running", completed: "Overtime finished", rejected: "Not approved", cancelled: "Cancelled" }[state];
-  return <p className="text-xs">{label}{len ? ` · ${len}` : ""}{r.overtime_starts_at && r.overtime_ends_at ? ` · ${t(r.overtime_starts_at)}–${t(r.overtime_ends_at)}` : ""}</p>;
-}
+type AttendanceRequest = { id: string; request_type: string; status: string; reason: string; review_note: string | null; requested_overtime_minutes?: number | null };
 type UpcomingShift = AttendanceShift & { shift_date: string; station_name: string | null };
 type AttendanceWorkspace = { settings: { geofence_enabled: boolean; qr_verification_enabled: boolean; selfie_verification_enabled: boolean } | null; shifts: AttendanceShift[]; upcomingShifts?: UpcomingShift[]; sessions: AttendanceSession[]; tasks: AttendanceTask[]; requests: AttendanceRequest[]; activeBreak: { id: string; session_id?: string; started_at: string } | null; lastClosedBreak?: { id: string; session_id: string; started_at: string; ended_at: string } | null };
 
@@ -109,6 +101,8 @@ function MyAttendance() {
   const [overtime, setOvertime] = useState("60");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const punchInFlightRef = useRef<QueueKind | null>(null);
+  const [punchStatus, setPunchStatus] = useState<"idle" | "checking_location" | "submitting">("idle");
   const queueRef = useRef<QueueStorage | null>(null);
   const [queue, setQueue] = useState<QueuedAction[]>([]);
   const [persistent, setPersistent] = useState(true);
@@ -198,17 +192,27 @@ function MyAttendance() {
     } finally { setBusy(false); }
   };
   const doClockOut = async (reason?: string) => {
-    if (busy) return;
-    const loc = query.data && (query.data as AttendanceWorkspace).settings?.geofence_enabled ? await readClockOutLocation() : {};
-    const d = { note: note.trim() || null, ...loc, ...(reason ? { exceptionReason: reason } : {}) };
-    await punch("clock_out", async () => {
+    if (punchInFlightRef.current) return;
+    punchInFlightRef.current = "clock_out";
+    setBusy(true);
+    setPunchStatus("checking_location");
+    try {
+      const loc = query.data && (query.data as AttendanceWorkspace).settings?.geofence_enabled ? await readClockOutLocation() : {};
+      const d = { note: note.trim() || null, ...loc, ...(reason ? { exceptionReason: reason } : {}) };
+      setPunchStatus("submitting");
+      await punch("clock_out", async () => {
       try { const r = await clockOut({ data: d }); setExceptionPrompt(null); setExceptionReason(""); return r; }
       catch (error) {
         const ex = parseExceptionRequired(error instanceof Error ? error.message : "");
         if (ex) { setExceptionPrompt(ex.message); return EXCEPTION_PENDING; }
         throw error;
       }
-    }, d, reason ? "Clocked out — sent for Owner review" : "Clocked out");
+      }, d, reason ? "Clocked out — sent for Owner review" : "Clocked out");
+    } finally {
+      punchInFlightRef.current = null;
+      setPunchStatus("idle");
+      setBusy(false);
+    }
   };
   const query = useQuery({ queryKey: ["my-attendance-workspace"], queryFn: () => getWorkspace(), refetchInterval: 60000, enabled: staffDuty });
   // Foreground-only geofence sampling. Android/browser background execution is not guaranteed.
@@ -220,17 +224,13 @@ function MyAttendance() {
       if (!active || inFlight || !navigator.onLine || document.visibilityState !== "visible") return;
       inFlight = true;
       try {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true, timeout: 12000, maximumAge: 0,
-          });
-        });
-        if (!active || position.coords.accuracy > 50) return;
+        const location = await readReliableAttendanceLocation();
+        if (!active) return;
         await recordGpsTransition({ data: {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters: position.coords.accuracy,
-          capturedAt: Math.round(position.timestamp),
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+          capturedAt: location.capturedAt,
         } });
       } catch {
         // GPS permission, network, and transient failures must not block attendance actions.
@@ -309,26 +309,27 @@ function MyAttendance() {
             <div className="col-span-2"><dt className="text-xs text-muted-foreground">Time on duty</dt><dd className="font-display text-lg font-bold">{Math.floor(elapsed / 60)} h {elapsed % 60} min</dd></div>
           </dl>
         </div>;
-      })()}{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), activeBreak.session_id ? { breakId: activeBreak.id, sessionId: activeBreak.session_id } : undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak)} aria-describedby={activeBreak ? "clockout-locked" : undefined} onClick={() => void doClockOut()}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div>{activeBreak ? <p id="clockout-locked" className="mt-2 text-xs text-muted-foreground">Clock out is locked while your break is running. End your break first.</p> : null}</div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); void (async () => {
+      })()}{activeBreak ? (() => { const b = breakStatus(activeBreak.started_at, now, shifts.find((x) => x.id === activeSession.shift_id)?.planned_break_minutes ?? null); return b.allowanceMinutes == null ? <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} min · no scheduled break limit for this session.{b.minutes > 30 ? " Possible long break (unscheduled estimate, over 30 min)." : ""}</p> : b.exceeded ? <p className="mt-2 rounded-md border border-destructive/40 p-2 text-sm text-destructive">Scheduled limit exceeded: your break is {b.overBy} min over your scheduled {b.allowanceMinutes} min. Please end your break.</p> : <p className="mt-1 text-xs text-muted-foreground">On break {b.minutes} of {b.allowanceMinutes} scheduled min.</p>; })() : null}<div className="mt-3 flex flex-wrap gap-2">{activeBreak ? <Button disabled={busy} onClick={() => void punch("break_end", () => endBreak(), activeBreak.session_id ? { breakId: activeBreak.id, sessionId: activeBreak.session_id } : undefined, "Break ended")}><Coffee className="mr-2 h-4 w-4"/>End break</Button> : <Button variant="outline" disabled={busy} onClick={() => void punch("break_start", () => startBreak(), undefined, "Break started")}><Coffee className="mr-2 h-4 w-4"/>Start break</Button>}<Button variant="destructive" disabled={busy || Boolean(activeBreak) || Boolean(punchInFlightRef.current)} aria-describedby={activeBreak ? "clockout-locked" : undefined} onClick={() => void doClockOut()}><LogOut className="mr-2 h-4 w-4"/>Clock out</Button></div>{activeBreak ? <p id="clockout-locked" className="mt-2 text-xs text-muted-foreground">Clock out is locked while your break is running. End your break first.</p> : null}</div> : <form className="space-y-3" onSubmit={(e) => {e.preventDefault(); if (punchInFlightRef.current) return; punchInFlightRef.current = "clock_in"; setBusy(true); setPunchStatus("checking_location"); void (async () => {
           const payload: { shiftId: string | null; note: string | null; latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number; qrToken?: string; selfiePath?: string } = { shiftId: shiftId || null, note: note.trim() || null };
           try {
-            if (settings?.geofence_enabled) { if (!navigator.onLine) throw new Error("Geofence clock-in needs an online connection so the GPS reading can be checked immediately."); if (!navigator.geolocation) throw new Error("This browser does not support GPS location."); const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Location permission is required to clock in.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })); payload.latitude = position.coords.latitude; payload.longitude = position.coords.longitude; payload.accuracyMeters = position.coords.accuracy; payload.capturedAt = Math.round(position.timestamp); }
+            if (settings?.geofence_enabled) { if (!navigator.onLine) throw new Error("Geofence clock-in needs an online connection so the GPS reading can be checked immediately."); const location = await readReliableAttendanceLocation(); payload.latitude = location.latitude; payload.longitude = location.longitude; payload.accuracyMeters = location.accuracyMeters; payload.capturedAt = location.capturedAt; }
             if (settings?.qr_verification_enabled) { if (!qrToken.trim()) throw new Error("Enter the station QR token before clocking in."); payload.qrToken = qrToken.trim(); }
             if (isSelfieVerificationEnabled(settings?.selfie_verification_enabled)) {
               if (!selfie) throw new Error("Take a new check-in photo with your camera before clocking in.");
               if (Date.now() - selfie.capturedAt > SELFIE_MAX_AGE_MS) { setSelfie(null); throw new Error("This photo has expired. Take a new check-in photo."); }
               if (!navigator.onLine) throw new Error("Check-in photo upload needs an internet connection. Try again when online.");
-              setBusy(true);
               try { const up = await uploadSelfie({ data: { imageBase64: selfie.base64, capturedAt: selfie.capturedAt } }); payload.selfiePath = up.path; }
-              finally { setBusy(false); }
+              finally { setPunchStatus("checking_location"); }
             }
-          } catch (err) { toast.error(err instanceof Error ? err.message : "Clock-in failed"); return; }
+          } catch (err) { toast.error(err instanceof Error ? err.message : "Clock-in failed"); punchInFlightRef.current = null; setPunchStatus("idle"); setBusy(false); return; }
+          setPunchStatus("submitting");
           await punch("clock_in", () => clockIn({ data: payload }), payload, "Clocked in");
           setSelfie(null);
-        })();}}>
+          punchInFlightRef.current = null; setPunchStatus("idle"); setBusy(false);
+        })().catch(() => { punchInFlightRef.current = null; setPunchStatus("idle"); setBusy(false); });}}>
         <div className="space-y-1"><Label htmlFor="attendance-shift">Today's shift</Label><select id="attendance-shift" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={shiftId} onChange={(e)=>setShiftId(e.target.value)}><option value="">Unscheduled / automatic selection</option>{shifts.filter((s) =>s.status==="scheduled").map((s) =><option key={s.id} value={s.id}>{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" overnight":""}{s.duty_role?" · "+s.duty_role:""}</option>)}</select></div>
         <div className="space-y-1"><Label htmlFor="punch-note">Note (optional)</Label><Input id="punch-note" maxLength={500} value={note} onChange={(e)=>setNote(e.target.value)}/></div>
-        {settings?.geofence_enabled ? <p className="text-xs text-muted-foreground">GPS geofence is enabled. Allow precise location when prompted; location is checked against your assigned station on the server.</p> : null}{settings?.qr_verification_enabled ? <div className="space-y-2"><Label htmlFor="attendance-qr-token">Station QR token</Label><Input id="attendance-qr-token" autoComplete="off" maxLength={512} value={qrToken} onChange={(e) => setQrToken(e.target.value)} placeholder="Paste the token from your station QR"/><Button type="button" variant="outline" disabled={busy} onClick={()=>setQrScannerOpen(true)}><Camera className="mr-2 h-4 w-4"/>Scan station QR</Button><p className="text-xs text-muted-foreground">Camera scanning requires permission and a supported Android browser. Manual token entry remains available.</p></div> : null}{isSelfieVerificationEnabled(settings?.selfie_verification_enabled) ? <div className="space-y-2 rounded-md border p-3"><Label>Required check-in photo</Label>{selfie ? <img src={selfie.preview} alt="Your check-in photo" className="h-24 w-24 rounded-md object-cover" /> : null}<Button type="button" variant="outline" disabled={busy} onClick={() => setSelfieOpen(true)}><Camera className="mr-2 h-4 w-4"/>{selfie ? "Retake photo" : "Take check-in photo"}</Button><p className="text-xs text-muted-foreground">Use the live camera to take a new photo. It is stored privately for Owner/Manager review. You cannot select a gallery file here. Clock-out does not require a photo.</p></div> : null}<p className="text-xs text-muted-foreground">Clock-in uses server time and current Owner settings.</p><Button disabled={busy}><LogIn className="mr-2 h-4 w-4"/>Clock in</Button>
+        {settings?.geofence_enabled ? <p className="text-xs text-muted-foreground">GPS geofence is enabled. Allow precise location when prompted; location is checked against your assigned station on the server.</p> : null}{settings?.qr_verification_enabled ? <div className="space-y-2"><Label htmlFor="attendance-qr-token">Station QR token</Label><Input id="attendance-qr-token" autoComplete="off" maxLength={512} value={qrToken} onChange={(e) => setQrToken(e.target.value)} placeholder="Paste the token from your station QR"/><Button type="button" variant="outline" disabled={busy} onClick={()=>setQrScannerOpen(true)}><Camera className="mr-2 h-4 w-4"/>Scan station QR</Button><p className="text-xs text-muted-foreground">Camera scanning requires permission and a supported Android browser. Manual token entry remains available.</p></div> : null}{isSelfieVerificationEnabled(settings?.selfie_verification_enabled) ? <div className="space-y-2 rounded-md border p-3"><Label>Required check-in photo</Label>{selfie ? <img src={selfie.preview} alt="Your check-in photo" className="h-24 w-24 rounded-md object-cover" /> : null}<Button type="button" variant="outline" disabled={busy} onClick={() => setSelfieOpen(true)}><Camera className="mr-2 h-4 w-4"/>{selfie ? "Retake photo" : "Take check-in photo"}</Button><p className="text-xs text-muted-foreground">Use the live camera to take a new photo. It is stored privately for Owner/Manager review. You cannot select a gallery file here. Clock-out does not require a photo.</p></div> : null}<p className="text-xs text-muted-foreground">Clock-in uses server time and current Owner settings.</p><Button disabled={busy}><LogIn className="mr-2 h-4 w-4"/>{punchStatus === "checking_location" ? "Checking location…" : punchStatus === "submitting" ? "Clocking in…" : "Clock in"}</Button>
       </form>}
     </CardContent></Card>
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Today's schedule</h3>{shifts.length?shifts.map((s) =><div key={s.id} className="rounded-lg border p-3"><p className="font-semibold">{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}{s.is_overnight?" · overnight":""}</p><p className="text-sm text-muted-foreground">{s.duty_role||"Scheduled duty"} · break {s.planned_break_minutes} min · {s.status}</p></div>):<p className="text-sm text-muted-foreground">No shift assigned for today.</p>}</CardContent></Card>
@@ -338,10 +339,10 @@ function MyAttendance() {
     <Card><CardContent className="space-y-3 p-4"><h3 className="font-display font-bold">Submit a request</h3><form className="grid gap-3 sm:grid-cols-2" onSubmit={(e)=>{e.preventDefault();void run(async()=>{await createRequest({data:{requestType,leaveType:requestType==="leave"?leaveType:null,leaveStartDate:requestType==="leave"?leaveStart:null,leaveEndDate:requestType==="leave"?leaveEnd:null,targetDate:requestType!=="leave"?targetDate:null,sessionId:requestType==="correction"||requestType==="overtime"?requestSessionId||null:null,requestedClockIn:(requestType==="correction"||requestType==="missed_punch")&&requestedIn?new Date(requestedIn).toISOString():null,requestedClockOut:(requestType==="correction"||requestType==="missed_punch")&&requestedOut?new Date(requestedOut).toISOString():null,requestedOvertimeMinutes:requestType==="overtime"?Number(overtime):null,reason}});setReason("");}, "Request submitted");}}>
       <div className="space-y-1 sm:col-span-2"><Label htmlFor="request-type">Request type</Label><select id="request-type" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={requestType} onChange={(e)=>setRequestType(e.target.value as typeof requestType)}><option value="leave">Leave</option><option value="correction">Attendance correction</option><option value="missed_punch">Missed punch (both times)</option><option value="overtime">Overtime</option></select></div>
       {requestType==="leave"?<><div className="space-y-1"><Label htmlFor="leave-type">Leave type</Label><select id="leave-type" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={leaveType} onChange={(e)=>setLeaveType(e.target.value)}><option value="annual">Annual</option><option value="sick">Sick</option><option value="casual">Casual</option><option value="unpaid">Unpaid</option></select></div><div/><div className="space-y-1"><Label htmlFor="leave-start">From</Label><Input id="leave-start" type="date" required value={leaveStart} onChange={(e)=>setLeaveStart(e.target.value)}/></div><div className="space-y-1"><Label htmlFor="leave-end">To</Label><Input id="leave-end" type="date" min={leaveStart||undefined} required value={leaveEnd} onChange={(e)=>setLeaveEnd(e.target.value)}/></div></>:null}
-      {requestType!=="leave"?<>{(requestType==="correction"||requestType==="overtime")?<div className="space-y-1 sm:col-span-2"><Label htmlFor="request-session">Attendance session</Label><select id="request-session" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={requestSessionId} onChange={(e)=>setRequestSessionId(e.target.value)}><option value="">Select session</option>{sessions.map((s) =><option key={s.id} value={s.id}>{s.duty_date} · {dateTime(s.clock_in_at)}</option>)}</select></div>:null}<div className="space-y-1"><Label htmlFor="request-date">Target date</Label><Input id="request-date" type="date" required value={targetDate} onChange={(e)=>setTargetDate(e.target.value)}/></div>{requestType==="correction"||requestType==="missed_punch"?<><div className="space-y-1"><Label htmlFor="requested-in">Requested clock-in</Label><Input id="requested-in" type="datetime-local" required value={requestedIn} onChange={(e)=>setRequestedIn(e.target.value)}/></div><div className="space-y-1"><Label htmlFor="requested-out">Requested clock-out</Label><Input id="requested-out" type="datetime-local" required value={requestedOut} onChange={(e)=>setRequestedOut(e.target.value)}/></div></>:<div className="space-y-1"><Label htmlFor="overtime-minutes">Overtime length</Label><select id="overtime-minutes" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={overtime} onChange={(e)=>setOvertime(e.target.value)}>{OVERTIME_DURATIONS.map((m)=><option key={m} value={String(m)}>{OVERTIME_LABELS[m]}</option>)}</select><p className="text-xs text-muted-foreground">Asked before your duty ends: starts when duty ends. Asked after: starts when approved. Ends on its own.</p></div>}</>:null}
+      {requestType!=="leave"?<>{(requestType==="correction"||requestType==="overtime")?<div className="space-y-1 sm:col-span-2"><Label htmlFor="request-session">Attendance session</Label><select id="request-session" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={requestSessionId} onChange={(e)=>setRequestSessionId(e.target.value)}><option value="">Select session</option>{sessions.map((s) =><option key={s.id} value={s.id}>{s.duty_date} · {dateTime(s.clock_in_at)}</option>)}</select></div>:null}<div className="space-y-1"><Label htmlFor="request-date">Target date</Label><Input id="request-date" type="date" required value={targetDate} onChange={(e)=>setTargetDate(e.target.value)}/></div>{requestType==="correction"||requestType==="missed_punch"?<><div className="space-y-1"><Label htmlFor="requested-in">Requested clock-in</Label><Input id="requested-in" type="datetime-local" required value={requestedIn} onChange={(e)=>setRequestedIn(e.target.value)}/></div><div className="space-y-1"><Label htmlFor="requested-out">Requested clock-out</Label><Input id="requested-out" type="datetime-local" required value={requestedOut} onChange={(e)=>setRequestedOut(e.target.value)}/></div></>:<div className="space-y-1"><Label htmlFor="overtime-minutes">Approved overtime duration</Label><select id="overtime-minutes" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={overtime} onChange={(e)=>setOvertime(e.target.value)}><option value="30">30 minutes</option><option value="60">1 hour</option><option value="90">1 hour 30 minutes</option><option value="120">2 hours</option></select></div>}</>:null}
       <div className="space-y-1 sm:col-span-2"><Label htmlFor="request-reason">Reason</Label><Textarea id="request-reason" required minLength={5} maxLength={1000} value={reason} onChange={(e)=>setReason(e.target.value)}/></div><Button disabled={busy} className="sm:col-span-2"><Send className="mr-2 h-4 w-4"/>Submit request</Button>
     </form>
-    <div className="space-y-2">{requests.map((r) =><div key={r.id} className="rounded-lg border p-3"><div className="flex justify-between gap-2"><p className="font-semibold">{r.request_type.replaceAll("_"," ")}</p><span className="text-xs">{r.status}</span></div><p className="text-sm text-muted-foreground">{r.reason}</p>{r.request_type==="overtime"?<OvertimeLine r={r}/>:null}{r.review_note?<p className="text-xs">Owner note: {r.review_note}</p>:null}{r.status==="pending"?<Button type="button" size="sm" variant="outline" disabled={busy} onClick={()=>void run(()=>cancelRequest({data:{requestId:r.id}}),"Request cancelled")}><XCircle className="mr-1 h-4 w-4"/>Cancel request</Button>:null}</div>)}</div>
+    <div className="space-y-2">{requests.map((r) =><div key={r.id} className="rounded-lg border p-3"><div className="flex justify-between gap-2"><p className="font-semibold">{r.request_type.replaceAll("_"," ")}</p><span className="text-xs">{r.status}</span></div><p className="text-sm text-muted-foreground">{r.reason}</p>{r.request_type==="overtime"?<p className="text-xs text-muted-foreground">Duration: {r.requested_overtime_minutes ?? "—"} minutes · Approval is required before overtime is counted.</p>:null}{r.review_note?<p className="text-xs">Owner note: {r.review_note}</p>:null}{r.status==="pending"?<Button type="button" size="sm" variant="outline" disabled={busy} onClick={()=>void run(()=>cancelRequest({data:{requestId:r.id}}),"Request cancelled")}><XCircle className="mr-1 h-4 w-4"/>Cancel request</Button>:null}</div>)}</div>
     </CardContent></Card>
     <Dialog open={exceptionPrompt !== null} onOpenChange={(o) => { if (!o && !busy) { setExceptionPrompt(null); setExceptionReason(""); } }}>
       <DialogContent>
