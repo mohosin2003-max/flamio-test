@@ -93,3 +93,27 @@ The production application code also does not currently contain the Attendance M
 Create one clean, production-safe Attendance Master release migration from the current TEST schema, then validate it in an isolated environment before applying it to Production.
 
 Production remains untouched by this manifest.
+
+
+## 2026-11-23 release-candidate artifacts created
+
+- `20261123_attendance_production_bootstrap.sql` — commit d195e1871c24356451b8554136a21304a70a7afe
+- `20261123_attendance_production_base_release_candidate.sql` — commit 30dd6d713518c54681845ca01d534910b281e957
+- `20261123_attendance_production_core_functions_release_candidate.sql` — commit 7862c443000cd861155120b21486dd894e6c3649
+- `20261123_attendance_production_service_functions_part1.sql` — commit 37e0091db274a9df511190cbf4ed4b8f42be6bfe
+- `20261123_attendance_production_service_functions_part2.sql` — commit 53e7b9108768725e90d355d5216b121284788d0f
+- `20261123_attendance_production_service_functions_part3.sql` — commit 39b146511c38188dc0f0a0ad1f0addea67552101
+- `20261123_attendance_runtime_functions_release_candidate.sql` — commit 062f3686246c6a4efccd40e8b5b74a186c1fd0e8
+- `20261123_attendance_production_rls_indexes_release_candidate.sql` — commit 0adca8ad31bef4e9b68b0f2f9de30d5bc6f74cca
+- `20261123_attendance_production_storage_cron_release_candidate.sql` — commit 111482eb853b5cb0e0fcc7861e168cb6f8692d42
+
+All artifacts are release candidates only. No Production DB mutation has been performed.
+
+## Remaining gates
+
+1. Reconcile all function dependencies against the clean-room base schema.
+2. Validate the complete ordered migration set on an isolated disposable database/branch if an available no-cost test target exists.
+3. Port/verify the Attendance application code in the actual Production application repository.
+4. Add production-specific edge-function URL/secret configuration only after the production project is approved.
+5. Run final regression/security/ACL/storage/cron verification.
+6. Obtain explicit approval before any Production database or production-code deployment.
