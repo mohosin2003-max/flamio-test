@@ -13,7 +13,7 @@ AS $function$
            SELECT 1 FROM public.user_roles c
             WHERE c.user_id = auth.uid() AND c.role IN ('owner'::public.app_role, 'admin'::public.app_role)))
      AND EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id);
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_is_manager(_user_id uuid)
