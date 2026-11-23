@@ -36,8 +36,8 @@ describe("clock-out geofence", () => {
     expect(decideClockOutLocation({ ...base, point: {} })).toMatchObject({ ok: false, discrepancy: "no_location" });
     expect(decideClockOutLocation({ ...base, point: {}, exceptionReason: "GPS permission denied on my phone" })).toMatchObject({ ok: true, mode: "exception", discrepancy: "no_location" });
   });
-  test("accuracy over 50 m is not accepted as verified", () => {
-    expect(decideClockOutLocation({ ...base, point: { ...inside, accuracyMeters: 51 } })).toMatchObject({ ok: false, discrepancy: "inaccurate_location" });
+  test("accuracy over 500 m is not accepted as verified", () => {
+    expect(decideClockOutLocation({ ...base, point: { ...inside, accuracyMeters: 501 } })).toMatchObject({ ok: false, discrepancy: "inaccurate_location" });
   });
   test("reading older than 2 minutes is stale", () => {
     expect(decideClockOutLocation({ ...base, point: { ...inside, capturedAt: now - 121_000 } })).toMatchObject({ ok: false, discrepancy: "stale_location" });

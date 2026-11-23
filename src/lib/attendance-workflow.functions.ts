@@ -233,8 +233,8 @@ export const staffClockIn = createServerFn({ method: "POST" })
           ? "GPS reading is older than two minutes. Refresh your location and try again."
           : "GPS timestamp is invalid. Refresh your location and try again.");
       }
-      if (data.accuracyMeters > 50) {
-        throw new Error("GPS accuracy is too low. Move to an open area and try again.");
+      if (data.accuracyMeters > 500) {
+        throw new Error("GPS accuracy is too low (over 500m). Turn on Precise location for this browser/app, keep Location on, and try again.");
       }
       if (!shift?.station_id) {
         throw new Error("A station-linked shift is required while geofence verification is enabled.");
@@ -248,7 +248,12 @@ export const staffClockIn = createServerFn({ method: "POST" })
         throw new Error("The selected shift's station has no active geofence configured.");
       }
       const distance = distanceMeters(data.latitude, data.longitude, Number(station.latitude), Number(station.longitude));
-      if (!Number.isFinite(distance) || distance > Number(station.geofence_radius_meters)) {
+      const radius = Number(station.geofence_radius_meters);
+      // Treat the browser's accuracy as an uncertainty radius. A reported
+      // point is accepted only when its uncertainty circle still overlaps
+      // the station fence. This prevents false "outside" failures near the
+      // boundary without simply enlarging the configured geofence.
+      if (!Number.isFinite(distance) || !Number.isFinite(radius) || distance - data.accuracyMeters > radius) {
         throw new Error("You are outside the permitted attendance geofence.");
       }
     }
@@ -283,6 +288,25 @@ export const staffClockIn = createServerFn({ method: "POST" })
       ...(selfiePath ? { clock_in_selfie_path: selfiePath } : {}),
     }).select("id, user_id, shift_id, duty_date, clock_in_at, status, late_minutes").single();
     if (insertError || !session) {
+      // Concurrent taps, a remounted page, or a delayed network retry can
+      // race the same authenticated staff member into the unique
+      // no-overlapping-session constraint. If another request already
+      // created the open session, treat this request as the same successful
+      // clock-in instead of making the staff tap again.
+      const isSessionConflict = insertError?.code === "23P01"
+        || /attendance_sessions.*conflict|conflicts with existing key/i.test(insertError?.message ?? "");
+      if (isSessionConflict) {
+        const { data: existing, error: existingError } = await db.from("attendance_sessions")
+          .select("id, user_id, shift_id, duty_date, clock_in_at, status, late_minutes")
+          .eq("user_id", context.userId)
+          .is("clock_out_at", null)
+          .order("clock_in_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!existingError && existing) {
+          return { ok: true, session: existing, idempotent: true };
+        }
+      }
       console.error("Attendance clock-in failed", insertError?.message);
       throw new Error("Clock-in failed. Please refresh and try again.");
     }
@@ -309,9 +333,12 @@ export const staffClockOut = createServerFn({ method: "POST" })
     { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const now = new Date();
     const { data: session, error: readError } = await db.from("attendance_sessions")
-      .select("id, user_id, shift_id, clock_in_at, break_minutes, status, flags")
+       .select("id, user_id, shift_id, clock_in_at, break_minutes, status, flags, session_kind")
       .eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (readError || !session) throw new Error("No open attendance session was found.");
+    if (session.session_kind === "overtime") {
+      throw new Error("Approved overtime closes automatically. Manual clock-out is not allowed during overtime.");
+    }
     const { data: openBreaks, error: breakReadError } = await db.from("attendance_breaks")
       .select("id, started_at").eq("session_id", session.id).is("ended_at", null).limit(1);
     if (breakReadError) throw new Error("Could not check your break status.");
@@ -342,14 +369,17 @@ export const staffClockOut = createServerFn({ method: "POST" })
       exceptionReason: data.exceptionReason ?? null, now: now.getTime(),
     });
     if (!decision.ok) throw new Error(decision.error);
-    const workedMinutes = Math.max(0, Math.floor(elapsed / 60000) - Number(session.break_minutes ?? 0));
-    const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - now.getTime()) / 60000)) : 0;
+    const effectiveOutMs = shift ? Math.min(now.getTime(), Date.parse(shift.ends_at)) : now.getTime();
+    const effectiveElapsed = effectiveOutMs - Date.parse(session.clock_in_at);
+    const workedMinutes = Math.max(0, Math.floor(effectiveElapsed / 60000) - Number(session.break_minutes ?? 0));
+    const earlyLeave = shift ? Math.max(0, Math.floor((Date.parse(shift.ends_at) - effectiveOutMs) / 60000)) : 0;
+    const effectiveOutAt = new Date(effectiveOutMs).toISOString();
     const isException = decision.mode === "exception";
     const note = isException
       ? `[Location exception: ${decision.discrepancy}] ${decision.reason}${data.note ? ` | ${data.note}` : ""}`.slice(0, 500)
       : data.note ?? null;
     const update: Record<string, unknown> = {
-      clock_out_at: now.toISOString(), clock_out_source: "app", clock_out_note: note,
+      clock_out_at: effectiveOutAt, clock_out_source: "app", clock_out_note: note,
       worked_minutes: workedMinutes, early_leave_minutes: earlyLeave, status: "closed",
     };
     if (isException) {
@@ -369,7 +399,7 @@ export const staffClockOut = createServerFn({ method: "POST" })
       tableName: "attendance_sessions", rowId: session.id, action: isException ? "clock_out_location_exception" : "clock_out",
       actorId: context.userId, subjectUserId: context.userId, oldData: session,
       newData: {
-        clockOutAt: now.toISOString(), workedMinutes, locationCheck: decision.mode,
+        clockOutAt: effectiveOutAt, workedMinutes, locationCheck: decision.mode,
         ...(isException ? { discrepancy: decision.discrepancy, reason: decision.reason } : {}),
         ...(decision.distance !== undefined ? { distanceMeters: Math.round(decision.distance) } : {}),
         ...(data.accuracyMeters !== undefined ? { accuracyMeters: Math.round(data.accuracyMeters) } : {}),
@@ -385,8 +415,11 @@ export const staffStartBreak = createServerFn({ method: "POST" })
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
     { const { requireAttendanceFeature } = await import("@/lib/attendance-features.server"); await requireAttendanceFeature(db); }
     const { data: session, error } = await db.from("attendance_sessions")
-      .select("id").eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
+      .select("id, session_kind, shift_id, clock_in_at").eq("user_id", context.userId).is("clock_out_at", null).order("clock_in_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !session) throw new Error("Clock in before starting a break.");
+    if (session.session_kind === "overtime") {
+      throw new Error("Breaks are not allowed during approved overtime.");
+    }
     const { data: openBreak } = await db.from("attendance_breaks").select("id")
       .eq("session_id", session.id).is("ended_at", null).limit(1).maybeSingle();
     if (openBreak) throw new Error("A break is already active.");
@@ -408,18 +441,20 @@ export const staffEndBreak = createServerFn({ method: "POST" })
     const { data: openBreak, error } = await db.from("attendance_breaks").select("id, session_id, started_at")
       .eq("user_id", context.userId).is("ended_at", null).order("started_at", { ascending: false }).limit(1).maybeSingle();
     if (error || !openBreak) throw new Error("No active break was found.");
-    const endedAt = new Date().toISOString();
-    const durationMinutes = Math.max(0, Math.floor((Date.parse(endedAt) - Date.parse(openBreak.started_at)) / 60000));
-    const { error: updateError } = await db.from("attendance_breaks").update({ ended_at: endedAt }).eq("id", openBreak.id).is("ended_at", null);
-    if (updateError) throw new Error("Could not end break.");
-    const { data: session } = await db.from("attendance_sessions").select("break_minutes")
-      .eq("id", openBreak.session_id).eq("user_id", context.userId).maybeSingle();
-    const { error: sessionError } = await db.from("attendance_sessions")
-      .update({ break_minutes: Number(session?.break_minutes ?? 0) + durationMinutes })
-      .eq("id", openBreak.session_id).eq("user_id", context.userId).is("clock_out_at", null);
-    if (sessionError) throw new Error("Break ended but attendance totals could not be updated; ask the Owner to review.");
-    await audit(db, { tableName: "attendance_breaks", rowId: openBreak.id, action: "break_end", actorId: context.userId, subjectUserId: context.userId, oldData: openBreak, newData: { endedAt, durationMinutes } });
-    return { ok: true, durationMinutes };
+    const { data: durationMinutes, error: endBreakError } = await db.rpc("attendance_end_break_as_service", {
+      _actor_id: context.userId,
+      _break_id: openBreak.id,
+    });
+    if (endBreakError || durationMinutes === null || durationMinutes === undefined) {
+      console.error("Atomic break end failed", endBreakError?.message);
+      throw new Error("Could not end break safely. Refresh and try again.");
+    }
+    await audit(db, {
+      tableName: "attendance_breaks", rowId: openBreak.id, action: "break_end",
+      actorId: context.userId, subjectUserId: context.userId,
+      oldData: openBreak, newData: { durationMinutes: Number(durationMinutes) },
+    });
+    return { ok: true, durationMinutes: Number(durationMinutes) };
   });
 
 export const staffCompleteAttendanceTask = createServerFn({ method: "POST" })
@@ -461,10 +496,68 @@ export const staffCreateAttendanceRequest = createServerFn({ method: "POST" })
     requestedClockOut: z.string().datetime().nullable().optional(),
     requestedOvertimeMinutes: z.number().int().min(1).max(960).nullable().optional(),
     reason: z.string().trim().min(5).max(1000),
-  }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.").refine((v) => v.requestType !== "correction" || Boolean(v.sessionId && (v.requestedClockIn || v.requestedClockOut)), "Correction requires a session and a requested time.").refine((v) => v.requestType !== "missed_punch" || Boolean(v.targetDate && v.requestedClockIn && v.requestedClockOut), "Missed punch requires a date and both times.").refine((v) => v.requestType !== "overtime" || Boolean(v.sessionId && v.requestedOvertimeMinutes), "Overtime requires a session and minutes.").parse(input))
+  }).refine((v) => v.requestType !== "leave" || (v.leaveStartDate && v.leaveEndDate && v.leaveEndDate >= v.leaveStartDate), "Leave dates are required and must be valid.")
+    .refine((v) => v.requestType !== "correction" || Boolean(v.sessionId && (v.requestedClockIn || v.requestedClockOut)), "Correction requires a session and a requested time.")
+    .refine((v) => v.requestType !== "missed_punch" || Boolean(v.targetDate && v.requestedClockIn && v.requestedClockOut), "Missed punch requires a date and both times.")
+    .refine((v) => v.requestType !== "overtime" || Boolean(v.sessionId && [30, 60, 90, 120].includes(v.requestedOvertimeMinutes ?? 0)), "Overtime requires a session and 30, 60, 90 or 120 minutes.")
+    .parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
     if (!access.isStaff) throw new Error("Only staff accounts can use the staff attendance workspace.");
+
+    const nowMs = Date.now();
+    const requestedInMs = data.requestedClockIn ? Date.parse(data.requestedClockIn) : null;
+    const requestedOutMs = data.requestedClockOut ? Date.parse(data.requestedClockOut) : null;
+    const thirtyOneDaysMs = 31 * 24 * 60 * 60 * 1000;
+
+    if (requestedInMs !== null && (!Number.isFinite(requestedInMs) || requestedInMs > nowMs || requestedInMs < nowMs - thirtyOneDaysMs)) {
+      throw new Error("Requested clock-in must be between now and 31 days ago.");
+    }
+    if (requestedOutMs !== null && (!Number.isFinite(requestedOutMs) || requestedOutMs > nowMs || requestedOutMs < nowMs - thirtyOneDaysMs)) {
+      throw new Error("Requested clock-out must be between now and 31 days ago.");
+    }
+    if (requestedInMs !== null && requestedOutMs !== null) {
+      if (requestedOutMs <= requestedInMs) throw new Error("Requested clock-out must be after clock-in.");
+      if (requestedOutMs - requestedInMs > 24 * 60 * 60 * 1000) throw new Error("Requested attendance interval cannot exceed 24 hours.");
+    }
+
+    if (data.requestType === "missed_punch" && data.targetDate) {
+      const targetDateMs = Date.parse(data.targetDate + "T00:00:00+06:00");
+      if (!Number.isFinite(targetDateMs) || targetDateMs > nowMs) {
+        throw new Error("Missed-punch date cannot be in the future.");
+      }
+      if (requestedInMs !== null && localDateDhaka(new Date(requestedInMs)) !== data.targetDate) {
+        throw new Error("Missed-punch date must match the requested clock-in date.");
+      }
+    }
+
+    if (data.sessionId) {
+      const { data: session, error: sessionError } = await db.from("attendance_sessions")
+        .select("id, user_id, shift_id, clock_out_at, early_leave_minutes, session_kind, duty_date")
+        .eq("id", data.sessionId)
+        .eq("user_id", context.userId)
+        .maybeSingle();
+      if (sessionError) throw new Error("Could not verify the selected attendance session.");
+      if (!session) throw new Error("The selected attendance session does not belong to you.");
+
+      if (data.requestType === "overtime") {
+        if (session.session_kind !== "normal") throw new Error("Overtime must be requested from a normal duty session.");
+        if (!session.shift_id) throw new Error("Overtime requires a scheduled shift.");
+        if (session.early_leave_minutes > 0) throw new Error("Overtime is not allowed after early leave.");
+        if (session.clock_out_at) {
+          const { data: shift, error: shiftError } = await db.from("attendance_shifts")
+            .select("ends_at").eq("id", session.shift_id).eq("user_id", context.userId).maybeSingle();
+          if (shiftError || !shift) throw new Error("The session's scheduled shift could not be verified.");
+          if (Date.parse(session.clock_out_at) < Date.parse(shift.ends_at)) {
+            throw new Error("Overtime is not allowed after an early clock-out.");
+          }
+          if (new Date(session.clock_out_at).getTime() < nowMs && nowMs < Date.parse(shift.ends_at)) {
+            throw new Error("Overtime can only be requested after the scheduled duty end when duty has already ended.");
+          }
+        }
+      }
+    }
+
     const { data: request, error } = await db.from("attendance_requests").insert({
       user_id: context.userId, request_type: data.requestType, session_id: data.sessionId ?? null, leave_type: data.leaveType ?? null,
       leave_start_date: data.leaveStartDate ?? null, leave_end_date: data.leaveEndDate ?? null,
@@ -516,9 +609,9 @@ export const ownerListAttendanceRequests = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.isOwner) throw new Error("Only the Owner can review attendance requests.");
+    if (!access.isManager) throw new Error("Only an Owner or Manager can review attendance requests.");
     const { data, error } = await db.from("attendance_requests")
-      .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, reason, status, review_note, created_at")
+      .select("id, user_id, request_type, leave_type, leave_start_date, leave_end_date, target_date, requested_clock_in, requested_clock_out, requested_overtime_minutes, approved_overtime_start_at, approved_overtime_end_at, reason, status, review_note, created_at")
       .order("created_at", { ascending: false }).limit(200);
     if (error) throw new Error("Could not load attendance requests.");
     const ids = Array.from(new Set((data ?? []).map((r: { user_id: string }) => r.user_id)));
@@ -532,7 +625,7 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ requestId: z.string().uuid(), decision: z.enum(["approved", "rejected"]), reviewNote: z.string().trim().max(1000).nullable().optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { access, db } = await dbForUser(context.userId);
-    if (!access.isOwner) throw new Error("Only the Owner can review attendance requests.");
+    if (!access.isManager) throw new Error("Only an Owner or Manager can review attendance requests.");
     const { data: current, error: readError } = await db.from("attendance_requests")
       .select("id, user_id, request_type, status, session_id, leave_start_date, leave_end_date, requested_clock_in, requested_clock_out")
       .eq("id", data.requestId).maybeSingle();
@@ -542,7 +635,7 @@ export const ownerReviewAttendanceRequest = createServerFn({ method: "POST" })
     // Use the TEST-only service-role bridge to execute the existing database
     // transaction, including leave/shift changes, missed-punch creation,
     // session correction and recalculation. The bridge independently verifies
-    // the supplied actor is an Owner and is executable only by service_role.
+    // the supplied actor is an Owner or Manager and is executable only by service_role.
     const { data: updated, error } = await db.rpc("attendance_review_request_as_service", {
       _request_id: data.requestId,
       _approve: data.decision === "approved",
@@ -665,9 +758,15 @@ export const ownerReviewAttendanceSession = createServerFn({ method: "POST" })
       { userId: context.userId, isOwner: !!access.isOwner, isManager: !!(access as { isManager?: boolean }).isManager },
       { userId: session.user_id, clockOutAt: session.clock_out_at }, data.status, data.note);
     if (refusal) throw new Error(refusal);
-    // Call as the signed-in user so the DB procedure sees auth.uid() and enforces its own checks.
-    const { error } = await (context.supabase as unknown as { rpc: (n: string, a: Record<string, unknown>) => Promise<{ error: { message: string } | null }> })
-      .rpc("attendance_verify_session", { _session_id: data.sessionId, _status: data.status, _note: data.note ?? null });
-    if (error) { console.error("Session review failed", error.message); throw new Error(error.message || "Could not review session."); }
+    const { error } = await db.rpc("attendance_verify_session_as_service", {
+      _session_id: data.sessionId,
+      _status: data.status,
+      _note: data.note ?? null,
+      _actor_id: context.userId,
+    });
+    if (error) {
+      console.error("Session review failed", error.message);
+      throw new Error(error.message || "Could not review session.");
+    }
     return { ok: true, status: data.status };
   });
