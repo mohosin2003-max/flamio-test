@@ -41,7 +41,7 @@ BEGIN
    WHERE b.session_id = s.id
      AND (b.started_at < _in OR (_out IS NOT NULL AND (b.ended_at IS NULL OR b.ended_at > _out)));
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_audit()
@@ -71,7 +71,7 @@ BEGIN
   );
   RETURN COALESCE(NEW, OLD);
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_auto_close_stale_session(_user_id uuid, _max_session_hours integer)
@@ -142,7 +142,7 @@ begin
 
   return found;
 end;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_break_guard()
@@ -162,7 +162,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_cancel_request(_request_id uuid)
@@ -180,7 +180,7 @@ BEGIN
   IF r.id IS NULL THEN RAISE EXCEPTION 'Request not found or already reviewed'; END IF;
   RETURN r;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_clear_expired_evidence_refs(_paths text[])
@@ -230,7 +230,7 @@ BEGIN
 
   RETURN jsonb_build_object('sessions_cleared', v_sessions, 'tasks_cleared', v_tasks);
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_complete_task_as_service(_actor_id uuid, _task_id uuid, _completion_note text DEFAULT NULL::text, _photo_path text DEFAULT NULL::text)
@@ -294,7 +294,7 @@ BEGIN
     to_jsonb(v_new) || jsonb_build_object('_attendance_event', 'staff_completed'));
   RETURN v_new;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_consume_qr_challenge(_token_hash text, _expected_station_id uuid)
@@ -336,7 +336,7 @@ BEGIN
   END IF;
   RETURN QUERY SELECT v_station, v_id;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_end_break_as_service(_actor_id uuid, _break_id uuid)
@@ -368,7 +368,7 @@ BEGIN
   PERFORM public.attendance_recalculate_session(v_session.id);
   RETURN v_minutes;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_list_expired_evidence_paths(_limit integer DEFAULT 500)
