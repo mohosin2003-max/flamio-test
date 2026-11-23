@@ -16,7 +16,7 @@ AS $function$
      )
    ORDER BY so.created_at ASC
    LIMIT LEAST(GREATEST(COALESCE(_limit, 500), 1), 500);
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_lock_task_checklist_parent()
@@ -57,7 +57,7 @@ BEGIN
   IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
   RETURN NEW;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_manager_correct_session(_session_id uuid, _clock_in_at timestamp with time zone, _clock_out_at timestamp with time zone, _reason text)
@@ -83,7 +83,7 @@ BEGIN
   SELECT * INTO s FROM public.attendance_sessions WHERE id = s.id;
   RETURN s;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_process_duty_end_and_overtime()
@@ -203,7 +203,7 @@ BEGIN
 
   RETURN v_count;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_purge_old_records()
@@ -232,7 +232,7 @@ begin
 
   return jsonb_build_object('sessions_deleted', v_sessions, 'tasks_deleted', v_tasks);
 end;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_review_request(_request_id uuid, _approve boolean, _note text DEFAULT NULL::text)
@@ -488,7 +488,7 @@ BEGIN
 
   RETURN q;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_review_request_as_service(_request_id uuid, _approve boolean, _note text, _actor_id uuid)
@@ -516,7 +516,7 @@ BEGIN
 
   RETURN v_request;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_review_task(_task_id uuid, _approve boolean, _note text DEFAULT NULL::text)
@@ -547,7 +547,7 @@ BEGIN
    WHERE id = t.id RETURNING * INTO t;
   RETURN t;
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_run_maintenance()
@@ -610,7 +610,7 @@ BEGIN
 
   RETURN jsonb_build_object('auto_closed', v_closed, 'missed', v_missed);
 END;
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.attendance_session_guard()
