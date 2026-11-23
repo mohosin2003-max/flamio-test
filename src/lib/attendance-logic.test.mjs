@@ -18,8 +18,8 @@ describe("geofence", () => {
     const r = evaluateGeofence({ point: { ...station, accuracy: 5, capturedAt: now - 121_000 }, station, now });
     expect(r).toMatchObject({ ok: false, reason: "stale" });
   });
-  test("accuracy worse than 100m rejected", () => {
-    const r = evaluateGeofence({ point: { ...station, accuracy: 150, capturedAt: now }, station, now });
+  test("accuracy worse than 500m rejected", () => {
+    const r = evaluateGeofence({ point: { ...station, accuracy: 501, capturedAt: now }, station, now });
     expect(r).toMatchObject({ ok: false, reason: "inaccurate" });
   });
   test("invalid coordinates rejected", () => {
